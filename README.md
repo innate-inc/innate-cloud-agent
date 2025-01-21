@@ -1,6 +1,22 @@
 # Cloud Agent
 
-## Build the Docker image
+## Build and test locally
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Build and run the Docker image
+
+```bash
+docker compose -f docker-compose.local.yml up
+```
+
+## Build and deploy the Cloud Run service
+
+### Build the Docker image
 
 ```bash
 docker build \
@@ -9,13 +25,13 @@ docker build \
   .
 ```
 
-## Push the Docker image to Google Cloud Container Registry
+### Push the Docker image to Google Cloud Container Registry
 
 ```bash
 docker push us-central1-docker.pkg.dev/innate-agent/innate-agent-websocket-server/agent-ws-server-image:v0
 ```
 
-## Deploy the Cloud Run service
+### Deploy the Cloud Run service
 
 ```bash
 gcloud run deploy agent-ws-server \
@@ -25,7 +41,7 @@ gcloud run deploy agent-ws-server \
   --port 8765
 ```
 
-## Test the Cloud Run service
+### Test the Cloud Run service
 
 Use the test_ws_server.py script to test the Cloud Run service.
 
