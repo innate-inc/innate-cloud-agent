@@ -5,6 +5,19 @@ from typing import Optional, List, Any
 from pydantic import BaseModel
 
 
+class TaskType(Enum):
+    NAVIGATION_IN_SIGHT = "navigation_in_sight"
+    NAVIGATION_TO_MEMORY = "navigation_out_of_sight"
+    ACTION_WITH_ARM = "action_with_arm"
+    ASK_FOR_INFORMATION = "ask_for_information"
+    VELOCITY_CONTROL = "velocity_control"
+
+
+class Task(BaseModel):
+    type: TaskType
+    description: str
+
+
 class MessageType(str, Enum):
     AUTH = "auth"
     DIRECTIVE = "directive"
@@ -23,7 +36,12 @@ class VisionAgentOutput(BaseModel):
     observation: str
     thoughts: str
     new_goal: Optional[str]
-    next_task: Optional[Any] = None  # Could be replaced with your Task pydantic model
+    next_task: Optional[Task] = None
     users_implicated: List[str]
     anticipation: Optional[str]
     to_tell_user: Optional[str]
+
+    class Config:
+        json_encoders = {
+            TaskType: lambda v: v.value,
+        }

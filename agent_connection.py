@@ -9,7 +9,7 @@ import datetime
 from websockets.exceptions import ConnectionClosed
 from typing import Optional
 
-from message_types import MessageType, VisionAgentOutput
+from message_types import MessageType, Task, TaskType, VisionAgentOutput
 
 
 def get_user_from_token(token: str):
@@ -35,6 +35,7 @@ class WebSocketAgentConnection:
         self.user_id: Optional[str] = None
         self.recording_dir: str = ""
         self._processing_image = False
+        self.turn_right = True  # New variable to track direction
 
     async def handle_connection(self):
         """
@@ -141,39 +142,36 @@ class WebSocketAgentConnection:
         await self.send_message({"type": MessageType.WELL_RECEIVED.value})
         print("[DEBUG] Sent 'well_received' to client")
 
-        # 3) Simulate some “processing” (call your BrainCore or Orchestrator logic)
-        #    Let’s pretend we got back a VisionAgentOutput-like object
-        #    In reality, you’d call self.orchestrator_node.brain.process_vision_observation(...)
+        # 3) Simulate some "processing" (call your BrainCore or Orchestrator logic)
         mock_output = VisionAgentOutput(
             stop_current_task=False,
             observation="Analyzed image successfully",
-            thoughts="Some internal thoughts here",
+            thoughts="Alternating between left and right turns",
             new_goal=None,
-            next_task=None,
+            next_task=Task(
+                type=TaskType.VELOCITY_CONTROL,
+                description=json.dumps(
+                    {"forward": 1.0, "angle": 10.0 if self.turn_right else -10.0}
+                ),  # Alternates between left/right at 2 radians/s
+            ),
             users_implicated=[],
             anticipation=None,
-            to_tell_user="We see an object, everything is fine!",
+            to_tell_user=f"Turning {'right' if self.turn_right else 'left'} at high speed!",
         )
+
+        # Toggle direction for next time
+        self.turn_right = not self.turn_right
 
         time.sleep(1)  # Simulate some processing time
 
-        # 4) Send “vision_agent_output” back to the client
+        # 4) Send "vision_agent_output" back to the client
         await self.send_message(
             {
                 "type": MessageType.VISION_AGENT_OUTPUT.value,
-                "payload": mock_output.dict(),  # or .json()
+                "payload": mock_output.model_dump_json(),
             }
         )
         print("[DEBUG] Sent 'vision_agent_output' to client")
-
-        await self.send_message(
-            {
-                "type": MessageType.ACTION_TO_DO.value,
-                "cmd": "set_velocity",
-                "values": [5.0, 5.0],
-            }
-        )
-        print("[DEBUG] Sent 'action_to_do'")
 
         # Then re-allow new images in next loop
         self._processing_image = False
