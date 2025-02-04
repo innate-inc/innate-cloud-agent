@@ -6,7 +6,7 @@ import datetime
 from websockets.exceptions import ConnectionClosed
 from typing import Optional
 
-from src.message_types import MessageOut, MessageOutType, MessageIn
+from src.message_types import MessageInType, MessageOut, MessageOutType, MessageIn
 from src.brain import Brain
 
 
@@ -86,6 +86,9 @@ class WebSocketAgentConnection:
                 except Exception as e:
                     print(f"[WARN] Received invalid message format: {e}")
                     continue
+
+                if message_in.type == MessageInType.IMAGE:
+                    await self._save_incoming_image(message_in.payload["image_b64"])
 
                 await self.brain.enqueue_message(message_in)
 

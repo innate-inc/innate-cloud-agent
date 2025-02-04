@@ -69,6 +69,7 @@ class Brain:
             },
         )
         await self.send_callback(response)
+        await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_chat_in(self, message: MessageIn):
         """
