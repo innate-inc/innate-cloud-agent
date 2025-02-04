@@ -33,7 +33,6 @@ class MessageInType(str, Enum):
 # Outgoing messages from the server/agent
 class MessageOutType(str, Enum):
     READY_FOR_IMAGE = "ready_for_image"
-    WELL_RECEIVED = "well_received"
     ACTION_TO_DO = "action_to_do"
     VISION_AGENT_OUTPUT = "vision_agent_output"
     DIRECTIVE_ACK = "directive_ack"  # Example: acknowledgment for a directive

@@ -8,8 +8,6 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-
-# Import the connection handler from your server code.
 from run_server import connection_handler
 
 
