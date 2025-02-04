@@ -6,7 +6,7 @@ import datetime
 from websockets.exceptions import ConnectionClosed
 from typing import Optional
 
-from src.message_types import MessageOutType, MessageIn
+from src.message_types import MessageOut, MessageOutType, MessageIn
 from src.brain import Brain
 
 
@@ -56,7 +56,12 @@ class WebSocketAgentConnection:
             print(f"[INFO] Brain instance started for user: {self.user_token}")
 
             # Notify client that the server is ready for an image (or other messages)
-            await self.send_message({"type": MessageOutType.READY_FOR_IMAGE.value})
+            await self.send_message(
+                MessageOut(
+                    type=MessageOutType.READY_FOR_IMAGE,
+                    payload={},
+                )
+            )
             print("[DEBUG] Sent 'ready_for_image' to client")
 
             # Main listening loop --
@@ -153,12 +158,10 @@ class WebSocketAgentConnection:
             print(f"[ERROR] Failed to decode/write image: {e}")
             return None
 
-    async def send_message(self, msg: dict):
+    async def send_message(self, msg: MessageOut):
         """
         Utility to send JSON-encoded messages to the client.
         This method is provided as the callback to the Brain.
         """
-        try:
-            await self.websocket.send(json.dumps(msg))
-        except ConnectionClosed:
-            print("[WARN] Attempted to send message after connection was closed.")
+        json_msg = msg.model_dump_json()  # or msg.json() in Pydantic v1
+        await self.websocket.send(json_msg)

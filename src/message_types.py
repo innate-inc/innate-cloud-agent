@@ -2,12 +2,14 @@
 
 from enum import Enum
 from typing import Dict, Optional, List, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 
 
 class TaskType(Enum):
     NAVIGATION_IN_SIGHT = "navigation_in_sight"
-    NAVIGATION_TO_MEMORY = "navigation_out_of_sight"
+    NAVIGATION_TO_MEMORY = (
+        "navigation_in_sight"  # NOTE: consider renaming or updating value if needed.
+    )
     ACTION_WITH_ARM = "action_with_arm"
     ASK_FOR_INFORMATION = "ask_for_information"
     VELOCITY_CONTROL = "velocity_control"
@@ -16,6 +18,10 @@ class TaskType(Enum):
 class Task(BaseModel):
     type: TaskType
     description: str
+
+    @field_serializer("type")
+    def serialize_task_type(self, value: TaskType) -> str:
+        return value.value
 
 
 # Incoming messages from the client
@@ -45,6 +51,10 @@ class MessageOut(BaseModel):
     type: MessageOutType
     payload: Dict[str, Any]
 
+    @field_serializer("type")
+    def serialize_message_out_type(self, value: MessageOutType) -> str:
+        return value.value
+
 
 class VisionAgentOutput(BaseModel):
     """Mirrors your orchestrator.agent.models.VisionAgentOutput shape."""
@@ -58,8 +68,4 @@ class VisionAgentOutput(BaseModel):
     anticipation: Optional[str]
     to_tell_user: Optional[str]
 
-    model_config = {
-        "json_encoders": {
-            TaskType: lambda v: v.value,
-        }
-    }
+    # If 'next_task' is provided, Task's serializer will ensure TaskType is converted.
