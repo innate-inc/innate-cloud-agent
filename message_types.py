@@ -18,15 +18,20 @@ class Task(BaseModel):
     description: str
 
 
-class MessageType(str, Enum):
+# Incoming messages from the client
+class MessageInType(str, Enum):
     AUTH = "auth"
     DIRECTIVE = "directive"
     IMAGE = "image"
+
+
+# Outgoing messages from the server/agent
+class MessageOutType(str, Enum):
     READY_FOR_IMAGE = "ready_for_image"
     WELL_RECEIVED = "well_received"
     ACTION_TO_DO = "action_to_do"
     VISION_AGENT_OUTPUT = "vision_agent_output"
-    # Add more types as needed
+    DIRECTIVE_ACK = "directive_ack"  # Example: acknowledgment for a directive
 
 
 class VisionAgentOutput(BaseModel):

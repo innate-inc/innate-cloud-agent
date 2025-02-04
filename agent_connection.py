@@ -9,7 +9,13 @@ import datetime
 from websockets.exceptions import ConnectionClosed
 from typing import Optional
 
-from message_types import MessageType, Task, TaskType, VisionAgentOutput
+from message_types import (
+    MessageInType,
+    MessageOutType,
+    Task,
+    TaskType,
+    VisionAgentOutput,
+)
 
 
 def get_user_from_token(token: str):
@@ -55,7 +61,7 @@ class WebSocketAgentConnection:
 
         try:
             # Start by telling the client we are ready for an image
-            await self.send_message({"type": MessageType.READY_FOR_IMAGE.value})
+            await self.send_message({"type": MessageOutType.READY_FOR_IMAGE.value})
             print("[DEBUG] Sent 'ready_for_image' to client")
 
             # Now enter the main listening loop
@@ -78,9 +84,9 @@ class WebSocketAgentConnection:
                     print("[WARN] No 'type' field in message; ignoring.")
                     continue
 
-                if msg_type == MessageType.IMAGE.value:
+                if msg_type == MessageInType.IMAGE.value:
                     await self.handle_image_message(data)
-                elif msg_type == MessageType.DIRECTIVE.value:
+                elif msg_type == MessageInType.DIRECTIVE.value:
                     await self.handle_directive_message(data)
                 else:
                     print(f"[WARN] Unknown message type: {msg_type}")
@@ -139,7 +145,7 @@ class WebSocketAgentConnection:
         await self._save_incoming_image(image_b64)
 
         # 2) Send "well_received"
-        await self.send_message({"type": MessageType.WELL_RECEIVED.value})
+        await self.send_message({"type": MessageOutType.WELL_RECEIVED.value})
         print("[DEBUG] Sent 'well_received' to client")
 
         # 3) Simulate some "processing" (call your BrainCore or Orchestrator logic)
@@ -165,12 +171,12 @@ class WebSocketAgentConnection:
         time.sleep(1)  # Simulate some processing time
 
         # 4) Send "vision_agent_output" back to the client
-        await self.send_message(
-            {
-                "type": MessageType.VISION_AGENT_OUTPUT.value,
-                "payload": mock_output.model_dump_json(),
-            }
-        )
+        # await self.send_message(
+        #     {
+        #         "type": MessageType.VISION_AGENT_OUTPUT.value,
+        #         "payload": mock_output.model_dump_json(),
+        #     }
+        # )
         print("[DEBUG] Sent 'vision_agent_output' to client")
 
         # Then re-allow new images in next loop
@@ -178,7 +184,7 @@ class WebSocketAgentConnection:
 
         await self.send_message(
             {
-                "type": MessageType.READY_FOR_IMAGE.value,
+                "type": MessageOutType.READY_FOR_IMAGE.value,
             }
         )
         print("[DEBUG] Sent 'ready_for_image'")
