@@ -42,6 +42,7 @@ class WebSocketAgentConnection:
         self.user_token: Optional[str] = None
         self.recording_dir: str = ""
         self.brain: Optional[Brain] = None
+        self.brain_task = None  # Keep a reference to the brain task
 
     async def handle_connection(self):
         """
@@ -49,53 +50,67 @@ class WebSocketAgentConnection:
         Performs authentication, creates a session folder, sets up the Brain,
         and then simply forwards future messages to this brain.
         """
-        # Step 1: Authenticate
-        if not await self._authenticate():
+        try:
+            # Step 1: Authenticate
+            if not await self._authenticate():
+                await self.websocket.close()
+                return
+
+            # Step 2: Create a folder to store session images
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.recording_dir = f"./recordings/session_{self.user_token}_{timestamp}"
+            os.makedirs(self.recording_dir, exist_ok=True)
+            print(f"[INFO] Created recording dir: {self.recording_dir}")
+
+            # Step 3: Create a per-connection Brain that will process all messages.
+            self.brain = Brain(self.user_token, self.send_message)
+            self.brain_task = asyncio.create_task(self.brain.run())
+            print(f"[INFO] Brain instance started for user: {self.user_token}")
+
+            # Notify client that the server is ready for an image (or other messages)
+            await self.send_message({"type": MessageOutType.READY_FOR_IMAGE.value})
+            print("[DEBUG] Sent 'ready_for_image' to client")
+
+            # Main listening loop --
+            # For every message received on the websocket,
+            # simply forward it to the brain for processing.
+            while True:
+                try:
+                    raw_msg = await self.websocket.recv()
+                except ConnectionClosed:
+                    print(f"[INFO] WebSocket closed for user: {self.user_token}")
+                    break
+
+                try:
+                    data_raw = json.loads(raw_msg)
+                except json.JSONDecodeError:
+                    print("[WARN] Received non-JSON data from client. Ignoring.")
+                    continue
+
+                # Parse the incoming data as a MessageIn. This ensures the message is validated.
+                try:
+                    message_in = MessageIn.model_validate(data_raw)
+                except Exception as e:
+                    print(f"[WARN] Received invalid message format: {e}")
+                    continue
+
+                await self.brain.enqueue_message(message_in)
+
+                # Sleep a tiny bit to avoid busy looping
+                await asyncio.sleep(0.01)
+        finally:
+            # Shutdown the brain task gracefully
+            if self.brain is not None:
+                await self.brain.stop()
+            if self.brain_task is not None:
+                self.brain_task.cancel()
+                try:
+                    await self.brain_task
+                except asyncio.CancelledError:
+                    print("[DEBUG] Brain task cancelled.")
+            # Ensure the websocket is closed
             await self.websocket.close()
-            return
-
-        # Step 2: Create a folder to store session images
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.recording_dir = f"./recordings/session_{self.user_token}_{timestamp}"
-        os.makedirs(self.recording_dir, exist_ok=True)
-        print(f"[INFO] Created recording dir: {self.recording_dir}")
-
-        # Step 3: Create a per-connection Brain that will process all messages.
-        self.brain = Brain(self.user_token, self.send_message)
-        asyncio.create_task(self.brain.run())
-        print(f"[INFO] Brain instance started for user: {self.user_token}")
-
-        # Notify client that the server is ready for an image (or other messages)
-        await self.send_message({"type": MessageOutType.READY_FOR_IMAGE.value})
-        print("[DEBUG] Sent 'ready_for_image' to client")
-
-        # Main listening loop --
-        # For every message received on the websocket,
-        # simply forward it to the brain for processing.
-        while True:
-            try:
-                raw_msg = await self.websocket.recv()
-            except ConnectionClosed:
-                print(f"[INFO] Connection closed for user: {self.user_token}")
-                break
-
-            try:
-                data_raw = json.loads(raw_msg)
-            except json.JSONDecodeError:
-                print("[WARN] Received non-JSON data from client. Ignoring.")
-                continue
-
-            # Parse the incoming data as a MessageIn. This ensures the message is validated.
-            try:
-                message_in = MessageIn.model_validate(data_raw)
-            except Exception as e:
-                print(f"[WARN] Received invalid message format: {e}")
-                continue
-
-            await self.brain.enqueue_message(message_in)
-
-            # Sleep a tiny bit to avoid busy looping
-            await asyncio.sleep(0.01)
+            print("[INFO] WebSocket connection closed cleanly.")
 
     async def _authenticate(self) -> bool:
         """
