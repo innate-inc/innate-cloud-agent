@@ -1,6 +1,7 @@
 import asyncio
+import json
 
-from src.message_types import MessageIn, MessageOut
+from src.message_types import MessageIn, MessageOut, Task, TaskType
 
 
 class Brain:
@@ -13,6 +14,8 @@ class Brain:
         self.send_callback = send_callback
         self.message_queue = asyncio.Queue()
         self.running = True
+        # Flag to override the next vision output (set via a chat_in command)
+        self.forward_command_active = False
 
     async def enqueue_message(self, message: MessageIn):
         """
@@ -55,6 +58,24 @@ class Brain:
         Simulates image processing (e.g., running ML inference) with a delay.
         """
         await asyncio.sleep(1)
+
+        # If a chat_in command instructed us to go forward,
+        # set up the next_task accordingly (one iteration only)
+        next_task = None
+        if self.forward_command_active:
+            next_task = Task(
+                type=TaskType.VELOCITY_CONTROL,
+                description=json.dumps({"forward": 1.0, "angle": 0.0}),
+            )
+            # Reset the flag after one vision output iteration.
+            self.forward_command_active = False
+        else:
+            # We stop moving after one iteration.
+            next_task = Task(
+                type=TaskType.VELOCITY_CONTROL,
+                description=json.dumps({"forward": 0.0, "angle": 0.0}),
+            )
+
         response = MessageOut(
             type="vision_agent_output",
             payload={
@@ -62,7 +83,7 @@ class Brain:
                 "observation": "Analyzed image successfully",
                 "thoughts": "Brain processing logic applied",
                 "new_goal": None,
-                "next_task": None,
+                "next_task": next_task,
                 "users_implicated": [],
                 "anticipation": None,
                 "to_tell_user": "Image processed.",
@@ -74,13 +95,24 @@ class Brain:
     async def handle_chat_in(self, message: MessageIn):
         """
         Handle messages of type 'chat_in'.
-        Echoes back the text received.
+        Echoes back the text received and, if a special command is detected,
+        sets a flag to modify the next vision output.
         """
         text = message.payload["text"]
-        response = MessageOut(
-            type="chat_out",
-            payload={"text": f"Echo: {text}"},
-        )
+        if text.strip() == "Go Forward by chatIn":
+            # Set the flag so that the next vision output includes a forward command.
+            self.forward_command_active = True
+            response = MessageOut(
+                type="chat_out",
+                payload={
+                    "text": "Command received: Next vision output will initiate a forward movement."
+                },
+            )
+        else:
+            response = MessageOut(
+                type="chat_out",
+                payload={"text": f"Echo: {text}"},
+            )
         await self.send_callback(response)
 
     async def handle_directive(self, message: MessageIn):
