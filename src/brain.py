@@ -1,6 +1,6 @@
 import asyncio
 
-from message_types import MessageIn
+from src.message_types import MessageIn
 
 
 class Brain:

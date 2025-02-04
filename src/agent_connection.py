@@ -1,25 +1,13 @@
-# agent_connection.py
-
 import os
 import asyncio
 import json
 import base64
-import time
 import datetime
 from websockets.exceptions import ConnectionClosed
 from typing import Optional
 
-from message_types import (
-    MessageInType,
-    MessageOutType,
-    Task,
-    TaskType,
-    VisionAgentOutput,
-    MessageIn,
-)
-
-# Import the new brain module.
-from brain import Brain
+from src.message_types import MessageOutType, MessageIn
+from src.brain import Brain
 
 
 def get_user_from_token(token: str):
