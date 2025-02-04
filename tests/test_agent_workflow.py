@@ -41,7 +41,7 @@ async def test_basic_workflow():
         # For this test, we simply send a dummy string.
         image_message = {
             "type": "image",
-            "payload": {"image_data": "dummy_image_data"},
+            "payload": {"image_b64": "dummy_image_data"},
         }
         await websocket.send(json.dumps(image_message))
 
@@ -49,6 +49,11 @@ async def test_basic_workflow():
         raw_msg = await websocket.recv()
         msg = json.loads(raw_msg)
         assert msg["type"] == "vision_agent_output"
+
+        # Now we expect the brain to send a "ready_for_image" message.
+        raw_msg = await websocket.recv()
+        msg = json.loads(raw_msg)
+        assert msg["type"] == "ready_for_image"
 
         # ----- STEP 3: Send a chat message -----
         # Note: Since the brain code calls message.get("text", ""),
