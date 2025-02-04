@@ -11,6 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the actual code
+COPY src/ src/
 COPY run_server.py .
 
 # Expose port 8765 for the WebSocket
@@ -18,3 +19,4 @@ EXPOSE 8765
 
 # Define the command to run the server
 CMD ["python", "run_server.py"]
+

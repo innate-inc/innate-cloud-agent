@@ -11,6 +11,10 @@ pip install -r requirements.txt
 ## Build and run the Docker image
 
 ```bash
+docker compose -f docker-compose.local.yml build
+```
+
+```bash
 docker compose -f docker-compose.local.yml up
 ```
 
