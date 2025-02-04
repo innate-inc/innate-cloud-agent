@@ -34,52 +34,75 @@ class Brain:
 
     async def process_message(self, message: MessageIn):
         """
-        Process a standardized message and send an appropriate response.
-        Extend this logic for more complex behavior as needed.
+        Process a standardized message and dispatch it to the appropriate handler
+        based on the message type.
         """
         message_type = message.type
         print(f"[Brain {self.connection_id}] Processing message: {message_type}")
 
         if message_type == "image":
-            # Simulate image processing (e.g., running ML inference) with a delay.
-            await asyncio.sleep(1)
-            response = MessageOut(
-                type="vision_agent_output",
-                payload={
-                    "stop_current_task": False,
-                    "observation": "Analyzed image successfully",
-                    "thoughts": "Brain processing logic applied",
-                    "new_goal": None,
-                    "next_task": None,
-                    "users_implicated": [],
-                    "anticipation": None,
-                    "to_tell_user": "Image processed.",
-                },
-            )
-            await self.send_callback(response)
+            await self.handle_image(message)
         elif message_type == "chat_in":
-            # For a chat message, simply echo back the text.
-            text = message.payload["text"]
-            response = MessageOut(
-                type="chat_out",
-                payload={"text": f"Echo: {text}"},
-            )
-            await self.send_callback(response)
+            await self.handle_chat_in(message)
         elif message_type == "directive":
-            # Process a directive message and give an acknowledgment.
-            directive = message.payload["directive"]
-            response = MessageOut(
-                type="directive_ack",
-                payload={"text": f"Directive '{directive}' processed."},
-            )
-            await self.send_callback(response)
+            await self.handle_directive(message)
         else:
-            # For any unhandled message types.
-            response = MessageOut(
-                type="error",
-                payload={"text": f"Unhandled message type: {message_type}"},
-            )
-            await self.send_callback(response)
+            await self.handle_unknown(message)
+
+    async def handle_image(self, message: MessageIn):
+        """
+        Handle messages of type 'image'.
+        Simulates image processing (e.g., running ML inference) with a delay.
+        """
+        await asyncio.sleep(1)
+        response = MessageOut(
+            type="vision_agent_output",
+            payload={
+                "stop_current_task": False,
+                "observation": "Analyzed image successfully",
+                "thoughts": "Brain processing logic applied",
+                "new_goal": None,
+                "next_task": None,
+                "users_implicated": [],
+                "anticipation": None,
+                "to_tell_user": "Image processed.",
+            },
+        )
+        await self.send_callback(response)
+
+    async def handle_chat_in(self, message: MessageIn):
+        """
+        Handle messages of type 'chat_in'.
+        Echoes back the text received.
+        """
+        text = message.payload["text"]
+        response = MessageOut(
+            type="chat_out",
+            payload={"text": f"Echo: {text}"},
+        )
+        await self.send_callback(response)
+
+    async def handle_directive(self, message: MessageIn):
+        """
+        Handle messages of type 'directive'.
+        Processes the directive and sends an acknowledgment.
+        """
+        directive = message.payload["directive"]
+        response = MessageOut(
+            type="directive_ack",
+            payload={"text": f"Directive '{directive}' processed."},
+        )
+        await self.send_callback(response)
+
+    async def handle_unknown(self, message: MessageIn):
+        """
+        Handle any unrecognized message types.
+        """
+        response = MessageOut(
+            type="error",
+            payload={"text": f"Unhandled message type: {message.type}"},
+        )
+        await self.send_callback(response)
 
     async def stop(self):
         """
