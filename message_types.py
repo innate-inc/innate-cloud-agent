@@ -1,7 +1,7 @@
 # message_types.py
 
 from enum import Enum
-from typing import Optional, List, Any
+from typing import Dict, Optional, List, Any
 from pydantic import BaseModel
 
 
@@ -23,6 +23,7 @@ class MessageInType(str, Enum):
     AUTH = "auth"
     DIRECTIVE = "directive"
     IMAGE = "image"
+    CHAT_IN = "chat_in"
 
 
 # Outgoing messages from the server/agent
@@ -32,6 +33,17 @@ class MessageOutType(str, Enum):
     ACTION_TO_DO = "action_to_do"
     VISION_AGENT_OUTPUT = "vision_agent_output"
     DIRECTIVE_ACK = "directive_ack"  # Example: acknowledgment for a directive
+    CHAT_OUT = "chat_out"
+
+
+class MessageIn(BaseModel):
+    type: MessageInType
+    payload: Dict[str, Any]
+
+
+class MessageOut(BaseModel):
+    type: MessageOutType
+    payload: Dict[str, Any]
 
 
 class VisionAgentOutput(BaseModel):

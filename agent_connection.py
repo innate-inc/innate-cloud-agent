@@ -15,7 +15,11 @@ from message_types import (
     Task,
     TaskType,
     VisionAgentOutput,
+    MessageIn,
 )
+
+# Import the new brain module.
+from brain import Brain
 
 
 def get_user_from_token(token: str):
@@ -29,24 +33,21 @@ def get_user_from_token(token: str):
 
 class WebSocketAgentConnection:
     """
-    Represents a single client connection. Handles:
-      - Authentication
-      - Incoming messages (image, directive, etc.)
-      - Outgoing messages (ready_for_image, action_to_do, well_received)
-      - Logging images to a per-session directory
+    Represents a single client connection. Now, as soon as the connection is authenticated,
+    we create a dedicated Brain instance that will handle all incoming messages.
     """
 
     def __init__(self, websocket):
         self.websocket = websocket
-        self.user_id: Optional[str] = None
+        self.user_token: Optional[str] = None
         self.recording_dir: str = ""
-        self._processing_image = False
-        self.turn_right = True  # New variable to track direction
+        self.brain: Optional[Brain] = None
 
     async def handle_connection(self):
         """
         Main entrypoint after the server accepts a connection.
-        Performs authentication, then enters a receive-loop for messages.
+        Performs authentication, creates a session folder, sets up the Brain,
+        and then simply forwards future messages to this brain.
         """
         # Step 1: Authenticate
         if not await self._authenticate():
@@ -55,54 +56,51 @@ class WebSocketAgentConnection:
 
         # Step 2: Create a folder to store session images
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.recording_dir = f"./recordings/session_{self.user_id}_{timestamp}"
+        self.recording_dir = f"./recordings/session_{self.user_token}_{timestamp}"
         os.makedirs(self.recording_dir, exist_ok=True)
         print(f"[INFO] Created recording dir: {self.recording_dir}")
 
-        try:
-            # Start by telling the client we are ready for an image
-            await self.send_message({"type": MessageOutType.READY_FOR_IMAGE.value})
-            print("[DEBUG] Sent 'ready_for_image' to client")
+        # Step 3: Create a per-connection Brain that will process all messages.
+        self.brain = Brain(self.user_token, self.send_message)
+        asyncio.create_task(self.brain.run())
+        print(f"[INFO] Brain instance started for user: {self.user_token}")
 
-            # Now enter the main listening loop
-            while True:
-                try:
-                    raw_msg = await self.websocket.recv()
-                except ConnectionClosed:
-                    print(f"[INFO] Connection closed for user: {self.user_id}")
-                    break
+        # Notify client that the server is ready for an image (or other messages)
+        await self.send_message({"type": MessageOutType.READY_FOR_IMAGE.value})
+        print("[DEBUG] Sent 'ready_for_image' to client")
 
-                try:
-                    data = json.loads(raw_msg)
-                except json.JSONDecodeError:
-                    print("[WARN] Received non-JSON data from client. Ignoring.")
-                    continue
+        # Main listening loop --
+        # For every message received on the websocket,
+        # simply forward it to the brain for processing.
+        while True:
+            try:
+                raw_msg = await self.websocket.recv()
+            except ConnectionClosed:
+                print(f"[INFO] Connection closed for user: {self.user_token}")
+                break
 
-                # Dispatch to the appropriate handler
-                msg_type = data.get("type")
-                if not msg_type:
-                    print("[WARN] No 'type' field in message; ignoring.")
-                    continue
+            try:
+                data_raw = json.loads(raw_msg)
+            except json.JSONDecodeError:
+                print("[WARN] Received non-JSON data from client. Ignoring.")
+                continue
 
-                if msg_type == MessageInType.IMAGE.value:
-                    await self.handle_image_message(data)
-                elif msg_type == MessageInType.DIRECTIVE.value:
-                    await self.handle_directive_message(data)
-                else:
-                    print(f"[WARN] Unknown message type: {msg_type}")
+            # Parse the incoming data as a MessageIn. This ensures the message is validated.
+            try:
+                message_in = MessageIn.model_validate(data_raw)
+            except Exception as e:
+                print(f"[WARN] Received invalid message format: {e}")
+                continue
 
-                # (Optional) Sleep a tiny bit to avoid busy looping
-                await asyncio.sleep(0.01)
+            await self.brain.enqueue_message(message_in)
 
-        except ConnectionClosed:
-            print(f"[INFO] Client disconnected: {self.user_id}")
-        except Exception as e:
-            print(f"[ERROR] Exception in connection loop: {e}")
+            # Sleep a tiny bit to avoid busy looping
+            await asyncio.sleep(0.01)
 
     async def _authenticate(self) -> bool:
         """
         Wait for the client's first message (the token).
-        If valid, store self.user_id. Otherwise, reject.
+        If valid, store self.user_token. Otherwise, reject.
         """
         try:
             token_msg = await self.websocket.recv()
@@ -110,106 +108,33 @@ class WebSocketAgentConnection:
             print("[ERROR] Connection closed before token was received.")
             return False
 
-        # If the token message itself might be JSON, parse it,
-        # but here we assume it's just a string token
-        token = token_msg
-        user_id = get_user_from_token(token)
-        if user_id is None:
+        # The token message itself might be JSON, but here we assume its a string token.
+        try:
+            token = json.loads(token_msg)
+        except json.JSONDecodeError:
+            print("[WARN] Received non-JSON data from client. Ignoring.")
+            return False
+
+        # Now we can use the token to get the user_token
+        try:
+            token_payload = MessageIn.model_validate(token).payload
+            token = token_payload["token"]
+        except Exception as e:
+            print(f"[ERROR] Failed to get user_token from token: {e}")
+            return False
+
+        if token is None:
             print("[WARN] Invalid token, closing connection.")
             return False
 
-        self.user_id = user_id
-        print(f"[INFO] Authenticated user: {self.user_id}")
+        self.user_token = token
+        print(f"[INFO] Authenticated user with token: {self.user_token}")
         return True
-
-    async def handle_image_message(self, data):
-        """
-        Called when the client sends an 'image' message.
-        We'll decode it, store it, respond with "well_received",
-        then maybe do some 'AI' process and send an "action_to_do".
-        """
-        if self._processing_image:
-            # In case you don't want parallel image handling
-            print("[DEBUG] Still processing previous image. Ignoring new image.")
-            return
-
-        self._processing_image = True
-
-        image_b64 = data.get("image_b64")
-        if not image_b64:
-            print("[WARN] No 'image_b64' field in image message.")
-            self._processing_image = False
-            return
-
-        # 1) Decode and save image
-        await self._save_incoming_image(image_b64)
-
-        # 2) Send "well_received"
-        await self.send_message({"type": MessageOutType.WELL_RECEIVED.value})
-        print("[DEBUG] Sent 'well_received' to client")
-
-        # 3) Simulate some "processing" (call your BrainCore or Orchestrator logic)
-        mock_output = VisionAgentOutput(
-            stop_current_task=False,
-            observation="Analyzed image successfully",
-            thoughts="Alternating between left and right turns",
-            new_goal=None,
-            next_task=Task(
-                type=TaskType.VELOCITY_CONTROL,
-                description=json.dumps(
-                    {"forward": 1.0, "angle": 10.0 if self.turn_right else -10.0}
-                ),  # Alternates between left/right at 2 radians/s
-            ),
-            users_implicated=[],
-            anticipation=None,
-            to_tell_user=f"Turning {'right' if self.turn_right else 'left'} at high speed!",
-        )
-
-        # Toggle direction for next time
-        self.turn_right = not self.turn_right
-
-        time.sleep(1)  # Simulate some processing time
-
-        # 4) Send "vision_agent_output" back to the client
-        # await self.send_message(
-        #     {
-        #         "type": MessageType.VISION_AGENT_OUTPUT.value,
-        #         "payload": mock_output.model_dump_json(),
-        #     }
-        # )
-        print("[DEBUG] Sent 'vision_agent_output' to client")
-
-        # Then re-allow new images in next loop
-        self._processing_image = False
-
-        await self.send_message(
-            {
-                "type": MessageOutType.READY_FOR_IMAGE.value,
-            }
-        )
-        print("[DEBUG] Sent 'ready_for_image'")
-
-    async def handle_directive_message(self, data):
-        """
-        Called when the client sends a 'directive' message, e.g. to set some new directive.
-        In your real code, you might call OrchestratorNode/BrainCore to update the directive.
-        """
-        directive = data.get("directive")
-        if directive:
-            print(f"[INFO] Received new directive: {directive}")
-
-            await self.send_message(
-                {
-                    "type": "directive_ack",
-                    "message": f"Directive '{directive}' updated successfully.",
-                }
-            )
-        else:
-            print("[WARN] 'directive' field missing in the message.")
 
     async def _save_incoming_image(self, image_b64: str):
         """
-        Decodes the base64 image and saves it in self.recording_dir.
+        Optionally, you may want to decode and save the image in self.recording_dir.
+        This helper remains available, should you choose to let the brain trigger it.
         """
         try:
             img_data = base64.b64decode(image_b64)
@@ -220,12 +145,15 @@ class WebSocketAgentConnection:
             with open(filepath, "wb") as f:
                 f.write(img_data)
             print(f"[INFO] Saved image to {filepath}")
+            return filepath
         except Exception as e:
             print(f"[ERROR] Failed to decode/write image: {e}")
+            return None
 
     async def send_message(self, msg: dict):
         """
         Utility to send JSON-encoded messages to the client.
+        This method is provided as the callback to the Brain.
         """
         try:
             await self.websocket.send(json.dumps(msg))
