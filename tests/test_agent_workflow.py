@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 
 # Import the connection handler from your server code.
-from src.run_server import connection_handler
+from run_server import connection_handler
 
 
 @pytest.mark.asyncio
