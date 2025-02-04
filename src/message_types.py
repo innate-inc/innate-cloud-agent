@@ -58,7 +58,8 @@ class VisionAgentOutput(BaseModel):
     anticipation: Optional[str]
     to_tell_user: Optional[str]
 
-    class Config:
-        json_encoders = {
+    model_config = {
+        "json_encoders": {
             TaskType: lambda v: v.value,
         }
+    }
