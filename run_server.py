@@ -2,7 +2,7 @@
 
 import asyncio
 import websockets
-from agent_connection import WebSocketAgentConnection
+from src.agent_connection import WebSocketAgentConnection
 
 # Optionally read port from environment or config
 WEBSOCKET_PORT = 8765
