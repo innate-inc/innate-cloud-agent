@@ -4,6 +4,11 @@ import asyncio
 import websockets
 from src.agent_connection import WebSocketAgentConnection
 
+# Import dotenv
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Optionally read port from environment or config
 WEBSOCKET_PORT = 8765
 
