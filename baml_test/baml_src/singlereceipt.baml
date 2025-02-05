@@ -43,3 +43,10 @@ function ExtractReceiptFromImage(img: image) -> Receipt {
         {{ ctx.output_format }}
     "#
 } 
+
+test TestExtraction {
+  functions [ExtractReceiptFromImage]
+  args {
+    img { file "../test.jpg" }
+  }
+}
