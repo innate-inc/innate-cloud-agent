@@ -1,0 +1,23 @@
+=== Multi-Text Experiment Results ===
+This header can be easily changed.
+
+Model: llama-3.2-11b-vision-plus-two-lorem
+Statistics:
+Average Time: 0.6607 seconds
+Max Time: 1.8616 seconds
+Min Time: 0.3508 seconds
+Error Count: 10
+Extraction Error Count: 2
+Rate Limit Error Count: 8
+
+Iteration Results:
+Iteration 1: extraction error
+Iteration 2: rate limit error
+Iteration 3: rate limit error
+Iteration 4: rate limit error
+Iteration 5: rate limit error
+Iteration 6: rate limit error
+Iteration 7: rate limit error
+Iteration 8: rate limit error
+Iteration 9: rate limit error
+Iteration 10: extraction error

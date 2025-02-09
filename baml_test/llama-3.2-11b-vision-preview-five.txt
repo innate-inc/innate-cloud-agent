@@ -1,0 +1,21 @@
+=== Multi-Image Experiment Results ===
+This header can be easily changed.
+
+Model: llama-3.2-11b-vision-preview-five
+Statistics:
+Average Time: 0.0024 seconds
+Max Time: 0.0030 seconds
+Min Time: 0.0020 seconds
+Error Count: 10
+
+Iteration Results:
+Iteration 1: error
+Iteration 2: error
+Iteration 3: error
+Iteration 4: error
+Iteration 5: error
+Iteration 6: error
+Iteration 7: error
+Iteration 8: error
+Iteration 9: error
+Iteration 10: error

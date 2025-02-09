@@ -1,0 +1,76 @@
+{
+    "header": "=== Multi-Text Experiment Results ===\nThis header can be easily changed.\n\n",
+    "model": "llama-3.2-11b-vision-plus-four-lorem",
+    "statistics": {
+        "average_time": 0.4415,
+        "max_time": 0.6219,
+        "min_time": 0.3462,
+        "error_count": 10,
+        "extraction_error_count": 0,
+        "rate_limit_error_count": 10
+    },
+    "iterations": [
+        {
+            "iteration": 1,
+            "duration": 0.5285,
+            "result": "rate limit error"
+        },
+        {
+            "iteration": 2,
+            "duration": 0.3869,
+            "result": "rate limit error"
+        },
+        {
+            "iteration": 3,
+            "duration": 0.3462,
+            "result": "rate limit error"
+        },
+        {
+            "iteration": 4,
+            "duration": 0.3767,
+            "result": "rate limit error"
+        },
+        {
+            "iteration": 5,
+            "duration": 0.3903,
+            "result": "rate limit error"
+        },
+        {
+            "iteration": 6,
+            "duration": 0.3938,
+            "result": "rate limit error"
+        },
+        {
+            "iteration": 7,
+            "duration": 0.5452,
+            "result": "rate limit error"
+        },
+        {
+            "iteration": 8,
+            "duration": 0.4019,
+            "result": "rate limit error"
+        },
+        {
+            "iteration": 9,
+            "duration": 0.6219,
+            "result": "rate limit error"
+        },
+        {
+            "iteration": 10,
+            "duration": 0.4239,
+            "result": "rate limit error"
+        }
+    ],
+    "text_results": [
+        "rate limit error",
+        "rate limit error",
+        "rate limit error",
+        "rate limit error",
+        "rate limit error",
+        "rate limit error",
+        "rate limit error",
+        "rate limit error",
+        "rate limit error",
+        "rate limit error"
+    ]
+}

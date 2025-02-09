@@ -1,0 +1,120 @@
+{
+    "header": "=== Multi-Text Experiment Results ===\nThis header can be easily changed.\n\n",
+    "model": "llama-3.2-11b-vision-plus-one-lorem",
+    "statistics": {
+        "average_time": 1.496,
+        "max_time": 1.7273,
+        "min_time": 1.2721,
+        "error_count": 8,
+        "extraction_error_count": 8,
+        "rate_limit_error_count": 0
+    },
+    "iterations": [
+        {
+            "iteration": 1,
+            "duration": 1.6034,
+            "result": {
+                "line_items": [
+                    {
+                        "description": "Pho Noodle Soup",
+                        "quantity": 1,
+                        "quantity_unit": null,
+                        "price": 14.5
+                    },
+                    {
+                        "description": "Double Protein",
+                        "quantity": 1,
+                        "quantity_unit": null,
+                        "price": 82.99
+                    }
+                ],
+                "total_amount": 19.09,
+                "date": "7/10/2019",
+                "time": "1:39 PM",
+                "business": "Forbes Cafe",
+                "currency_code": "USD",
+                "address": "order# 11285128\tStaff love KUNGFU \tSelf Checkout\t Call Name: Axe \tCall Name: Axe",
+                "payment_method": "VISA 1297"
+            }
+        },
+        {
+            "iteration": 2,
+            "duration": 1.7273,
+            "result": {
+                "line_items": [
+                    {
+                        "description": "Phoebe Noodle Soup",
+                        "quantity": 1,
+                        "quantity_unit": null,
+                        "price": 14.5
+                    },
+                    {
+                        "description": "Double Protein",
+                        "quantity": 1,
+                        "quantity_unit": null,
+                        "price": 2.95
+                    }
+                ],
+                "total_amount": 19.09,
+                "date": "7/10/2019",
+                "time": "1:39 PM",
+                "business": "Forbes Cafe",
+                "currency_code": "no currency code specified, so cannot be inferred. \n  address: null",
+                "address": null,
+                "payment_method": "VISA 1297\n\nNote: The payment_method includes the VISA card number. This is less than ideal as it is not secure to print these numbers on receipts to protect the card holder against fraud."
+            }
+        },
+        {
+            "iteration": 3,
+            "duration": 1.4136,
+            "result": "extraction error"
+        },
+        {
+            "iteration": 4,
+            "duration": 1.404,
+            "result": "extraction error"
+        },
+        {
+            "iteration": 5,
+            "duration": 1.5281,
+            "result": "extraction error"
+        },
+        {
+            "iteration": 6,
+            "duration": 1.4847,
+            "result": "extraction error"
+        },
+        {
+            "iteration": 7,
+            "duration": 1.4911,
+            "result": "extraction error"
+        },
+        {
+            "iteration": 8,
+            "duration": 1.2721,
+            "result": "extraction error"
+        },
+        {
+            "iteration": 9,
+            "duration": 1.4958,
+            "result": "extraction error"
+        },
+        {
+            "iteration": 10,
+            "duration": 1.5395,
+            "result": "extraction error"
+        }
+    ],
+    "text_results": [
+        "1.6034 seconds",
+        "1.7273 seconds",
+        "extraction error",
+        "extraction error",
+        "extraction error",
+        "extraction error",
+        "extraction error",
+        "extraction error",
+        "extraction error",
+        "extraction error"
+    ]
+}
