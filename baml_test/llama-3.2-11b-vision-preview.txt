@@ -1,0 +1,21 @@
+=== Test Run Results ===
+You can change this header content easily.
+
+Model: llama-3.2-11b-vision-preview
+Statistics:
+Average Time: 1.5682 seconds
+Max Time: 1.9341 seconds
+Min Time: 1.3328 seconds
+Error Count: 3
+
+Iteration Results:
+Iteration 1: 1.6395 seconds
+Iteration 2: error
+Iteration 3: 1.8374 seconds
+Iteration 4: 1.5124 seconds
+Iteration 5: 1.3682 seconds
+Iteration 6: 1.9341 seconds
+Iteration 7: 1.6538 seconds
+Iteration 8: error
+Iteration 9: 1.6197 seconds
+Iteration 10: error

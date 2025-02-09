@@ -23,14 +23,29 @@ async def extract_receipt_from_url(url: str):
 
 async def extract_receipt_from_base64(base64_str: str):
     """
-    Extracts a receipt from a base64 encoded receipt image.
+    Extracts a receipt from a base64 encoded receipt image using the default model (llama-3.2-90b-vision-preview).
 
     Args:
-        base64_str (str): Base64 string encoded image
+        base64_str (str): Base64 string encoded image.
 
     Returns:
         dict: The receipt data based on the Receipt model.
     """
     img_64 = Image.from_base64("image/png", base64_str)
     output = await b.ExtractReceiptFromImage(img_64)
+    return output
+
+
+async def extract_receipt_from_base64_11b(base64_str: str):
+    """
+    Extracts a receipt from a base64 encoded receipt image using the model llama-3.2-11b-vision-preview.
+
+    Args:
+        base64_str (str): Base64 string encoded image.
+
+    Returns:
+        dict: The receipt data based on the Receipt model.
+    """
+    img_64 = Image.from_base64("image/png", base64_str)
+    output = await b.ExtractReceiptFromImage11b(img_64)
     return output

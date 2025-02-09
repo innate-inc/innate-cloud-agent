@@ -30,9 +30,23 @@ class Receipt {
   "#)
 }
 
-// Image processing function
+// Original image processing function using the 90b model
 function ExtractReceiptFromImage(img: image) -> Receipt {
     client LlamaVisionGroqClient
+    prompt #"
+        {{_.role("user")}}
+        
+        Extract details from this image of a receipt: {{ img }}
+
+        The currency type may need to be inferred from the address info extracted. Example: 12345 Sunshine St, Sunnyville, CA 12345 is in the US, so return USD.
+
+        {{ ctx.output_format }}
+    "#
+} 
+
+// New image processing function using the 11b model
+function ExtractReceiptFromImage11b(img: image) -> Receipt {
+    client LlamaVisionGroqClient11b
     prompt #"
         {{_.role("user")}}
         

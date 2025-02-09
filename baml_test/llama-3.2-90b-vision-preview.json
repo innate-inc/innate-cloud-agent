@@ -1,0 +1,94 @@
+{
+    "header": "=== Test Run Results ===\nYou can change this header content easily.\n\n",
+    "model": "llama-3.2-90b-vision-preview",
+    "statistics": {
+        "average_time": 1.9926,
+        "max_time": 2.414,
+        "min_time": 1.8093,
+        "error_count": 8
+    },
+    "iterations": [
+        {
+            "iteration": 1,
+            "duration": 2.1638,
+            "result": "error"
+        },
+        {
+            "iteration": 2,
+            "duration": 2.0482,
+            "result": "error"
+        },
+        {
+            "iteration": 3,
+            "duration": 1.8346,
+            "result": {
+                "line_items": [
+                    {
+                        "description": "Pho Noodle Soup Beef Double Protein",
+                        "quantity": 1,
+                        "quantity_unit": null,
+                        "price": 32.99
+                    }
+                ],
+                "total_amount": 19.09,
+                "date": "7/10/24",
+                "time": "1:39 PM",
+                "business": "Forbes Cafe",
+                "currency_code": "USD",
+                "address": null,
+                "payment_method": "VISA 1297"
+            }
+        },
+        {
+            "iteration": 4,
+            "duration": 2.0323,
+            "result": "error"
+        },
+        {
+            "iteration": 5,
+            "duration": 1.8756,
+            "result": "error"
+        },
+        {
+            "iteration": 6,
+            "duration": 1.8382,
+            "result": "error"
+        },
+        {
+            "iteration": 7,
+            "duration": 2.414,
+            "result": {
+                "line_items": [
+                    {
+                        "description": "Pho Noodle Soup",
+                        "quantity": 1,
+                        "quantity_unit": "bowl",
+                        "price": 14.5
+                    }
+                ],
+                "total_amount": 19.09,
+                "date": "7/10/24",
+                "time": "1:39 PM",
+                "business": "Forbes Cafe",
+                "currency_code": "USD",
+                "address": null,
+                "payment_method": "VISA 1297"
+            }
+        },
+        {
+            "iteration": 8,
+            "duration": 1.9352,
+            "result": "error"
+        },
+        {
+            "iteration": 9,
+            "duration": 1.8093,
+            "result": "error"
+        },
+        {
+            "iteration": 10,
+            "duration": 1.9744,
+            "result": "error"
+        }
+    ]
+}
