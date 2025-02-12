@@ -179,6 +179,15 @@ class Brain:
         sets a flag to modify the next vision output.
         """
         text = message.payload["text"]
+
+        # If the message is like "Go to XXX", send back a chat_out with "Going to XXX"
+        if text.startswith("Go to "):
+            response = MessageOut(
+                type="chat_out",
+                payload={"text": f"Going to {text[5:]}"},
+            )
+            await self.send_callback(response)
+
         # Save the latest user message
         self.latest_user_message = text
 

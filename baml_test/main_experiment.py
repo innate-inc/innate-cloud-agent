@@ -112,8 +112,8 @@ async def main():
 
     # Define experiments: Tuple with (experiment_name, extraction_function)
     experiments = [
-        ("llama-3.2-11b-vision-plus-one-lorem", extract_receipt_from_base64_11b_two),
-        ("llama-3.2-11b-vision-plus-two-lorem", extract_receipt_from_base64_11b_three),
+        # ("llama-3.2-11b-vision-plus-one-lorem", extract_receipt_from_base64_11b_two),
+        # ("llama-3.2-11b-vision-plus-two-lorem", extract_receipt_from_base64_11b_three),
         ("llama-3.2-11b-vision-plus-four-lorem", extract_receipt_from_base64_11b_five),
     ]
 

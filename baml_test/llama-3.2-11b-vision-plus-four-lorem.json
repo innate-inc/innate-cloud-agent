@@ -2,75 +2,97 @@
     "header": "=== Multi-Text Experiment Results ===\nThis header can be easily changed.\n\n",
     "model": "llama-3.2-11b-vision-plus-four-lorem",
     "statistics": {
-        "average_time": 0.4415,
-        "max_time": 0.6219,
-        "min_time": 0.3462,
-        "error_count": 10,
-        "extraction_error_count": 0,
-        "rate_limit_error_count": 10
+        "average_time": 1.8982,
+        "max_time": 2.2899,
+        "min_time": 1.6691,
+        "error_count": 12,
+        "extraction_error_count": 9,
+        "rate_limit_error_count": 3
     },
     "iterations": [
         {
             "iteration": 1,
-            "duration": 0.5285,
-            "result": "rate limit error"
+            "duration": 1.8575,
+            "result": "extraction error"
         },
         {
             "iteration": 2,
-            "duration": 0.3869,
-            "result": "rate limit error"
+            "duration": 1.8684,
+            "result": "extraction error"
         },
         {
             "iteration": 3,
-            "duration": 0.3462,
-            "result": "rate limit error"
+            "duration": 1.8127,
+            "result": {
+                "line_items": [
+                    {
+                        "description": "Pho Noodle Soup",
+                        "quantity": 1,
+                        "quantity_unit": null,
+                        "price": 14.5
+                    },
+                    {
+                        "description": "Double Protein",
+                        "quantity": 1,
+                        "quantity_unit": null,
+                        "price": 2.99
+                    }
+                ],
+                "total_amount": 17.49,
+                "date": "7/10/2019",
+                "time": "1:39 PM",
+                "business": "Forbes Cafe",
+                "currency_code": "USD",
+                "address": "Statlove KHUDSRS",
+                "payment_method": "VISA 1297"
+            }
         },
         {
             "iteration": 4,
-            "duration": 0.3767,
-            "result": "rate limit error"
+            "duration": 1.8686,
+            "result": "extraction error"
         },
         {
             "iteration": 5,
-            "duration": 0.3903,
-            "result": "rate limit error"
+            "duration": 1.9006,
+            "result": "extraction error"
         },
         {
             "iteration": 6,
-            "duration": 0.3938,
-            "result": "rate limit error"
+            "duration": 2.2899,
+            "result": "extraction error"
         },
         {
             "iteration": 7,
-            "duration": 0.5452,
-            "result": "rate limit error"
+            "duration": 1.9909,
+            "result": "extraction error"
         },
         {
             "iteration": 8,
-            "duration": 0.4019,
-            "result": "rate limit error"
+            "duration": 1.792,
+            "result": "extraction error"
         },
         {
             "iteration": 9,
-            "duration": 0.6219,
-            "result": "rate limit error"
+            "duration": 1.9328,
+            "result": "extraction error"
         },
         {
             "iteration": 10,
-            "duration": 0.4239,
-            "result": "rate limit error"
+            "duration": 1.6691,
+            "result": "extraction error"
         }
     ],
     "text_results": [
-        "rate limit error",
-        "rate limit error",
-        "rate limit error",
-        "rate limit error",
-        "rate limit error",
-        "rate limit error",
-        "rate limit error",
-        "rate limit error",
-        "rate limit error",
-        "rate limit error"
+        "extraction error",
+        "extraction error",
+        "1.8127 seconds",
+        "extraction error",
+        "extraction error",
+        "extraction error",
+        "extraction error",
+        "extraction error",
+        "extraction error",
+        "extraction error"
     ]
 }

@@ -97,3 +97,9 @@ async def extract_receipt_from_base64_11b_five(base64_str: str):
     img = Image.from_base64("image/png", base64_str)
     output = await b.ExtractReceiptFromImage11bFive(img)
     return output
+
+
+async def vision_agent(base64_str: str):
+    img = Image.from_base64("image/png", base64_str)
+    output = await b.VisionAgent(img)
+    return output
