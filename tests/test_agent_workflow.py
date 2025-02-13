@@ -47,7 +47,9 @@ async def test_basic_workflow():
         # we include an extra field "text" alongside the required keys.
         chat_message = {
             "type": "chat_in",
-            "payload": {"text": "Hello agent. Can you respond to me later?"},
+            "payload": {
+                "text": "Hello agent. Can you save this receipt and confirm it by telling me what you did?"
+            },
         }
         await websocket.send(json.dumps(chat_message))
 
@@ -81,6 +83,8 @@ async def test_basic_workflow():
         raw_msg = await websocket.recv()
         vision_agent_output_msg = json.loads(raw_msg)
         assert vision_agent_output_msg["type"] == "vision_agent_output"
+
+        print(f"vision_agent_output_msg: {vision_agent_output_msg}")
 
         # Assert it is the right primitive that is called
         assert (
