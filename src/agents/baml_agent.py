@@ -76,7 +76,7 @@ async def decreasesmax_retries(
         )
         return output
     except BamlValidationError as e:
-        print(f"BamlValidationError on attempt {attempt}/{max_retries}: {e}")
+        print(f"BamlValidationError on attempt {attempt}/{max_retries}")
         if attempt == max_retries:
             return None
         await asyncio.sleep(1)
