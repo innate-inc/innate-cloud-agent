@@ -2,9 +2,12 @@ import asyncio
 import json
 import pytest
 import websockets
+import base64  # <-- Import base64 for encoding the image
 
 import sys
 import os
+from PIL import Image  # <-- Import Pillow for image processing.
+import io  # <-- Import io for in-memory byte streams.
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -16,7 +19,6 @@ async def test_basic_workflow():
     port = 8766  # Make sure this port is free during testing.
     # Start a temporary WebSocket server for the test.
     server = await websockets.serve(connection_handler, "localhost", port)
-
     # Give the server a short moment to start.
     await asyncio.sleep(0.1)
 
@@ -24,6 +26,7 @@ async def test_basic_workflow():
     async with websockets.connect(uri) as websocket:
         # ----- STEP 1: Authenticate -----
         # The authentication message should follow the MessageIn schema.
+        print("Authenticating...")
         auth_message = {
             "type": "auth",
             "payload": {"token": "MY_HARDCODED_TOKEN"},
@@ -35,17 +38,36 @@ async def test_basic_workflow():
         msg = json.loads(raw_msg)
         assert msg["type"] == "ready_for_image"
 
-        # ----- STEP 2: Send an image message -----
-        # For this test, we simply send a dummy string.
+        # ----- STEP 2: Send an image message with reduced dimensions -----
+        # Open the image from ../baml_test/test.jpg, reduce its size by half, encode it in base64, and send it.
+        image_path = os.path.join(os.path.dirname(__file__), "../baml_test/test.jpg")
+        with open(image_path, "rb") as img_file:
+            image_bytes = img_file.read()
+
+        # Open the image via Pillow.
+        original_image = Image.open(io.BytesIO(image_bytes))
+        # Compute new dimensions: half the width and height.
+        new_size = (original_image.width // 2, original_image.height // 2)
+        # Use Image.Resampling.LANCZOS for high-quality downsampling.
+        resized_image = original_image.resize(new_size, Image.Resampling.LANCZOS)
+        # Save resized image to a bytes buffer.
+        buffer = io.BytesIO()
+        resized_image.save(buffer, format="JPEG")
+        resized_image_bytes = buffer.getvalue()
+
+        # Encode the resized image.
+        encoded_image = base64.b64encode(resized_image_bytes).decode("utf-8")
+
         image_message = {
             "type": "image",
-            "payload": {"image_b64": "dummy_image_data"},
+            "payload": {"image_b64": encoded_image},
         }
         await websocket.send(json.dumps(image_message))
 
         # The brain simulates processing by delaying for 1 second and then responding.
         raw_msg = await websocket.recv()
         msg = json.loads(raw_msg)
+        print(msg)
         assert msg["type"] == "vision_agent_output"
 
         # Now we expect the brain to send a "ready_for_image" message.

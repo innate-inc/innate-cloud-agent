@@ -1,6 +1,8 @@
 import asyncio
 import json
 import time
+import traceback
+from typing import Optional
 import openai  # Ensure the OpenAI SDK is installed
 
 from src.message_types import (
@@ -10,6 +12,9 @@ from src.message_types import (
 )
 from src.agents.baml_agent import vision_agent
 from src.baml_client.types import VisionAgentOutput
+from src.primitives.navigate_to_position import NavigateToPosition
+from src.primitives.save_receipt import SaveReceipt
+from src.primitives.transforms import primitive_to_dict
 
 
 class Brain:
@@ -26,6 +31,10 @@ class Brain:
         self.forward_command_active = False
         # NEW: Store the latest user message that should be consumed once by the vision language model.
         self.latest_user_message = None
+        self.primitives_list = [
+            primitive_to_dict(NavigateToPosition()),
+            primitive_to_dict(SaveReceipt()),
+        ]
 
     async def enqueue_message(self, message: MessageIn):
         """
@@ -68,14 +77,16 @@ class Brain:
             f"[Brain {self.connection_id}] Processed message in {time.time() - time_start} seconds"
         )
 
-    async def call_visual_language_model(self, user_prompt: str) -> VisionAgentOutput:
+    async def call_visual_language_model(
+        self, base64_img: str, user_prompt_text: Optional[str], primitives: list
+    ) -> VisionAgentOutput:
         """
         Calls the external visual language model (GPT-4-O 2024-11-20) with the given prompt.
         Expects the model to return a JSON structure adhering to the VisionAgentOutput schema.
         """
         try:
             # Call the OpenAI chat completion API asynchronously using the new parsing format.
-            completion = await vision_agent(user_prompt)
+            completion = await vision_agent(base64_img, user_prompt_text, primitives)
             return completion
         except Exception as e:
             print(
@@ -86,7 +97,7 @@ class Brain:
             return VisionAgentOutput(
                 stop_current_task=False,
                 observation="Image processed using fallback logic.",
-                thoughts=f"Fallback due to error: {str(e)}",
+                thoughts=f"Fallback due to error: {str(e)}\nTraceback: {traceback.format_exc()}",
                 new_goal=None,
                 next_task=fallback_task,
                 anticipation=None,
@@ -107,25 +118,20 @@ class Brain:
 
         # Start with the latest stored user message if available.
         if self.latest_user_message:
-            user_prompt_text = f"The user said: {self.latest_user_message}"
+            user_prompt_text = self.latest_user_message
             self.latest_user_message = None
         else:
-            user_prompt_text = "The user said nothing recently."
+            user_prompt_text = None
 
         # Check if the incoming message contains an image URL.
         base64_img = message.payload["image_b64"]
-        # Construct a Data URL for a JPEG image.
-        user_prompt_image = f"data:image/jpeg;base64,{base64_img}"
-
-        user_prompt = [
-            {"type": "text", "text": user_prompt_text},
-            {"type": "image_url", "image_url": {"url": user_prompt_image}},
-        ]
 
         print(f"[Brain {self.connection_id}] Sending request to visual language model.")
 
         # Call the visual language model with the combined prompt.
-        vision_output = await self.call_visual_language_model(user_prompt)
+        vision_output = await self.call_visual_language_model(
+            base64_img, user_prompt_text, self.primitives_list
+        )
 
         next_task_type = (
             vision_output.next_task.type if vision_output.next_task else "None"

@@ -1,3 +1,4 @@
+from typing import Optional
 from baml_py import Image
 from src.baml_client import b
 from src.primitives.transforms import create_type_builder
@@ -5,7 +6,7 @@ from src.baml_client.types import VisionAgentOutput
 
 
 async def vision_agent(
-    base64_str: str, last_user_message: str, primitives: list
+    base64_str: str, user_prompt_text: Optional[str], primitives: list
 ) -> VisionAgentOutput:
     """
     Calls the VisionAgent function with a dynamically built union for next_task.
@@ -35,5 +36,9 @@ async def vision_agent(
     tb = create_type_builder(primitives)
 
     # Call the VisionAgent function with the dynamic types.
-    output = await b.VisionAgent(img, last_user_message, baml_options={"tb": tb})
+    output = await b.VisionAgent(
+        img,
+        user_prompt_text if user_prompt_text is not None else "NO MESSAGE",
+        baml_options={"tb": tb},
+    )
     return output

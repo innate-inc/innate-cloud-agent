@@ -4,13 +4,17 @@ from src.primitives.types import Primitive
 from src.baml_client.type_builder import TypeBuilder
 
 
-def primitive_to_dict(primitive_obj: Primitive):
+def primitive_to_dict(primitive_obj: Primitive) -> dict:
     """
     Given a Primitive instance, returns a dict with:
+      - "name": the name of the primitive
       - "guideline": the guidelines text (if a guidelines() method exists)
-      - "inputs": a list of tuples (input_name, type_name) for each parameter of execute (other than self)
+      - "inputs": a dict mapping each parameter (excluding 'self') of execute to its type name
     """
     result = {}
+
+    # Add the 'name' attribute from the primitive.
+    result["name"] = primitive_obj.name
 
     # If the object has a guidelines method, call it and store its result.
     guidelines_func = getattr(primitive_obj, "guidelines", None)
@@ -57,7 +61,7 @@ def create_type_builder(primitives: list) -> TypeBuilder:
     # Process each primitive and create a new dynamic class.
     for i, prim in enumerate(primitives):
         task_name = prim["name"]
-        task_desc = prim["description"]
+        task_desc = prim["guideline"]
         dynamic_class_name = f"NextTask{i+1}"
 
         # Create the dynamic composite type for this primitive.

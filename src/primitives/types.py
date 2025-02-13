@@ -3,6 +3,15 @@ from abc import ABC, abstractmethod
 
 
 class Primitive(ABC):
+    @property
+    @abstractmethod
+    def name(self):
+        """
+        The name of the primitive.
+        Must be defined by every subclass.
+        """
+        pass
+
     @abstractmethod
     async def execute(self):
         """
