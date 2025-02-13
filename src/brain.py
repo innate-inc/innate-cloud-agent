@@ -8,7 +8,8 @@ from src.message_types import (
     MessageInType,
     MessageOut,
 )
-from src.agents.types import VisionAgentOutput, Task, TaskType
+from src.agents.baml_agent import vision_agent
+from src.baml_client.types import VisionAgentOutput
 
 
 class Brain:
@@ -74,32 +75,8 @@ class Brain:
         """
         try:
             # Call the OpenAI chat completion API asynchronously using the new parsing format.
-            completion = openai.beta.chat.completions.parse(
-                model="gpt-4o-2024-11-20",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a vision agent that processes images. Analyze the image and provide observations,"
-                            "thoughts, and other insights. Unless the user explicitly instructs you to perform an action,"
-                            "do not set a next task—in such cases, 'next_task' should be null. Provide a JSON response that"
-                            "strictly adheres to the VisionAgentOutput schema. The JSON should include the keys: stop_current_task,"
-                            "observation, thoughts, new_goal, next_task, users_implicated, anticipation, and to_tell_user."
-                            "When setting a next_task that is a navigation to position, the next_task.position should be"
-                            " a JSON object with the keys 'x' and 'y' and the values being the coordinates to navigate to."
-                            "This should only be set if the user explicitly instructs you to navigate to a position."
-                        ),
-                    },
-                    {"role": "user", "content": user_prompt},
-                ],
-                response_format=VisionAgentOutput,
-            )
-            # Extract the parsed content from the first choice.
-            vision_output = completion.choices[0].message.parsed
-            print(
-                f"[Brain {self.connection_id}] Vision output: {vision_output.model_dump()}"
-            )
-            return vision_output
+            completion = await vision_agent(user_prompt)
+            return completion
         except Exception as e:
             print(
                 f"[Brain {self.connection_id}] Error calling visual language model: {e}"
