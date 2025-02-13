@@ -155,7 +155,6 @@ class WebSocketAgentConnection:
             filepath = os.path.join(self.recording_dir, filename)
             with open(filepath, "wb") as f:
                 f.write(img_data)
-            print(f"[INFO] Saved image to {filepath}")
             return filepath
         except Exception as e:
             print(f"[ERROR] Failed to decode/write image: {e}")
