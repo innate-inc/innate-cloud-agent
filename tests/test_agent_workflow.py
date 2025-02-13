@@ -1,3 +1,7 @@
+import os
+
+os.environ["BAML_LOG"] = "off"
+
 import asyncio
 import json
 import pytest
