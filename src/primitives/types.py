@@ -18,23 +18,3 @@ class Primitive(ABC):
         Subclasses may override this method if guidelines are available.
         """
         return None
-
-
-# Example primitive without guidelines.
-class ServeGlass(Primitive):
-    def __init__(self):
-        super().__init__()
-
-    def guidelines(self):
-        return "Serve a glass of water. The glass has to be in sight."
-
-    async def execute(self, distance: float):
-        # Gentle handover motion for glass.
-        print("Serving glass.")
-        return "Served glass.", True
-
-
-# %%
-
-
-# %%

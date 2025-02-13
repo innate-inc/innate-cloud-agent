@@ -34,15 +34,12 @@ with open("test.jpg", "rb") as file:
 
 
 async def main():
-    for i in range(10):
-        start_time = time.perf_counter()
-        try:
-            result = await vision_agent(base64_str, "grab a bottle", tasks)
-        except Exception as e:
-            continue
-        elapsed_time = time.perf_counter() - start_time
-        print(f"Iteration {i+1}: Time elapsed: {elapsed_time:.4f} seconds")
-        print(result)
+    try:
+        result = await vision_agent(base64_str, "grab a bottle", tasks)
+    except Exception as e:
+        print(f"Error: {e}")
+        return
+    print(type(result))
 
 
 if __name__ == "__main__":

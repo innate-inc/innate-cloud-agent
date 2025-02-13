@@ -42,26 +42,23 @@ async def vision_agent(base64_str: str, last_user_message: str, primitives: list
         task_name = prim["name"]
         task_desc = prim["description"]
 
-        # Define a dynamic class name (e.g., NextTask1, NextTask2, ...)
+        # Define a dynamic class name for the task (e.g., NextTask1, NextTask2, ...)
         dynamic_class_name = f"NextTask{i+1}"
-
-        # Check that this dynamic class name does not conflict with existing ones.
-        # if dynamic_class_name in [cls.name for cls in tb.list_classes()]:
-        #     raise ValueError(
-        #         f"Dynamic class name conflict: {dynamic_class_name} already exists."
-        #     )
 
         # Create the dynamic composite type for this primitive.
         task_class = tb.add_class(dynamic_class_name)
 
         # Add a mandatory 'type' field with the guideline embedded in its description.
-        # (This field will hold the identifier for the task; its description informs the user.)
         task_class.add_property("type", tb.string()).description(task_desc)
 
-        # Add any input fields for this task.
+        # Create a dynamic composite type for the inputs, namespaced per task.
+        inputs_class_name = f"{dynamic_class_name}_Inputs"
+        inputs_class = tb.add_class(inputs_class_name)
+
+        # Add any input fields for this task into the inputs class.
         for field_name, field_type_str in prim.get("inputs", {}).items():
-            # Check for conflicting input field names within this class.
-            if field_name in [prop.name for prop in task_class.list_properties()]:
+            # Check for conflicting input field names within this inputs class.
+            if field_name in [prop.name for prop in inputs_class.list_properties()]:
                 raise ValueError(
                     f"Duplicate input field '{field_name}' in task '{task_name}'."
                 )
@@ -80,18 +77,19 @@ async def vision_agent(base64_str: str, last_user_message: str, primitives: list
                 # Default fallback if unknown.
                 field_type = tb.string()
 
-            # Add the input field (optional, since it only applies if that task is chosen).
-            task_class.add_property(field_name, field_type)
+            # Add the input field to the inputs class.
+            inputs_class.add_property(field_name, field_type)
 
-        # Save the newly created type for later union construction.
+        # Add an 'inputs' property to the task class that refers to the inputs class.
+        task_class.add_property("inputs", inputs_class.type())
+
+        # Save the newly created task type for later union construction.
         next_task_types.append(task_class.type())
 
     # Create a union type from all dynamic NextTask types.
-    # (The API for union types may vary; assume tb.union_type accepts a list of types.)
     union_next_task = tb.union(next_task_types)
 
     # Set the VisionAgentOutput.next_task field to use the dynamic union.
-    # (This replaces the compile-time static union with our runtime union.)
     tb.VisionAgentOutput.add_property("next_task", union_next_task).description(
         "List of the tasks the agent can perform."
     )
