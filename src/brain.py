@@ -134,7 +134,7 @@ class Brain:
         )
 
         next_task_type = (
-            vision_output.next_task.type if vision_output.next_task else "None"
+            vision_output.next_task["type"] if vision_output.next_task else "None"
         )
 
         print(
