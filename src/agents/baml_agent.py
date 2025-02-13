@@ -9,7 +9,7 @@ import asyncio
 
 async def vision_agent(
     base64_str: str, user_prompt_text: Optional[str], primitives: list
-) -> VisionAgentOutput:
+) -> Optional[VisionAgentOutput]:
     """
     Calls the VisionAgent function with a dynamically built union for next_task.
 
@@ -44,7 +44,7 @@ async def decreasesmax_retries(
     tb,
     max_retries: int,
     attempt: int = 1,
-) -> VisionAgentOutput:
+) -> Optional[VisionAgentOutput]:
     """
     Recursively attempts to call VisionAgent until either a successful output is produced
     or the number of allowed retries (max_retries) is exhausted.
@@ -72,7 +72,7 @@ async def decreasesmax_retries(
     except BamlValidationError as e:
         print(f"BamlValidationError on attempt {attempt}/{max_retries}: {e}")
         if attempt == max_retries:
-            raise
+            return None
         await asyncio.sleep(1)
         return await decreasesmax_retries(
             img, user_prompt_text, tb, max_retries, attempt + 1

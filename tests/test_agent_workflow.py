@@ -38,7 +38,16 @@ async def test_basic_workflow():
         msg = json.loads(raw_msg)
         assert msg["type"] == "ready_for_image"
 
-        # ----- STEP 2: Send an image message with reduced dimensions -----
+        # ----- STEP 2: Send a chat message -----
+        # Note: Since the brain code calls message.get("text", ""),
+        # we include an extra field "text" alongside the required keys.
+        chat_message = {
+            "type": "chat_in",
+            "payload": {"text": "Hello agent. Can you respond to me later?"},
+        }
+        await websocket.send(json.dumps(chat_message))
+
+        # ----- STEP 3: Send an image message with reduced dimensions -----
         # Open the image from ../baml_test/test.jpg, reduce its size by half, encode it in base64, and send it.
         image_path = os.path.join(os.path.dirname(__file__), "../baml_test/test.jpg")
         with open(image_path, "rb") as img_file:
@@ -66,29 +75,21 @@ async def test_basic_workflow():
 
         # The brain simulates processing by delaying for 1 second and then responding.
         raw_msg = await websocket.recv()
-        msg = json.loads(raw_msg)
-        print(msg)
-        assert msg["type"] == "vision_agent_output"
+        vision_agent_output_msg = json.loads(raw_msg)
+        assert vision_agent_output_msg["type"] == "vision_agent_output"
 
         # Now we expect the brain to send a "ready_for_image" message.
         raw_msg = await websocket.recv()
         msg = json.loads(raw_msg)
         assert msg["type"] == "ready_for_image"
 
-        # ----- STEP 3: Send a chat message -----
-        # Note: Since the brain code calls message.get("text", ""),
-        # we include an extra field "text" alongside the required keys.
-        chat_message = {
-            "type": "chat_in",
-            "payload": {"text": "Hello agent"},
-        }
-        await websocket.send(json.dumps(chat_message))
+        # ----- STEP 4: Verify we received a chat message -----
+        print(f"Received chat message: {vision_agent_output_msg}")
+        assert (
+            vision_agent_output_msg["payload"]["to_tell_user"] != ""
+        ), "Expected 'to_tell_user' in vision_agent_output_msg['payload'] to be a non-empty string"
 
-        raw_msg = await websocket.recv()
-        msg = json.loads(raw_msg)
-        assert msg["type"] == "chat_out"
-
-        # ----- STEP 4: Send a directive message -----
+        # ----- STEP 5: Send a directive message -----
         directive_message = {
             "type": "directive",
             "payload": {"directive": "Test directive"},
