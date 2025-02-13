@@ -5,3 +5,5 @@ venv/
 recordings/
 
 .env
+
+.DS_Store

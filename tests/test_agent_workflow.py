@@ -48,12 +48,11 @@ async def common_setup():
     return server, websocket
 
 
-async def basic_image_handling(websocket):
+async def basic_image_handling(websocket, image_path, image_type="JPEG"):
     """
     Opens an image from a local file, reduces its dimensions by half,
     encodes it in base64, and sends it over the provided websocket.
     """
-    image_path = os.path.join(os.path.dirname(__file__), "test_receipt.jpg")
     with open(image_path, "rb") as img_file:
         image_bytes = img_file.read()
 
@@ -65,7 +64,7 @@ async def basic_image_handling(websocket):
 
     # Save the resized image to an in-memory bytes buffer.
     buffer = io.BytesIO()
-    resized_image.save(buffer, format="JPEG")
+    resized_image.save(buffer, format=image_type)
     resized_image_bytes = buffer.getvalue()
 
     # Encode the image.
@@ -80,7 +79,7 @@ async def basic_image_handling(websocket):
 
 
 @pytest.mark.asyncio
-async def test_chat_workflow():
+async def test_chat_ask_receipt():
     """
     Test that uses a chat message and an image, then verifies the vision output.
     """
@@ -96,7 +95,7 @@ async def test_chat_workflow():
     await websocket.send(json.dumps(chat_message))
 
     # Send the image using the helper.
-    await basic_image_handling(websocket)
+    await basic_image_handling(websocket, "tests/test_receipt.jpg")
 
     # Expect a vision output response.
     raw_msg = await websocket.recv()
@@ -110,6 +109,48 @@ async def test_chat_workflow():
     assert (
         next_task_type == "save_receipt"
     ), "Expected the save_receipt primitive to be called"
+
+    # Next, the server should send a "ready_for_image" message.
+    raw_msg = await websocket.recv()
+    msg = json.loads(raw_msg)
+    assert (
+        msg["type"] == "ready_for_image"
+    ), "Expected ready_for_image after vision output"
+
+    # Clean up: close the server.
+    server.close()
+    await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_chat_ask_to_navigate():
+    """
+    Test that uses a chat message and an image, then verifies the vision output.
+    """
+    server, websocket = await common_setup()
+
+    # Send the chat message.
+    chat_message = {
+        "type": "chat_in",
+        "payload": {"text": "Hello agent. Can you navigate to x=100, y=100?"},
+    }
+    await websocket.send(json.dumps(chat_message))
+
+    # Send the image using the helper.
+    await basic_image_handling(websocket, "tests/test_navigate.png", "PNG")
+
+    # Expect a vision output response.
+    raw_msg = await websocket.recv()
+    vision_output = json.loads(raw_msg)
+    assert (
+        vision_output["type"] == "vision_agent_output"
+    ), "Expected vision_agent_output message"
+
+    # Check that the next task is the 'save_receipt' primitive.
+    next_task_type = vision_output["payload"].get("next_task", {}).get("type", "")
+    assert (
+        next_task_type == "navigate_to_position"
+    ), "Expected the navigate_to_position primitive to be called"
 
     # Next, the server should send a "ready_for_image" message.
     raw_msg = await websocket.recv()
