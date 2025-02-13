@@ -7,7 +7,7 @@ class ServeGlassPrimitiveInput {
 // Define the ServeGlassPrimitive composite type.
 class ServeGlassPrimitive {
   // The guideline for using this primitive.
-  guideline string @description("Serve a glass of water. The glass has to be in sight.")
+  type "serve_glass" @description("Serve a glass of water. The glass has to be in sight.")
   
   // The composite input structure specific to this primitive.
   inputs ServeGlassPrimitiveInput
@@ -22,7 +22,7 @@ class GrabBottlePrimitiveInput {
 // Define the GrabBottlePrimitive composite type.
 class GrabBottlePrimitive {
   // The guideline for this primitive.
-  guideline string @description("Grab a bottle with a specified color. The bottle must be within reach.")
+  type "grab_bottle" @description("To use when grabbing a bottle.")
   
   // The composite input structure specific to this primitive.
   inputs GrabBottlePrimitiveInput
@@ -41,12 +41,14 @@ class VisionAgentOutput {
   to_tell_user string?
 }
 
-function VisionAgent(img: image) -> VisionAgentOutput {
-    client OpenAIClient
+function VisionAgent(img: image, last_user_message: string) -> VisionAgentOutput {
+    client LlamaVisionGroqClient
     prompt #"
         {{_.role("user")}}
         
         Decide what to do next with this image: {{ img }}.
+
+        The last user message was: {{ last_user_message }}.
 
         Consider the guidelines of the primitives carefully before picking one to do (if any).
 

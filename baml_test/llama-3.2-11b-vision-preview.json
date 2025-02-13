@@ -2,15 +2,15 @@
     "header": "=== Test Run Results ===\nYou can change this header content easily.\n\n",
     "model": "llama-3.2-11b-vision-preview",
     "statistics": {
-        "average_time": 1.5682,
-        "max_time": 1.9341,
-        "min_time": 1.3328,
-        "error_count": 3
+        "average_time": 1.5948,
+        "max_time": 1.734,
+        "min_time": 1.4217,
+        "error_count": 8
     },
     "iterations": [
         {
             "iteration": 1,
-            "duration": 1.6395,
+            "duration": 1.734,
             "result": {
                 "line_items": [
                     {
@@ -21,87 +21,7 @@
                     },
                     {
                         "description": "Double Protein",
-                        "quantity": 2,
-                        "quantity_unit": null,
-                        "price": 42.99
-                    }
-                ],
-                "total_amount": 19.09,
-                "date": "7/10/20",
-                "time": "1:39 PM",
-                "business": "Forbes Cafe",
-                "currency_code": "USD",
-                "address": null,
-                "payment_method": "VISA 1297"
-            }
-        },
-        {
-            "iteration": 2,
-            "duration": 1.3356,
-            "result": "error"
-        },
-        {
-            "iteration": 3,
-            "duration": 1.8374,
-            "result": {
-                "line_items": [
-                    {
-                        "description": "Pho Noodle Soup",
-                        "quantity": 1,
-                        "quantity_unit": null,
-                        "price": 14.5
-                    },
-                    {
-                        "description": "Double Protein",
-                        "quantity": 1,
-                        "quantity_unit": null,
-                        "price": 0.0
-                    }
-                ],
-                "total_amount": 19.09,
-                "date": "7/10/2019",
-                "time": "13:39",
-                "business": "Forbes Cafe",
-                "currency_code": "$\" or \"USD",
-                "address": null,
-                "payment_method": null
-            }
-        },
-        {
-            "iteration": 4,
-            "duration": 1.5124,
-            "result": {
-                "line_items": [
-                    {
-                        "description": "Pho Noodle Soup",
-                        "quantity": 1,
-                        "quantity_unit": null,
-                        "price": 14.5
-                    }
-                ],
-                "total_amount": 19.09,
-                "date": "7/10/2023",
-                "time": "1:39 PM",
-                "business": "Forbes Cafe",
-                "currency_code": "USD",
-                "address": "Forbes Cafe",
-                "payment_method": "VISA 1297"
-            }
-        },
-        {
-            "iteration": 5,
-            "duration": 1.3682,
-            "result": {
-                "line_items": [
-                    {
-                        "description": "Pho Noodle Soup",
-                        "quantity": 1,
-                        "quantity_unit": null,
-                        "price": 14.5
-                    },
-                    {
-                        "description": "Double Protein",
-                        "quantity": 1,
+                        "quantity": 0,
                         "quantity_unit": null,
                         "price": 2.99
                     }
@@ -111,59 +31,48 @@
                 "time": "1:39 PM",
                 "business": "Forbes Cafe",
                 "currency_code": "USD",
-                "address": "12345",
-                "payment_method": "VISA 1297"
-            }
-        },
-        {
-            "iteration": 6,
-            "duration": 1.9341,
-            "result": {
-                "line_items": [],
-                "total_amount": 19.09,
-                "date": "Jul 10 2014",
-                "time": "3:39 PM",
-                "business": "Forbes Cafe",
-                "currency_code": "USD",
-                "address": "...",
-                "payment_method": "Visa"
-            }
-        },
-        {
-            "iteration": 7,
-            "duration": 1.6538,
-            "result": {
-                "line_items": [
-                    {
-                        "description": "Pho Noodle Soup Beef",
-                        "quantity": 1,
-                        "quantity_unit": "eighth",
-                        "price": 14.5
-                    },
-                    {
-                        "description": "Double Protein",
-                        "quantity": 1,
-                        "quantity_unit": null,
-                        "price": 2.99
-                    }
-                ],
-                "total_amount": 17.49,
-                "date": "7/10/2023",
-                "time": "1:39 PM",
-                "business": "Forbes Cafe",
-                "currency_code": "USD",
                 "address": null,
                 "payment_method": "VISA 1297"
             }
         },
         {
+            "iteration": 2,
+            "duration": 1.534,
+            "result": "error"
+        },
+        {
+            "iteration": 3,
+            "duration": 1.6586,
+            "result": "error"
+        },
+        {
+            "iteration": 4,
+            "duration": 1.5171,
+            "result": "error"
+        },
+        {
+            "iteration": 5,
+            "duration": 1.6433,
+            "result": "error"
+        },
+        {
+            "iteration": 6,
+            "duration": 1.6771,
+            "result": "error"
+        },
+        {
+            "iteration": 7,
+            "duration": 1.5472,
+            "result": "error"
+        },
+        {
             "iteration": 8,
-            "duration": 1.3328,
+            "duration": 1.536,
             "result": "error"
         },
         {
             "iteration": 9,
-            "duration": 1.6197,
+            "duration": 1.4217,
             "result": {
                 "line_items": [
                     {
@@ -174,9 +83,9 @@
                     },
                     {
                         "description": "Double Protein",
-                        "quantity": 1,
+                        "quantity": -2,
                         "quantity_unit": null,
-                        "price": 2.99
+                        "price": 22.99
                     }
                 ],
                 "total_amount": 19.09,
@@ -184,13 +93,13 @@
                 "time": "1:39 PM",
                 "business": "Forbes Cafe",
                 "currency_code": "USD",
-                "address": "Forbes Cafe",
+                "address": "1834 Union St, San Francisco, CA 94133",
                 "payment_method": "VISA 1297"
             }
         },
         {
             "iteration": 10,
-            "duration": 1.4484,
+            "duration": 1.6791,
             "result": "error"
         }
     ]

@@ -7,10 +7,8 @@ from src.message_types import (
     MessageIn,
     MessageInType,
     MessageOut,
-    Task,
-    TaskType,
-    VisionAgentOutput,
 )
+from src.agents.types import VisionAgentOutput, Task, TaskType
 
 
 class Brain:
@@ -87,6 +85,9 @@ class Brain:
                             "do not set a next task—in such cases, 'next_task' should be null. Provide a JSON response that"
                             "strictly adheres to the VisionAgentOutput schema. The JSON should include the keys: stop_current_task,"
                             "observation, thoughts, new_goal, next_task, users_implicated, anticipation, and to_tell_user."
+                            "When setting a next_task that is a navigation to position, the next_task.position should be"
+                            " a JSON object with the keys 'x' and 'y' and the values being the coordinates to navigate to."
+                            "This should only be set if the user explicitly instructs you to navigate to a position."
                         ),
                     },
                     {"role": "user", "content": user_prompt},
@@ -104,17 +105,13 @@ class Brain:
                 f"[Brain {self.connection_id}] Error calling visual language model: {e}"
             )
             # Fallback logic: provide a default action if the model call fails.
-            fallback_task = Task(
-                type=TaskType.VELOCITY_CONTROL,
-                description=json.dumps({"forward": 0.0, "angle": 0.0}),
-            )
+            fallback_task = None
             return VisionAgentOutput(
                 stop_current_task=False,
                 observation="Image processed using fallback logic.",
                 thoughts=f"Fallback due to error: {str(e)}",
                 new_goal=None,
                 next_task=fallback_task,
-                users_implicated=[],
                 anticipation=None,
                 to_tell_user="Fallback: Image processed.",
             )

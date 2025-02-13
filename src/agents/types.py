@@ -9,12 +9,17 @@ class TaskType(Enum):
     NAVIGATION_TO_POSITION = "navigation_to_position"
     # ACTION_WITH_ARM = "action_with_arm"
     # ASK_FOR_INFORMATION = "ask_for_information"
-    VELOCITY_CONTROL = "velocity_control"
+    # VELOCITY_CONTROL = "velocity_control"
+
+
+class NavigationToPosition(BaseModel):
+    x: float
+    y: float
 
 
 class Task(BaseModel):
     type: TaskType
-    description: str
+    position: NavigationToPosition
 
     @field_serializer("type")
     def serialize_task_type(self, value: TaskType) -> str:
