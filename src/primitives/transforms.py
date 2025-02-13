@@ -68,7 +68,9 @@ def create_type_builder(primitives: list) -> TypeBuilder:
         task_class = tb.add_class(dynamic_class_name)
 
         # Add a mandatory 'type' field with the guideline embedded in its description.
-        task_class.add_property("type", tb.string()).description(task_desc)
+        task_class.add_property("type", tb.literal_string(task_name)).description(
+            task_desc
+        )
 
         # Create a dynamic composite type for the inputs.
         inputs_class_name = f"{dynamic_class_name}_Inputs"
