@@ -49,7 +49,7 @@ async def test_basic_workflow():
 
         # ----- STEP 3: Send an image message with reduced dimensions -----
         # Open the image from ../baml_test/test.jpg, reduce its size by half, encode it in base64, and send it.
-        image_path = os.path.join(os.path.dirname(__file__), "../baml_test/test.jpg")
+        image_path = os.path.join(os.path.dirname(__file__), "test.jpg")
         with open(image_path, "rb") as img_file:
             image_bytes = img_file.read()
 

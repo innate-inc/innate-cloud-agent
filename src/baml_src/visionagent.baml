@@ -12,7 +12,7 @@ class VisionAgentOutput {
   @@dynamic
 }
 
-function VisionAgent(img: image, last_user_message: string) -> VisionAgentOutput {
+function VisionAgent(img: image, last_user_message: string, primitives_list_string: string) -> VisionAgentOutput {
     client LlamaVisionGroqClient
     prompt #"
         {{_.role("user")}}
@@ -21,7 +21,9 @@ function VisionAgent(img: image, last_user_message: string) -> VisionAgentOutput
 
         The last user message was: {{ last_user_message }}.
 
-        Consider the guidelines of the primitives carefully before picking one to do (if any).
+        Consider the guidelines of the tasks available carefully before picking one to do (if any).
+
+        You can only use one of the following tasks: {{ primitives_list_string }}.
 
         {{ ctx.output_format }}
     "#
