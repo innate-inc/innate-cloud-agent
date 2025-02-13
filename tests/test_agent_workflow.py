@@ -49,7 +49,7 @@ async def test_basic_workflow():
 
         # ----- STEP 3: Send an image message with reduced dimensions -----
         # Open the image from ../baml_test/test.jpg, reduce its size by half, encode it in base64, and send it.
-        image_path = os.path.join(os.path.dirname(__file__), "test.jpg")
+        image_path = os.path.join(os.path.dirname(__file__), "test_receipt.jpg")
         with open(image_path, "rb") as img_file:
             image_bytes = img_file.read()
 
@@ -77,6 +77,11 @@ async def test_basic_workflow():
         raw_msg = await websocket.recv()
         vision_agent_output_msg = json.loads(raw_msg)
         assert vision_agent_output_msg["type"] == "vision_agent_output"
+
+        # Assert it is the right primitive that is called
+        assert (
+            vision_agent_output_msg["payload"]["next_task"]["type"] == "save_receipt"
+        ), "Expected 'save_receipt' primitive to be called"
 
         # Now we expect the brain to send a "ready_for_image" message.
         raw_msg = await websocket.recv()
