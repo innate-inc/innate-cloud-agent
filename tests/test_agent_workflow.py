@@ -165,6 +165,69 @@ async def test_chat_ask_to_navigate():
 
 
 @pytest.mark.asyncio
+async def test_chat_ask_to_navigate_with_task_in_execution():
+    """
+    Test that uses a chat message and an image, verifies that the task started is navigate_to_position
+    and then sends another image. That should not stop the task.
+    """
+    server, websocket = await common_setup()
+
+    # Send the first navigation command.
+    chat_message_1 = {
+        "type": "chat_in",
+        "payload": {"text": "Hello agent. Can you navigate to x=100, y=100?"},
+    }
+    await websocket.send(json.dumps(chat_message_1))
+
+    # Send the image for the first command.
+    await basic_image_handling(websocket, "tests/test_navigate.png", "PNG")
+
+    # Expect vision output response for the first command.
+    raw_msg = await websocket.recv()
+    vision_output_1 = json.loads(raw_msg)
+    assert (
+        vision_output_1["type"] == "vision_agent_output"
+    ), "Expected vision_agent_output message for first navigation command"
+    next_task_type_1 = vision_output_1["payload"].get("next_task", {}).get("type", "")
+    assert (
+        next_task_type_1 == "navigate_to_position"
+    ), "Expected the navigate_to_position primitive to be called for first navigation"
+
+    # Expect the server to send a "ready_for_image" message.
+    raw_msg = await websocket.recv()
+    ready_msg_1 = json.loads(raw_msg)
+    assert (
+        ready_msg_1["type"] == "ready_for_image"
+    ), "Expected ready_for_image after vision output for first navigation"
+
+    # Send the image for the second navigation attempt.
+    await basic_image_handling(websocket, "tests/test_navigate.png", "PNG")
+
+    # Expect vision output response for the second navigation attempt.
+    raw_msg = await websocket.recv()
+    vision_output_2 = json.loads(raw_msg)
+    assert (
+        vision_output_2["type"] == "vision_agent_output"
+    ), "Expected vision_agent_output message for second navigation attempt"
+    # Since a task is already in execution, no new task should be created.
+    next_task_2 = vision_output_2["payload"].get("next_task", None)
+    assert (
+        next_task_2 is None
+    ), "Expected no new task to be created while a navigation task is already executing"
+
+    # The server should again indicate readiness for a new image.
+    raw_msg = await websocket.recv()
+    ready_msg_2 = json.loads(raw_msg)
+    assert (
+        ready_msg_2["type"] == "ready_for_image"
+    ), "Expected ready_for_image after vision output for second navigation attempt"
+
+    # Clean up: close the server.
+    server.close()
+    await server.wait_closed()
+
+
+@pytest.mark.asyncio
 async def test_directive_workflow():
     """
     Test that sends a directive message and expects a directive acknowledgment.
