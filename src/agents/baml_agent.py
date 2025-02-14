@@ -7,9 +7,7 @@ from src.baml_client.types import VisionAgentOutput
 import asyncio
 
 
-async def vision_agent(
-    base64_str: str, user_prompt_text: Optional[str], primitives: list
-) -> Optional[VisionAgentOutput]:
+async def vision_agent(vlm_inputs: dict) -> Optional[VisionAgentOutput]:
     """
     Calls the VisionAgent function with a dynamically built union for next_task.
 
@@ -32,19 +30,38 @@ async def vision_agent(
           }
       ]
     """
-    img = Image.from_base64("image/png", base64_str)
-    tb = create_type_builder(primitives)
-    primitive_names = [prim["name"] for prim in primitives]
+    img = Image.from_base64("image/png", vlm_inputs["base64_img"])
+    tb = create_type_builder(vlm_inputs["primitives_list"])
+    primitive_names = [prim["name"] for prim in vlm_inputs["primitives_list"]]
     primitives_list_string = ", ".join(primitive_names)
     max_retries = 3
+
+    context_text_lines = [
+        (
+            f"The user said: {vlm_inputs['user_prompt_text']}"
+            if vlm_inputs["user_prompt_text"] is not None
+            else "The user did not say anything."
+        ),
+        (
+            f"The current task is: {vlm_inputs['primitive_in_execution']}"
+            if vlm_inputs["primitive_in_execution"] is not None
+            else "You are not currently executing a task."
+        ),
+    ]
+    context_text = "\n".join(context_text_lines)
+
     return await decreasesmax_retries(
-        img, user_prompt_text, primitives_list_string, tb, max_retries
+        img,
+        context_text,
+        primitives_list_string,
+        tb,
+        max_retries,
     )
 
 
 async def decreasesmax_retries(
     img: Image,
-    user_prompt_text: Optional[str],
+    context_text: Optional[str],
     primitives_list_string: str,
     tb,
     max_retries: int,
@@ -70,7 +87,7 @@ async def decreasesmax_retries(
     try:
         output = await b.VisionAgent(
             img,
-            user_prompt_text if user_prompt_text is not None else "NO MESSAGE",
+            context_text,
             primitives_list_string=primitives_list_string,
             baml_options={"tb": tb},
         )
@@ -81,5 +98,10 @@ async def decreasesmax_retries(
             return None
         await asyncio.sleep(1)
         return await decreasesmax_retries(
-            img, user_prompt_text, primitives_list_string, tb, max_retries, attempt + 1
+            img,
+            context_text,
+            primitives_list_string,
+            tb,
+            max_retries,
+            attempt + 1,
         )

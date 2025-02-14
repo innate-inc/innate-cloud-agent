@@ -1,6 +1,6 @@
 import os
 
-os.environ["BAML_LOG"] = "off"
+# os.environ["BAML_LOG"] = "off"
 
 import asyncio
 import json

@@ -35,6 +35,7 @@ class Brain:
             primitive_to_dict(NavigateToPosition()),
             primitive_to_dict(SaveReceipt()),
         ]
+        self.primitive_in_execution = None
 
     async def enqueue_message(self, message: MessageIn):
         """
@@ -77,31 +78,29 @@ class Brain:
             f"[Brain {self.connection_id}] Processed message in {time.time() - time_start} seconds"
         )
 
-    async def call_visual_language_model(
-        self, base64_img: str, user_prompt_text: Optional[str], primitives: list
-    ) -> VisionAgentOutput:
+    async def call_visual_language_model(self, vlm_inputs: dict) -> VisionAgentOutput:
         """
         Calls the external visual language model (GPT-4-O 2024-11-20) with the given prompt.
         Expects the model to return a JSON structure adhering to the VisionAgentOutput schema.
         """
         try:
             # Call the OpenAI chat completion API asynchronously using the new parsing format.
-            completion = await vision_agent(base64_img, user_prompt_text, primitives)
+            completion = await vision_agent(vlm_inputs)
+            self.primitive_in_execution = completion.next_task
             return completion
         except Exception as e:
             print(
                 f"[Brain {self.connection_id}] Error calling visual language model: {e}"
             )
             # Fallback logic: provide a default action if the model call fails.
-            fallback_task = None
             return VisionAgentOutput(
-                stop_current_task=False,
-                observation="Image processed using fallback logic.",
+                stop_current_task=True,
+                observation="The brain failed, so it stopped the current task.",
                 thoughts=f"Fallback due to error: {str(e)}\nTraceback: {traceback.format_exc()}",
                 new_goal=None,
-                next_task=fallback_task,
+                next_task=None,
                 anticipation=None,
-                to_tell_user="Fallback: Image processed.",
+                to_tell_user="BEEP BOOP BEEP BOOP, the brain failed. Stopping the current task.",
             )
 
     async def handle_image(self, message: MessageIn):
@@ -128,10 +127,15 @@ class Brain:
 
         print(f"[Brain {self.connection_id}] Sending request to visual language model.")
 
+        vlm_inputs = {
+            "base64_img": base64_img,
+            "user_prompt_text": user_prompt_text,
+            "primitive_in_execution": self.primitive_in_execution,
+            "primitives_list": self.primitives_list,
+        }
+
         # Call the visual language model with the combined prompt.
-        vision_output = await self.call_visual_language_model(
-            base64_img, user_prompt_text, self.primitives_list
-        )
+        vision_output = await self.call_visual_language_model(vlm_inputs)
 
         next_task_type = (
             vision_output.next_task["type"] if vision_output.next_task else "None"
@@ -159,14 +163,6 @@ class Brain:
         sets a flag to modify the next vision output.
         """
         text = message.payload["text"]
-
-        # If the message is like "Go to XXX", send back a chat_out with "Going to XXX"
-        if text.startswith("Go to "):
-            response = MessageOut(
-                type="chat_out",
-                payload={"text": f"Going to {text[5:]}"},
-            )
-            await self.send_callback(response)
 
         # Save the latest user message
         self.latest_user_message = text
