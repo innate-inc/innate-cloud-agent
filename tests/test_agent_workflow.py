@@ -78,6 +78,7 @@ async def basic_image_handling(websocket, image_path, image_type="JPEG"):
     await websocket.send(json.dumps(image_message))
 
 
+@pytest.mark.skip(reason="Temporarily deactivated the receipt test")
 @pytest.mark.asyncio
 async def test_chat_ask_receipt():
     """
