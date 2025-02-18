@@ -33,8 +33,9 @@ class Brain:
         self.latest_user_message = None
         self.primitives_list = [
             primitive_to_dict(NavigateToPosition()),
-            primitive_to_dict(SaveReceipt()),
+            # primitive_to_dict(SaveReceipt()),
         ]
+        self.primitive_in_execution = None
 
     async def enqueue_message(self, message: MessageIn):
         """
@@ -70,6 +71,10 @@ class Brain:
             await self.handle_chat_in(message)
         elif message_type == MessageInType.DIRECTIVE:
             await self.handle_directive(message)
+        elif message_type == MessageInType.PRIMITIVE_COMPLETED:
+            await self.handle_primitive_completed(message)
+        elif message_type == MessageInType.PRIMITIVE_ACTIVATED:
+            await self.handle_primitive_activated(message)
         else:
             await self.handle_unknown(message)
 
@@ -77,31 +82,41 @@ class Brain:
             f"[Brain {self.connection_id}] Processed message in {time.time() - time_start} seconds"
         )
 
-    async def call_visual_language_model(
-        self, base64_img: str, user_prompt_text: Optional[str], primitives: list
-    ) -> VisionAgentOutput:
+    async def call_visual_language_model(self, vlm_inputs: dict) -> VisionAgentOutput:
         """
         Calls the external visual language model (GPT-4-O 2024-11-20) with the given prompt.
         Expects the model to return a JSON structure adhering to the VisionAgentOutput schema.
         """
         try:
             # Call the OpenAI chat completion API asynchronously using the new parsing format.
-            completion = await vision_agent(base64_img, user_prompt_text, primitives)
+            print(
+                f"[Brain {self.connection_id}] Calling visual language model while current primitive is {self.primitive_in_execution['name'] if self.primitive_in_execution else 'None'}"
+            )
+            if self.latest_user_message:
+                print(
+                    f"[Brain {self.connection_id}] Sending user message to vision agent: {vlm_inputs['user_prompt_text']}"
+                )
+            completion = await vision_agent(vlm_inputs)
+            if (
+                completion.next_task
+            ):  # Important so that we don't set primitive_in_execution to None
+                # here if we just didn't decide on changing one
+                self.primitive_in_execution = completion.next_task
+
             return completion
         except Exception as e:
             print(
                 f"[Brain {self.connection_id}] Error calling visual language model: {e}"
             )
             # Fallback logic: provide a default action if the model call fails.
-            fallback_task = None
             return VisionAgentOutput(
-                stop_current_task=False,
-                observation="Image processed using fallback logic.",
+                stop_current_task=True,
+                observation="The brain failed, so it stopped the current task.",
                 thoughts=f"Fallback due to error: {str(e)}\nTraceback: {traceback.format_exc()}",
                 new_goal=None,
-                next_task=fallback_task,
+                next_task=None,
                 anticipation=None,
-                to_tell_user="Fallback: Image processed.",
+                to_tell_user="BEEP BOOP BEEP BOOP, the brain failed. Stopping the current task.",
             )
 
     async def handle_image(self, message: MessageIn):
@@ -126,28 +141,28 @@ class Brain:
         # Check if the incoming message contains an image URL.
         base64_img = message.payload["image_b64"]
 
-        print(f"[Brain {self.connection_id}] Sending request to visual language model.")
+        vlm_inputs = {
+            "base64_img": base64_img,
+            "user_prompt_text": user_prompt_text,
+            "primitive_in_execution": self.primitive_in_execution,
+            "primitives_list": self.primitives_list,
+        }
 
         # Call the visual language model with the combined prompt.
-        vision_output = await self.call_visual_language_model(
-            base64_img, user_prompt_text, self.primitives_list
-        )
+        vision_output = await self.call_visual_language_model(vlm_inputs)
 
         next_task_type = (
             vision_output.next_task["type"] if vision_output.next_task else "None"
         )
 
         print(
-            f"[Brain {self.connection_id}] Vision output has determined task to do next to be: {next_task_type}"
+            f"[Brain {self.connection_id}] Agent decided next task to be: {next_task_type}"
         )
 
         # Build the response message using the structured output.
         response = MessageOut(
             type="vision_agent_output",
             payload=vision_output.model_dump(),
-        )
-        print(
-            f"[Brain {self.connection_id}] Sending response to client with type: {response.type}"
         )
         await self.send_callback(response)
         await self.send_callback(MessageOut(type="ready_for_image", payload={}))
@@ -160,16 +175,22 @@ class Brain:
         """
         text = message.payload["text"]
 
-        # If the message is like "Go to XXX", send back a chat_out with "Going to XXX"
-        if text.startswith("Go to "):
-            response = MessageOut(
-                type="chat_out",
-                payload={"text": f"Going to {text[5:]}"},
-            )
-            await self.send_callback(response)
-
         # Save the latest user message
         self.latest_user_message = text
+
+    async def handle_primitive_completed(self, message: MessageIn):
+        """
+        Handle messages of type 'primitive_completed'.
+        Processes the primitive completion and sends an acknowledgment.
+        """
+        primitive_name = message.payload["primitive_name"]
+        print(f"[Brain {self.connection_id}] Primitive '{primitive_name}' completed.")
+        if primitive_name == self.primitive_in_execution["name"]:
+            self.primitive_in_execution = None
+        else:
+            raise ValueError(
+                f"[Brain {self.connection_id}] Primitive '{primitive_name}' is not the current primitive in execution. That's a weird bug."
+            )
 
     async def handle_directive(self, message: MessageIn):
         """
@@ -182,6 +203,21 @@ class Brain:
             payload={"text": f"Directive '{directive}' processed."},
         )
         await self.send_callback(response)
+
+    async def handle_primitive_activated(self, message: MessageIn):
+        """
+        Handle messages of type 'primitive_activated'.
+        Processes the primitive activation and sends an acknowledgment.
+        """
+        primitive_name = message.payload["primitive_name"]
+        print(f"[Brain {self.connection_id}] Primitive '{primitive_name}' activated.")
+        self.primitive_in_execution = next(
+            (prim for prim in self.primitives_list if prim["name"] == primitive_name),
+            None,
+        )
+
+        # Respond that we're ready for the next image
+        await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_unknown(self, message: MessageIn):
         """

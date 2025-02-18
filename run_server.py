@@ -2,6 +2,11 @@
 
 import asyncio
 import websockets
+
+import os
+
+# os.environ["BAML_LOG"] = "off"
+
 from src.agent_connection import WebSocketAgentConnection
 
 # Import dotenv

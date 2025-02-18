@@ -114,22 +114,22 @@ class WebSocketAgentConnection:
         If valid, store self.user_token. Otherwise, reject.
         """
         try:
-            token_msg = await self.websocket.recv()
+            auth_msg = await self.websocket.recv()
         except ConnectionClosed:
             print("[ERROR] Connection closed before token was received.")
             return False
 
         # The token message itself might be JSON, but here we assume its a string token.
         try:
-            token = json.loads(token_msg)
+            auth_msg_json = json.loads(auth_msg)
         except json.JSONDecodeError:
             print("[WARN] Received non-JSON data from client. Ignoring.")
             return False
 
         # Now we can use the token to get the user_token
         try:
-            token_payload = MessageIn.model_validate(token).payload
-            token = token_payload["token"]
+            auth_msg_payload = MessageIn.model_validate(auth_msg_json).payload
+            token = auth_msg_payload["token"]
         except Exception as e:
             print(f"[ERROR] Failed to get user_token from token: {e}")
             return False

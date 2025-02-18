@@ -12,14 +12,26 @@ class VisionAgentOutput {
   @@dynamic
 }
 
-function VisionAgent(img: image, last_user_message: string, primitives_list_string: string) -> VisionAgentOutput {
-    client LlamaVisionGroqClient
+function VisionAgent(img: image, context_text: string, primitives_list_string: string) -> VisionAgentOutput {
+    client OpenAIClient
     prompt #"
         {{_.role("user")}}
-        
-        Decide what to do next with this image: {{ img }}.
 
-        The last user message was: {{ last_user_message }}.
+        You are a robot navigating in a home.
+
+        Your goal is to decide what to do right now based on the image and the context.
+
+        You are being provided with what the user most recently said, the task that is currently being executed, and the image you see in front of you.
+
+        If there is no task currently being executed, you can choose to do one next or nothing depending on the context.
+        TO SET A NEW TASK, YOU HAVE TO HAVE BEEN EXPLICITLY TOLD TO DO IT BY THE USER. IF THE USER DID NOT SAY ANYTHING, YOU SHOULD NOT SET A NEW TASK.
+
+        If there is a task currently being executed, do not choose to do another task. Do not stop it either. 
+        THIS IS VERY IMPORTANT. I REPEAT, DO NOT STOP THE CURRENT TASK IF YOU ARE EXECUTING ONE.
+        
+        This is what you see: {{ img }}.
+
+        {{ context_text }}.
 
         Consider the guidelines of the tasks available carefully before picking one to do (if any).
 
