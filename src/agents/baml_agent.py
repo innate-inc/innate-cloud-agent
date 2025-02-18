@@ -50,13 +50,17 @@ async def vision_agent(vlm_inputs: dict) -> Optional[VisionAgentOutput]:
     ]
     context_text = "\n".join(context_text_lines)
 
-    return await decreasesmax_retries(
+    response = await decreasesmax_retries(
         img,
         context_text,
         primitives_list_string,
         tb,
         max_retries,
     )
+
+    # Some post-processing if necessary
+
+    return response
 
 
 async def decreasesmax_retries(
@@ -93,7 +97,7 @@ async def decreasesmax_retries(
         )
         return output
     except BamlValidationError as e:
-        print(f"BamlValidationError on attempt {attempt}/{max_retries}")
+        print(f"BamlValidationError on attempt {attempt}/{max_retries}: {e}")
         if attempt == max_retries:
             return None
         await asyncio.sleep(1)

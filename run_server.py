@@ -5,7 +5,7 @@ import websockets
 
 import os
 
-os.environ["BAML_LOG"] = "off"
+# os.environ["BAML_LOG"] = "off"
 
 from src.agent_connection import WebSocketAgentConnection
 

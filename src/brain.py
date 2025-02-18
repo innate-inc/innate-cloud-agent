@@ -33,7 +33,7 @@ class Brain:
         self.latest_user_message = None
         self.primitives_list = [
             primitive_to_dict(NavigateToPosition()),
-            primitive_to_dict(SaveReceipt()),
+            # primitive_to_dict(SaveReceipt()),
         ]
         self.primitive_in_execution = None
 
@@ -89,8 +89,20 @@ class Brain:
         """
         try:
             # Call the OpenAI chat completion API asynchronously using the new parsing format.
+            print(
+                f"[Brain {self.connection_id}] Calling visual language model while current primitive is {self.primitive_in_execution['name'] if self.primitive_in_execution else 'None'}"
+            )
+            if self.latest_user_message:
+                print(
+                    f"[Brain {self.connection_id}] Sending user message to vision agent: {vlm_inputs['user_prompt_text']}"
+                )
             completion = await vision_agent(vlm_inputs)
-            self.primitive_in_execution = completion.next_task
+            if (
+                completion.next_task
+            ):  # Important so that we don't set primitive_in_execution to None
+                # here if we just didn't decide on changing one
+                self.primitive_in_execution = completion.next_task
+
             return completion
         except Exception as e:
             print(
@@ -129,8 +141,6 @@ class Brain:
         # Check if the incoming message contains an image URL.
         base64_img = message.payload["image_b64"]
 
-        print(f"[Brain {self.connection_id}] Sending request to visual language model.")
-
         vlm_inputs = {
             "base64_img": base64_img,
             "user_prompt_text": user_prompt_text,
@@ -146,16 +156,13 @@ class Brain:
         )
 
         print(
-            f"[Brain {self.connection_id}] Vision output has determined task to do next to be: {next_task_type}"
+            f"[Brain {self.connection_id}] Agent decided next task to be: {next_task_type}"
         )
 
         # Build the response message using the structured output.
         response = MessageOut(
             type="vision_agent_output",
             payload=vision_output.model_dump(),
-        )
-        print(
-            f"[Brain {self.connection_id}] Sending response to client with type: {response.type}"
         )
         await self.send_callback(response)
         await self.send_callback(MessageOut(type="ready_for_image", payload={}))
