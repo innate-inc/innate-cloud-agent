@@ -101,10 +101,10 @@ def create_type_builder(primitives: list) -> TypeBuilder:
             inputs_class.add_property(field_name, field_type)
 
         # Link the inputs composite type to the task type.
-        task_class.add_property("inputs", inputs_class.type().optional())
+        task_class.add_property("inputs", inputs_class.type())
 
         # Keep track of the dynamic task type.
-        next_task_types.append(task_class.type())
+        next_task_types.append(task_class.type().optional())
 
     # Create a union type from all dynamic NextTask types.
     union_next_task = tb.union(next_task_types)

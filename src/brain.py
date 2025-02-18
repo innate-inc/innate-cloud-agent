@@ -71,6 +71,10 @@ class Brain:
             await self.handle_chat_in(message)
         elif message_type == MessageInType.DIRECTIVE:
             await self.handle_directive(message)
+        elif message_type == MessageInType.PRIMITIVE_COMPLETED:
+            await self.handle_primitive_completed(message)
+        elif message_type == MessageInType.PRIMITIVE_ACTIVATED:
+            await self.handle_primitive_activated(message)
         else:
             await self.handle_unknown(message)
 
@@ -167,6 +171,20 @@ class Brain:
         # Save the latest user message
         self.latest_user_message = text
 
+    async def handle_primitive_completed(self, message: MessageIn):
+        """
+        Handle messages of type 'primitive_completed'.
+        Processes the primitive completion and sends an acknowledgment.
+        """
+        primitive_name = message.payload["primitive_name"]
+        print(f"[Brain {self.connection_id}] Primitive '{primitive_name}' completed.")
+        if primitive_name == self.primitive_in_execution["name"]:
+            self.primitive_in_execution = None
+        else:
+            raise ValueError(
+                f"[Brain {self.connection_id}] Primitive '{primitive_name}' is not the current primitive in execution. That's a weird bug."
+            )
+
     async def handle_directive(self, message: MessageIn):
         """
         Handle messages of type 'directive'.
@@ -178,6 +196,21 @@ class Brain:
             payload={"text": f"Directive '{directive}' processed."},
         )
         await self.send_callback(response)
+
+    async def handle_primitive_activated(self, message: MessageIn):
+        """
+        Handle messages of type 'primitive_activated'.
+        Processes the primitive activation and sends an acknowledgment.
+        """
+        primitive_name = message.payload["primitive_name"]
+        print(f"[Brain {self.connection_id}] Primitive '{primitive_name}' activated.")
+        self.primitive_in_execution = next(
+            (prim for prim in self.primitives_list if prim["name"] == primitive_name),
+            None,
+        )
+
+        # Respond that we're ready for the next image
+        await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_unknown(self, message: MessageIn):
         """

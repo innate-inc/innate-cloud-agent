@@ -13,7 +13,7 @@ class VisionAgentOutput {
 }
 
 function VisionAgent(img: image, context_text: string, primitives_list_string: string) -> VisionAgentOutput {
-    client LlamaVisionGroqClient
+    client OpenAIClient
     prompt #"
         {{_.role("user")}}
 
@@ -24,8 +24,10 @@ function VisionAgent(img: image, context_text: string, primitives_list_string: s
         You are being provided with what the user most recently said, the task that is currently being executed, and the image you see in front of you.
 
         If there is no task currently being executed, you can choose to do one next or nothing depending on the context.
+        TO SET A NEW TASK, YOU HAVE TO HAVE BEEN EXPLICITLY TOLD TO DO IT BY THE USER. IF THE USER DID NOT SAY ANYTHING, YOU SHOULD NOT SET A NEW TASK.
 
-        If there is a task currently being executed, do not choose to do another task. Do not stop it either.
+        If there is a task currently being executed, do not choose to do another task. Do not stop it either. 
+        THIS IS VERY IMPORTANT. I REPEAT, DO NOT STOP THE CURRENT TASK IF YOU ARE EXECUTING ONE.
         
         This is what you see: {{ img }}.
 
