@@ -215,7 +215,7 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
         next_task_2 is None
     ), "Expected no new task to be created while a navigation task is already executing"
 
-    # The server should again indicate readiness for a new image.
+    # The server should indicate readiness for a new image.
     raw_msg = await websocket.recv()
     ready_msg_2 = json.loads(raw_msg)
     assert (
