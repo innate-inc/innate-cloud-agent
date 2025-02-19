@@ -32,7 +32,9 @@ async def main():
     Main entrypoint to start the server.
     """
     print(f"Starting WebSocket server on port {WEBSOCKET_PORT}...")
-    async with websockets.serve(connection_handler, "0.0.0.0", WEBSOCKET_PORT):
+    async with websockets.serve(
+        connection_handler, "0.0.0.0", WEBSOCKET_PORT, max_size=10 * 1024 * 1024
+    ):
         print(f"Server started. Listening at ws://0.0.0.0:{WEBSOCKET_PORT}")
         await asyncio.Future()  # Run forever
 
