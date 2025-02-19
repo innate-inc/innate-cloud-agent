@@ -2,6 +2,10 @@ import asyncio
 import json
 import time
 import traceback
+import os
+
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 from src.message_types import (
     MessageIn,
@@ -14,6 +18,7 @@ from src.primitives.navigate_to_position import NavigateToPosition
 from src.primitives.transforms import primitive_to_object
 from src.history import History, HistoryEntryType
 from src.agents.types import VisionAgentInput, PrimitiveDefinition
+from src.utils import decode_depth_payload
 
 
 class Brain:
@@ -135,8 +140,54 @@ class Brain:
         Processes the image and uses a visual language model to decide the next action,
         sending back a structured vision agent output.
         """
-        # Simulate image processing delay
-        await asyncio.sleep(1)
+        # Retrieve the base64 image from the payload.
+        base64_img = message.payload["image_b64"]
+
+        # Process the depth map if it exists.
+        depth_payload = message.payload.get("depth")
+        if depth_payload:
+            # Decode the depth map.
+            depth_map = decode_depth_payload(depth_payload)
+
+            # Compute min and max values from the depth map.
+            d_min = depth_map.min()
+            d_max = depth_map.max()
+
+            # Normalize the depth map so that the maximum value becomes 255.
+            if d_max > d_min:
+                normalized_depth = ((depth_map - d_min) / (d_max - d_min) * 255).astype(
+                    np.uint8
+                )
+            else:
+                normalized_depth = np.zeros_like(depth_map, dtype=np.uint8)
+
+            # Create a PIL image (L mode for grayscale) and convert it to RGB so we can add colored text.
+            img = Image.fromarray(normalized_depth, mode="L").convert("RGB")
+
+            # Prepare debug text showing the min and max values.
+            debug_text = f"Min: {d_min} Max: {d_max}"
+            draw = ImageDraw.Draw(img)
+            try:
+                font = ImageFont.truetype("arial.ttf", 20)
+            except IOError:
+                font = ImageFont.load_default()
+            # Draw the text at position (10, 10) with a contrasting color (red in this case).
+            draw.text((10, 10), debug_text, font=font, fill=(255, 0, 0))
+
+            # Save the annotated depth map as a PNG file.
+            os.makedirs("depth_maps", exist_ok=True)
+            img.save("depth_maps/depth_map.png")
+            print(
+                f"[Brain {self.connection_id}] Depth map saved as depth_map.png with debug info: {debug_text}"
+            )
+
+            # If you later compute a segmentation mask (which must be a boolean array
+            # matching the shape of depth_map), you can compute the average depth over the region.
+            if "segmentation_mask" in locals() and segmentation_mask.sum() > 0:
+                average_depth = depth_map[segmentation_mask].mean()
+                print(f"Average depth in selected region: {average_depth}")
+            else:
+                print("No segmentation mask provided or mask is empty.")
 
         # Use the latest stored user message if available.
         if self.latest_user_message:
@@ -148,8 +199,6 @@ class Brain:
         print(
             f"[Brain {self.connection_id}] Message payload contains the following keys: {message.payload.keys()}"
         )
-
-        base64_img = message.payload["image_b64"]
 
         # Convert the current primitive in execution (if any) into a PrimitiveDefinition instance.
         primitive_in_execution = None
