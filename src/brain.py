@@ -2,8 +2,6 @@ import asyncio
 import json
 import time
 import traceback
-from typing import Optional
-import openai  # Ensure the OpenAI SDK is installed
 
 from src.message_types import (
     MessageIn,
@@ -13,8 +11,9 @@ from src.message_types import (
 from src.agents.baml_agent import vision_agent
 from src.baml_client.types import VisionAgentOutput
 from src.primitives.navigate_to_position import NavigateToPosition
-from src.primitives.save_receipt import SaveReceipt
 from src.primitives.transforms import primitive_to_dict
+from src.history import History, HistoryEntryType
+from src.agents.types import VisionAgentInput, PrimitiveDefinition
 
 
 class Brain:
@@ -29,13 +28,16 @@ class Brain:
         self.running = True
         # Flag to override the next vision output (set via a chat_in command)
         self.forward_command_active = False
-        # NEW: Store the latest user message that should be consumed once by the vision language model.
+        # Store the latest user message that should be consumed once by the visual language model.
         self.latest_user_message = None
         self.primitives_list = [
             primitive_to_dict(NavigateToPosition()),
             # primitive_to_dict(SaveReceipt()),
         ]
         self.primitive_in_execution = None
+
+        # Initialize history to record chat messages and vision agent outputs.
+        self.history = History()
 
     async def enqueue_message(self, message: MessageIn):
         """
@@ -88,7 +90,6 @@ class Brain:
         Expects the model to return a JSON structure adhering to the VisionAgentOutput schema.
         """
         try:
-            # Call the OpenAI chat completion API asynchronously using the new parsing format.
             print(
                 f"[Brain {self.connection_id}] Calling visual language model while current primitive is {self.primitive_in_execution['name'] if self.primitive_in_execution else 'None'}"
             )
@@ -97,12 +98,8 @@ class Brain:
                     f"[Brain {self.connection_id}] Sending user message to vision agent: {vlm_inputs['user_prompt_text']}"
                 )
             completion = await vision_agent(vlm_inputs)
-            if (
-                completion.next_task
-            ):  # Important so that we don't set primitive_in_execution to None
-                # here if we just didn't decide on changing one
+            if completion.next_task:  # Keep the current task if appropriate
                 self.primitive_in_execution = completion.next_task
-
             return completion
         except Exception as e:
             print(
@@ -124,9 +121,6 @@ class Brain:
         Handle messages of type 'image'.
         Processes the image and uses a visual language model to decide the next action,
         sending back a structured vision agent output.
-
-        This updated version makes sure to include any image provided in the message payload.
-        It checks for either an 'image_url' or an 'image_b64' field.
         """
         # Simulate image processing delay
         await asyncio.sleep(1)
@@ -138,17 +132,30 @@ class Brain:
         else:
             user_prompt_text = None
 
-        # Check if the incoming message contains an image URL.
         base64_img = message.payload["image_b64"]
 
-        vlm_inputs = {
-            "base64_img": base64_img,
-            "user_prompt_text": user_prompt_text,
-            "primitive_in_execution": self.primitive_in_execution,
-            "primitives_list": self.primitives_list,
-        }
+        # Convert the current primitive in execution (if any) into a PrimitiveDefinition instance.
+        primitive_in_execution = None
+        if self.primitive_in_execution:
+            primitive_in_execution = PrimitiveDefinition.model_validate(
+                self.primitive_in_execution
+            )
 
-        # Call the visual language model with the combined prompt.
+        # Convert the list of primitives into a list of PrimitiveDefinition instances.
+        primitives_list = [
+            PrimitiveDefinition.model_validate(prim) for prim in self.primitives_list
+        ]
+
+        # Create a VisionAgentInput instance with validated data.
+        vlm_inputs = VisionAgentInput(
+            base64_img=base64_img,
+            user_prompt_text=user_prompt_text,
+            primitive_in_execution=primitive_in_execution,
+            primitives_list=primitives_list,
+            history_as_string=self.history.get_as_string(),
+        )
+
+        # Call the visual language model with the validated inputs.
         vision_output = await self.call_visual_language_model(vlm_inputs)
 
         next_task_type = (
@@ -159,7 +166,12 @@ class Brain:
             f"[Brain {self.connection_id}] Agent decided next task to be: {next_task_type}"
         )
 
-        # Build the response message using the structured output.
+        # Record the vision agent output in the history.
+        self.history.add(
+            HistoryEntryType.VISION_AGENT_OUTPUT,
+            description=json.dumps(vision_output.model_dump()),
+        )
+
         response = MessageOut(
             type="vision_agent_output",
             payload=vision_output.model_dump(),
@@ -175,8 +187,11 @@ class Brain:
         """
         text = message.payload["text"]
 
-        # Save the latest user message
+        # Save the latest user message for processing.
         self.latest_user_message = text
+
+        # Record this chat message in the history.
+        self.history.add(HistoryEntryType.CHAT_MESSAGE, description=text)
 
     async def handle_primitive_completed(self, message: MessageIn):
         """
@@ -215,8 +230,6 @@ class Brain:
             (prim for prim in self.primitives_list if prim["name"] == primitive_name),
             None,
         )
-
-        # Respond that we're ready for the next image
         await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_unknown(self, message: MessageIn):
