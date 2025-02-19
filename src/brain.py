@@ -11,7 +11,7 @@ from src.message_types import (
 from src.agents.baml_agent import vision_agent
 from src.baml_client.types import VisionAgentOutput
 from src.primitives.navigate_to_position import NavigateToPosition
-from src.primitives.transforms import primitive_to_dict
+from src.primitives.transforms import primitive_to_object
 from src.history import History, HistoryEntryType
 from src.agents.types import VisionAgentInput, PrimitiveDefinition
 
@@ -31,7 +31,7 @@ class Brain:
         # Store the latest user message that should be consumed once by the visual language model.
         self.latest_user_message = None
         self.primitives_list = [
-            primitive_to_dict(NavigateToPosition()),
+            primitive_to_object(NavigateToPosition()),
             # primitive_to_dict(SaveReceipt()),
         ]
         self.primitive_in_execution = None
@@ -84,28 +84,36 @@ class Brain:
             f"[Brain {self.connection_id}] Processed message in {time.time() - time_start} seconds"
         )
 
-    async def call_visual_language_model(self, vlm_inputs: dict) -> VisionAgentOutput:
+    async def call_visual_language_model(
+        self, vlm_inputs: VisionAgentInput
+    ) -> VisionAgentOutput:
         """
         Calls the external visual language model (GPT-4-O 2024-11-20) with the given prompt.
         Expects the model to return a JSON structure adhering to the VisionAgentOutput schema.
         """
         try:
+            current_primitive = (
+                self.primitive_in_execution.name
+                if self.primitive_in_execution
+                else "None"
+            )
             print(
-                f"[Brain {self.connection_id}] Calling visual language model while current primitive is {self.primitive_in_execution['name'] if self.primitive_in_execution else 'None'}"
+                f"[Brain {self.connection_id}] Calling visual language model while current primitive is {current_primitive}"
             )
             if self.latest_user_message:
                 print(
-                    f"[Brain {self.connection_id}] Sending user message to vision agent: {vlm_inputs['user_prompt_text']}"
+                    f"[Brain {self.connection_id}] Sending user message to vision agent: {vlm_inputs.user_prompt_text}"
                 )
             completion = await vision_agent(vlm_inputs)
             if completion.next_task:  # Keep the current task if appropriate
-                self.primitive_in_execution = completion.next_task
+                self.primitive_in_execution = PrimitiveDefinition.model_validate(
+                    completion.next_task
+                )
             return completion
         except Exception as e:
             print(
-                f"[Brain {self.connection_id}] Error calling visual language model: {e}"
+                f"[Brain {self.connection_id}] Error calling visual language model: {e}. Traceback: {traceback.format_exc()}"
             )
-            # Fallback logic: provide a default action if the model call fails.
             return VisionAgentOutput(
                 stop_current_task=True,
                 observation="The brain failed, so it stopped the current task.",
@@ -159,7 +167,7 @@ class Brain:
         vision_output = await self.call_visual_language_model(vlm_inputs)
 
         next_task_type = (
-            vision_output.next_task["type"] if vision_output.next_task else "None"
+            vision_output.next_task["name"] if vision_output.next_task else "None"
         )
 
         print(
@@ -200,7 +208,10 @@ class Brain:
         """
         primitive_name = message.payload["primitive_name"]
         print(f"[Brain {self.connection_id}] Primitive '{primitive_name}' completed.")
-        if primitive_name == self.primitive_in_execution["name"]:
+        if (
+            self.primitive_in_execution
+            and primitive_name == self.primitive_in_execution.name
+        ):
             self.primitive_in_execution = None
         else:
             raise ValueError(
@@ -226,10 +237,17 @@ class Brain:
         """
         primitive_name = message.payload["primitive_name"]
         print(f"[Brain {self.connection_id}] Primitive '{primitive_name}' activated.")
-        self.primitive_in_execution = next(
-            (prim for prim in self.primitives_list if prim["name"] == primitive_name),
+        matched_prim = next(
+            (prim for prim in self.primitives_list if prim.name == primitive_name),
             None,
         )
+        if matched_prim is not None:
+            # Convert the dict to a PrimitiveDefinition instance
+            self.primitive_in_execution = PrimitiveDefinition.model_validate(
+                matched_prim
+            )
+        else:
+            self.primitive_in_execution = None
         await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_unknown(self, message: MessageIn):

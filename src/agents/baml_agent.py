@@ -37,7 +37,7 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
             else "The user did not say anything."
         ),
         (
-            f"The current task is: {vlm_inputs.primitive_in_execution}"
+            f"The current task is: {vlm_inputs.primitive_in_execution.model_dump_json()}"
             if vlm_inputs.primitive_in_execution is not None
             else "You are not currently executing a task."
         ),

@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 
@@ -10,7 +10,7 @@ class PrimitiveDefinition(BaseModel):
         alias="description",
         description="Guideline for the task. Can be provided as 'description' in inputs.",
     )
-    inputs: Dict[str, str]
+    inputs: Dict[str, Any]
 
     class Config:
         # Allow population using the field name (guideline) even if an alias is provided.
