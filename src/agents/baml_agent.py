@@ -20,6 +20,8 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
             - name: Unique name of the task.
             - description: (Aliased to 'guideline' internally) Guidelines for the task.
             - inputs: A dictionary mapping input fields to their type strings.
+      - history_as_string: A history of events.
+      - robot_coords: (Optional) A dictionary with the robot's coordinates.
     """
     img = Image.from_base64("image/png", vlm_inputs.base64_img)
     tb = create_type_builder(vlm_inputs.primitives_list)
@@ -28,9 +30,7 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
     max_retries = 3
 
     context_text_lines = [
-        (
-            f"Below is the history of your actions and exchanges so far:\n{vlm_inputs.history_as_string}"
-        ),
+        f"Below is the history of your actions and exchanges so far:\n{vlm_inputs.history_as_string}",
         (
             f"The user said: {vlm_inputs.user_prompt_text}"
             if vlm_inputs.user_prompt_text is not None
@@ -42,6 +42,16 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
             else "You are not currently executing a task."
         ),
     ]
+
+    # If robot coordinates were provided, append them to the context.
+    if vlm_inputs.robot_coords:
+        coords = vlm_inputs.robot_coords
+        coords_text = (
+            f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, "
+            f"z={coords.get('z')}, theta={coords.get('theta')}"
+        )
+        context_text_lines.append(coords_text)
+
     context_text = "\n".join(context_text_lines)
 
     response = await decreasesmax_retries(

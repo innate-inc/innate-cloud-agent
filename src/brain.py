@@ -212,6 +212,9 @@ class Brain:
             PrimitiveDefinition.model_validate(prim) for prim in self.primitives_list
         ]
 
+        # Get robot coordinates from the message payload.
+        robot_coords = message.payload.get("robot_coords")
+
         # Create a VisionAgentInput instance with validated data.
         vlm_inputs = VisionAgentInput(
             base64_img=base64_img,
@@ -219,6 +222,7 @@ class Brain:
             primitive_in_execution=primitive_in_execution,
             primitives_list=primitives_list,
             history_as_string=self.history.get_as_string(),
+            robot_coords=robot_coords,
         )
 
         # Call the visual language model with the validated inputs.
