@@ -137,7 +137,7 @@ class History:
                 }
                 for entry in self.full_entries
             ]
-            folder = os.path.expanduser("~/.agent/histories/")
+            folder = os.path.expanduser("./histories/")
             os.makedirs(folder, exist_ok=True)
 
             full_filename = os.path.join(

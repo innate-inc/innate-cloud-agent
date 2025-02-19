@@ -133,7 +133,7 @@ class Brain:
         # Simulate image processing delay
         await asyncio.sleep(1)
 
-        # Start with the latest stored user message if available.
+        # Use the latest stored user message if available.
         if self.latest_user_message:
             user_prompt_text = self.latest_user_message
             self.latest_user_message = None
@@ -169,7 +169,6 @@ class Brain:
         next_task_type = (
             vision_output.next_task["name"] if vision_output.next_task else "None"
         )
-
         print(
             f"[Brain {self.connection_id}] Agent decided next task to be: {next_task_type}"
         )
@@ -180,11 +179,17 @@ class Brain:
             description=json.dumps(vision_output.model_dump()),
         )
 
+        # Send the vision output to the client.
         response = MessageOut(
-            type="vision_agent_output",
-            payload=vision_output.model_dump(),
+            type="vision_agent_output", payload=vision_output.model_dump()
         )
         await self.send_callback(response)
+
+        # Save the entire history to a file (you can adjust the save() method in History if you need
+        # to target the connection's recording directory instead of the default ~/.agent/histories/)
+        self.history.save()
+
+        # Notify the client that the server is ready for the next image.
         await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_chat_in(self, message: MessageIn):
