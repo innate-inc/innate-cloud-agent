@@ -3,6 +3,7 @@ import asyncio
 import json
 import base64
 import datetime
+import traceback
 from websockets.exceptions import ConnectionClosed
 from typing import Optional
 
@@ -71,7 +72,9 @@ class WebSocketAgentConnection:
                 try:
                     raw_msg = await self.websocket.recv()
                 except ConnectionClosed:
-                    print(f"[INFO] WebSocket closed for user: {self.user_token}")
+                    print(
+                        f"[INFO] WebSocket closed for user: {self.user_token}. Traceback: {traceback.format_exc()}"
+                    )
                     break
 
                 try:
@@ -88,12 +91,17 @@ class WebSocketAgentConnection:
                     continue
 
                 if message_in.type == MessageInType.IMAGE:
+                    print(
+                        f"[Brain {self.brain.connection_id}] Received image message. Enqueuing..."
+                    )
                     await self._save_incoming_image(message_in.payload["image_b64"])
 
                 await self.brain.enqueue_message(message_in)
 
                 # Sleep a tiny bit to avoid busy looping
                 await asyncio.sleep(0.01)
+        except Exception as e:
+            print(f"[ERROR] Exception in handle_connection: {e}")
         finally:
             # Shutdown the brain task gracefully
             if self.brain is not None:

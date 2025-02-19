@@ -62,27 +62,32 @@ class Brain:
         Process a standardized message and dispatch it to the appropriate handler
         based on the message type.
         """
-        message_type = message.type
+        try:
+            message_type = message.type
 
-        print(f"[Brain {self.connection_id}] Processing message: {message_type}")
-        time_start = time.time()
+            print(f"[Brain {self.connection_id}] Processing message: {message_type}")
+            time_start = time.time()
 
-        if message_type == MessageInType.IMAGE:
-            await self.handle_image(message)
-        elif message_type == MessageInType.CHAT_IN:
-            await self.handle_chat_in(message)
-        elif message_type == MessageInType.DIRECTIVE:
-            await self.handle_directive(message)
-        elif message_type == MessageInType.PRIMITIVE_COMPLETED:
-            await self.handle_primitive_completed(message)
-        elif message_type == MessageInType.PRIMITIVE_ACTIVATED:
-            await self.handle_primitive_activated(message)
-        else:
-            await self.handle_unknown(message)
+            if message_type == MessageInType.IMAGE:
+                await self.handle_image(message)
+            elif message_type == MessageInType.CHAT_IN:
+                await self.handle_chat_in(message)
+            elif message_type == MessageInType.DIRECTIVE:
+                await self.handle_directive(message)
+            elif message_type == MessageInType.PRIMITIVE_COMPLETED:
+                await self.handle_primitive_completed(message)
+            elif message_type == MessageInType.PRIMITIVE_ACTIVATED:
+                await self.handle_primitive_activated(message)
+            else:
+                await self.handle_unknown(message)
 
-        print(
-            f"[Brain {self.connection_id}] Processed message in {time.time() - time_start} seconds"
-        )
+            print(
+                f"[Brain {self.connection_id}] Processed message in {time.time() - time_start} seconds"
+            )
+        except Exception as e:
+            print(
+                f"[Brain {self.connection_id}] Error processing message: {e}. Traceback: {traceback.format_exc()}"
+            )
 
     async def call_visual_language_model(
         self, vlm_inputs: VisionAgentInput
@@ -139,6 +144,10 @@ class Brain:
             self.latest_user_message = None
         else:
             user_prompt_text = None
+
+        print(
+            f"[Brain {self.connection_id}] Message payload contains the following keys: {message.payload.keys()}"
+        )
 
         base64_img = message.payload["image_b64"]
 
