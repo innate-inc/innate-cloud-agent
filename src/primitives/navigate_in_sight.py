@@ -1,3 +1,4 @@
+import traceback
 from src.primitives.types import Primitive
 import asyncio
 import base64
@@ -42,7 +43,7 @@ class NavigateInSight(Primitive):
         current_x: float,
         current_y: float,
         image_b64: str,
-        depth_data: str,
+        depth_payload: dict,
         target_object: str,
     ):
         print(
@@ -65,10 +66,11 @@ class NavigateInSight(Primitive):
         # Assume depth_data is a JSON string with keys like "height", "width", "encoding", "data", [and optionally "is_bigendian"].
         depth_array = None
         try:
-            depth_payload = json.loads(depth_data)
             depth_array = decode_depth_payload(depth_payload)
         except Exception as e:
-            print(f"Failed to decode depth payload: {e}")
+            print(
+                f"Failed to decode depth payload: {e}. Traceback: {traceback.format_exc()}"
+            )
 
         # Refine the target object using a Groq classifier.
         # For now we don't do that.
@@ -158,6 +160,9 @@ class NavigateInSight(Primitive):
         Use YOLO to detect the target object and SAM to segment the image.
         Then compute spatial information based on the segmentation mask and depth data.
         """
+        # Create a copy of the image for visualization
+        vis_image = cv_image.copy()
+
         # Set YOLO to detect only the target class.
         try:
             self.yolo_model.set_classes([target_class])
@@ -176,13 +181,16 @@ class NavigateInSight(Primitive):
 
         image_height, image_width = cv_image.shape[:2]
         sam_bboxes = []
-        # Assumes that YOLO returns normalized bounding boxes.
+        # Draw YOLO bounding boxes
         for bbox in yolo_results[0].boxes.xyxyn:
             x1 = int(bbox[0] * image_width)
             y1 = int(bbox[1] * image_height)
             x2 = int(bbox[2] * image_width)
             y2 = int(bbox[3] * image_height)
             sam_bboxes.append([x1, y1, x2, y2])
+            # Draw rectangle for YOLO detection
+            cv2.rectangle(vis_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
         # Get confidences from YOLO detections.
         confidences = list(yolo_results[0].boxes.conf.cpu().numpy())
 
@@ -205,18 +213,20 @@ class NavigateInSight(Primitive):
         else:
             cv_image_resized = cv_image.copy()
 
-        # Iterate over each segmentation mask (from SAM) with the corresponding YOLO confidence.
+        # Create a separate image for all segmentation masks
+        all_masks = np.zeros_like(cv_image)
+
+        # Iterate over each segmentation mask
         for i, (mask_tensor, conf) in enumerate(
             zip(sam_results[0].masks.data, confidences)
         ):
             try:
-                # Convert SAM mask from tensor to a binary numpy array.
                 mask_np = mask_tensor.cpu().numpy().astype(np.uint8)
             except Exception as e:
                 print(f"Error processing SAM mask tensor: {e}")
                 continue
 
-            # Resize the mask to match the depth image.
+            # Resize the mask if needed
             if mask_np.shape[:2] != (depth_height, depth_width):
                 mask_np_resized = cv2.resize(
                     mask_np,
@@ -225,6 +235,38 @@ class NavigateInSight(Primitive):
                 )
             else:
                 mask_np_resized = mask_np
+
+            # Add colored mask to visualization
+            color = np.random.randint(0, 255, 3).tolist()
+            mask_colored = np.zeros_like(cv_image)
+            mask_colored[mask_np_resized > 0] = color
+            all_masks = cv2.addWeighted(all_masks, 1.0, mask_colored, 0.5, 0)
+
+            # Find centroid and draw it
+            contours, _ = cv2.findContours(
+                mask_np_resized, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            print(f"Mask is {mask_np_resized.shape}")
+            if contours and len(contours) > 0:
+                M = cv2.moments(contours[0])
+                if M["m00"] != 0:
+                    center_x = int(M["m10"] / M["m00"])
+                    center_y = int(M["m01"] / M["m00"])
+                    # Draw centroid
+                    cv2.circle(vis_image, (center_x, center_y), 5, (0, 0, 255), -1)
+                    # Draw mask ID
+                    cv2.putText(
+                        vis_image,
+                        f"Mask {i+1}",
+                        (center_x + 10, center_y),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 0, 255),
+                        2,
+                    )
+            else:
+                print("No contours found for mask.")
+                continue
 
             # Extract depth values corresponding to the mask.
             if depth_array is not None:
@@ -241,17 +283,6 @@ class NavigateInSight(Primitive):
             else:
                 median_depth = 1.0
                 p10 = p25 = p75 = p90 = 1.0
-
-            # Find the contour for the segmentation mask and compute its centroid.
-            contours, _ = cv2.findContours(
-                mask_np_resized, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-            )
-            center_x, center_y = 0, 0
-            if contours and len(contours) > 0:
-                M = cv2.moments(contours[0])
-                if M["m00"] != 0:
-                    center_x = int(M["m10"] / M["m00"])
-                    center_y = int(M["m01"] / M["m00"])
 
             # Calculate the horizontal and vertical angles based on the mask centroid.
             angle_horizontal, angle_vertical = self._calculate_angles(
@@ -270,6 +301,15 @@ class NavigateInSight(Primitive):
                 },
                 "confidence": float(conf),
             }
+
+        # Combine original image with masks
+        final_vis = cv2.addWeighted(vis_image, 0.7, all_masks, 0.3, 0)
+
+        # Save the visualization
+        timestamp = int(time.time())
+        cv2.imwrite(f"segmentation_result_{timestamp}.jpg", final_vis)
+        print(f"Saved visualization to segmentation_result_{timestamp}.jpg")
+
         return segmentation_masks
 
     def _calculate_angles(self, center_x, center_y, image_shape):

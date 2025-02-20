@@ -37,9 +37,8 @@ class Brain:
         # Store the latest user message that should be consumed once by the visual language model.
         self.latest_user_message = None
         self.primitives_list = [
-            primitive_to_object(NavigateToPosition()),
-            primitive_to_object(NavigateInSight()),
-            # primitive_to_dict(SaveReceipt()),
+            NavigateToPosition(),
+            NavigateInSight(),
         ]
         self.primitive_in_execution = None
 
@@ -183,14 +182,6 @@ class Brain:
                 f"[Brain {self.connection_id}] Depth map saved as depth_map.png with debug info: {debug_text}"
             )
 
-            # If you later compute a segmentation mask (which must be a boolean array
-            # matching the shape of depth_map), you can compute the average depth over the region.
-            if "segmentation_mask" in locals() and segmentation_mask.sum() > 0:
-                average_depth = depth_map[segmentation_mask].mean()
-                print(f"Average depth in selected region: {average_depth}")
-            else:
-                print("No segmentation mask provided or mask is empty.")
-
         # Use the latest stored user message if available.
         if self.latest_user_message:
             user_prompt_text = self.latest_user_message
@@ -205,14 +196,25 @@ class Brain:
         # Convert the current primitive in execution (if any) into a PrimitiveDefinition instance.
         primitive_in_execution = None
         if self.primitive_in_execution:
-            primitive_in_execution = PrimitiveDefinition.model_validate(
-                self.primitive_in_execution
-            )
+            primitive_in_execution = primitive_to_object(self.primitive_in_execution)
 
-        # Convert the list of primitives into a list of PrimitiveDefinition instances.
-        primitives_list = [
-            PrimitiveDefinition.model_validate(prim) for prim in self.primitives_list
-        ]
+        nav_in_sight = next(
+            (prim for prim in self.primitives_list if prim.name == "navigate_in_sight"),
+            None,
+        )
+        if nav_in_sight:
+            self.primitive_in_execution = nav_in_sight
+
+        await nav_in_sight.execute(
+            current_x=0,
+            current_y=0,
+            image_b64=base64_img,
+            depth_payload=depth_payload,
+            target_object="shelf",
+        )
+
+        # Forget about the rest fornow we want to try the new primitive.
+        return
 
         # Get robot coordinates from the message payload.
         robot_coords = message.payload.get("robot_coords")
