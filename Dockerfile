@@ -5,6 +5,7 @@ FROM python:3.10-slim
 RUN apt-get update && apt-get install -y \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a working directory
@@ -25,4 +26,3 @@ EXPOSE 8765
 
 # Define the command to run the server
 CMD ["python", "run_server.py"]
-

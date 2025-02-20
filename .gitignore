@@ -9,3 +9,12 @@ depth_maps/
 .env
 
 .DS_Store
+
+*.png
+*.pt
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.webp
