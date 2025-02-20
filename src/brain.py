@@ -19,6 +19,7 @@ from src.primitives.transforms import primitive_to_object
 from src.history import History, HistoryEntryType
 from src.agents.types import VisionAgentInput, PrimitiveDefinition
 from src.utils import decode_depth_payload
+from src.primitives.navigate_in_sight import NavigateInSight
 
 
 class Brain:
@@ -37,6 +38,7 @@ class Brain:
         self.latest_user_message = None
         self.primitives_list = [
             primitive_to_object(NavigateToPosition()),
+            primitive_to_object(NavigateInSight()),
             # primitive_to_dict(SaveReceipt()),
         ]
         self.primitive_in_execution = None
