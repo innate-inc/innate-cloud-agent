@@ -45,6 +45,8 @@ class NavigateInSight(Primitive):
         image_b64: str,
         depth_payload: dict,
         target_object: str,
+        horizontal_fov: float = 60.0,
+        vertical_fov: float = 40.0,
     ):
         print(
             f"NavigateInSight: Starting navigation from ({current_x}, {current_y}) towards '{target_object}'"
@@ -95,7 +97,11 @@ class NavigateInSight(Primitive):
 
         # Attempt segmentation using YOLO + SAM.
         segmentation_masks = self.attempt_segmentation(
-            cv_image, refined_target, depth_array
+            cv_image,
+            refined_target,
+            depth_array,
+            horizontal_fov,
+            vertical_fov,
         )
         if segmentation_masks is None or len(segmentation_masks) == 0:
             print("Segmentation failed. Aborting navigation.")
@@ -155,7 +161,14 @@ class NavigateInSight(Primitive):
             True,
         )
 
-    def attempt_segmentation(self, cv_image, target_class, depth_array):
+    def attempt_segmentation(
+        self,
+        cv_image,
+        target_class,
+        depth_array,
+        horizontal_fov: float = 60.0,
+        vertical_fov: float = 40.0,
+    ):
         """
         Use YOLO to detect the target object and SAM to segment the image.
         Then compute spatial information based on the segmentation mask and depth data.
@@ -286,7 +299,11 @@ class NavigateInSight(Primitive):
 
             # Calculate the horizontal and vertical angles based on the mask centroid.
             angle_horizontal, angle_vertical = self._calculate_angles(
-                center_x, center_y, (depth_height, depth_width)
+                center_x,
+                center_y,
+                (depth_height, depth_width),
+                horizontal_fov,
+                vertical_fov,
             )
 
             segmentation_masks[str(i + 1)] = {
@@ -306,13 +323,19 @@ class NavigateInSight(Primitive):
         final_vis = cv2.addWeighted(vis_image, 0.7, all_masks, 0.3, 0)
 
         # Save the visualization
-        timestamp = int(time.time())
-        cv2.imwrite(f"segmentation_result_{timestamp}.jpg", final_vis)
-        print(f"Saved visualization to segmentation_result_{timestamp}.jpg")
+        cv2.imwrite(f"segmentation_result.jpg", final_vis)
+        print("Saved visualization to segmentation_result.jpg")
 
         return segmentation_masks
 
-    def _calculate_angles(self, center_x, center_y, image_shape):
+    def _calculate_angles(
+        self,
+        center_x,
+        center_y,
+        image_shape,
+        horizontal_fov: float = 60.0,
+        vertical_fov: float = 40.0,
+    ):
         """
         Compute horizontal and vertical angles from the camera center to the given point.
 
@@ -320,6 +343,8 @@ class NavigateInSight(Primitive):
             center_x (int): x-coordinate of the point (in pixels).
             center_y (int): y-coordinate of the point (in pixels).
             image_shape (tuple): The (height, width) of the image.
+            horizontal_fov (float): Horizontal field of view in degrees
+            vertical_fov (float): Vertical field of view in degrees
 
         Returns:
             tuple: (horizontal_angle, vertical_angle) in degrees.
@@ -336,11 +361,7 @@ class NavigateInSight(Primitive):
         x_norm = dx / (width / 2.0)
         y_norm = dy / (height / 2.0)
 
-        # Assume a fixed field-of-view (FOV)
-        horizontal_fov = 120  # degrees
-        vertical_fov = 80  # degrees
-
-        # Compute angles relative to center.
+        # Use the provided FOV values
         horizontal_angle = x_norm * (horizontal_fov / 2.0)
         vertical_angle = y_norm * (vertical_fov / 2.0)
         return horizontal_angle, vertical_angle

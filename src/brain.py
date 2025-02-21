@@ -144,6 +144,9 @@ class Brain:
         # Retrieve the base64 image from the payload.
         base64_img = message.payload["image_b64"]
 
+        horizontal_fov = message.payload["horizontal_fov"]
+        vertical_fov = message.payload["vertical_fov"]
+
         # Process the depth map if it exists.
         depth_payload = message.payload.get("depth")
         if depth_payload:
@@ -211,6 +214,8 @@ class Brain:
             image_b64=base64_img,
             depth_payload=depth_payload,
             target_object="shelf",
+            horizontal_fov=horizontal_fov,
+            vertical_fov=vertical_fov,
         )
 
         # Forget about the rest fornow we want to try the new primitive.
