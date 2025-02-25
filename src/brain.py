@@ -201,26 +201,6 @@ class Brain:
         if self.primitive_in_execution:
             primitive_in_execution = primitive_to_object(self.primitive_in_execution)
 
-        nav_in_sight = next(
-            (prim for prim in self.primitives_list if prim.name == "navigate_in_sight"),
-            None,
-        )
-        if nav_in_sight:
-            self.primitive_in_execution = nav_in_sight
-
-        await nav_in_sight.execute(
-            current_x=0,
-            current_y=0,
-            image_b64=base64_img,
-            depth_payload=depth_payload,
-            target_object="shelf",
-            horizontal_fov=horizontal_fov,
-            vertical_fov=vertical_fov,
-        )
-
-        # Forget about the rest fornow we want to try the new primitive.
-        return
-
         # Get robot coordinates from the message payload.
         robot_coords = message.payload.get("robot_coords")
 
@@ -229,7 +209,9 @@ class Brain:
             base64_img=base64_img,
             user_prompt_text=user_prompt_text,
             primitive_in_execution=primitive_in_execution,
-            primitives_list=primitives_list,
+            primitives_list=[
+                primitive_to_object(prim) for prim in self.primitives_list
+            ],
             history_as_string=self.history.get_as_string(),
             robot_coords=robot_coords,
         )
@@ -250,9 +232,55 @@ class Brain:
             description=json.dumps(vision_output.model_dump()),
         )
 
+        # Sometimes a primitive will actually call another primitive, especially if it's
+        # activated on the agent side. Here, in the case of navigate_in_sight, we need to
+        # return the navigation to position primitive after getting the navigation command.
+        if next_task_type == "navigate_in_sight":
+            nav_in_sight = next(
+                (
+                    prim
+                    for prim in self.primitives_list
+                    if prim.name == "navigate_in_sight"
+                ),
+                None,
+            )
+
+            msg, result, navigation_command = await nav_in_sight.execute(
+                current_x=robot_coords["x"],
+                current_y=robot_coords["y"],
+                current_yaw=robot_coords["theta"],
+                image_b64=base64_img,
+                depth_payload=depth_payload,
+                target_object="shelf",
+                horizontal_fov=horizontal_fov,
+                vertical_fov=vertical_fov,
+            )
+
+            # Only replace the output with a navigation task if the execution was successful
+            if result:
+                # Replace the output with a navigation_to_position primitive.
+                navigation_to_position_task = PrimitiveDefinition(
+                    name="navigate_to_position",
+                    inputs={
+                        "x": navigation_command["x"],
+                        "y": navigation_command["y"],
+                        "w": navigation_command["w"],
+                    },
+                )
+                vision_output.next_task = navigation_to_position_task
+            else:
+                # If the execution failed, update the vision output to reflect the failure
+                vision_output.stop_current_task = True
+                vision_output.observation = f"Navigation in sight failed: {msg}"
+                vision_output.next_task = None
+                vision_output.to_tell_user = f"I couldn't navigate to the shelf: {msg}"
+
         # Send the vision output to the client.
         response = MessageOut(
             type="vision_agent_output", payload=vision_output.model_dump()
+        )
+        print(
+            f"[Brain {self.connection_id}] Sending vision output to client: {response}"
         )
         await self.send_callback(response)
 
@@ -319,9 +347,7 @@ class Brain:
         )
         if matched_prim is not None:
             # Convert the dict to a PrimitiveDefinition instance
-            self.primitive_in_execution = PrimitiveDefinition.model_validate(
-                matched_prim
-            )
+            self.primitive_in_execution = primitive_to_object(matched_prim)
         else:
             self.primitive_in_execution = None
         await self.send_callback(MessageOut(type="ready_for_image", payload={}))

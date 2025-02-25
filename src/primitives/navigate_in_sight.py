@@ -42,6 +42,7 @@ class NavigateInSight(Primitive):
         self,
         current_x: float,
         current_y: float,
+        current_yaw: float,
         image_b64: str,
         depth_payload: dict,
         target_object: str,
@@ -59,10 +60,10 @@ class NavigateInSight(Primitive):
             cv_image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
             if cv_image is None:
                 print("Failed to decode image into cv_image.")
-                return "Failed to decode image", False
+                return "Failed to decode image", False, None
         except Exception as e:
             print(f"Exception decoding image: {e}")
-            return "Image decode error", False
+            return "Image decode error", False, None
 
         # Process the depth payload.
         # Assume depth_data is a JSON string with keys like "height", "width", "encoding", "data", [and optionally "is_bigendian"].
@@ -105,13 +106,13 @@ class NavigateInSight(Primitive):
         )
         if segmentation_masks is None or len(segmentation_masks) == 0:
             print("Segmentation failed. Aborting navigation.")
-            return "Segmentation failed", False
+            return "Segmentation failed", False, None
 
         # Select the segmentation mask with highest confidence.
         target_info = segmentation_masks.get("1")
         if not target_info:
             print("No valid segmentation mask found.")
-            return "Segmentation failed", False
+            return "Segmentation failed", False, None
 
         print(f"Segmentation result: {target_info}")
 
@@ -148,9 +149,9 @@ class NavigateInSight(Primitive):
         target_y = current_y + corrected_distance * np.sin(next_yaw)
 
         navigation_command = {
-            "target_x": target_x,
-            "target_y": target_y,
-            "target_yaw": next_yaw,
+            "x": target_x,
+            "y": target_y,
+            "w": next_yaw,
         }
         print(f"Computed navigation command: {navigation_command}")
 
@@ -159,6 +160,7 @@ class NavigateInSight(Primitive):
         return (
             f"Navigation towards {refined_target} initiated with command: {navigation_command}",
             True,
+            navigation_command,
         )
 
     def attempt_segmentation(
