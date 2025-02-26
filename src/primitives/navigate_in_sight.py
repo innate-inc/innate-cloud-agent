@@ -32,30 +32,37 @@ class NavigateInSight(Primitive):
         return "navigate_in_sight"
 
     def guidelines(self):
-        return (
-            "Navigate to the specified object using current coordinates, image, "
-            "and depth information. Inputs: current_x (float), current_y (float), "
-            "image_b64 (str), depth_data (str), target_object (str)."
-        )
+        return "To use to navigate to an object or target in sight. Provide a target object name, such as 'shelf', 'table', 'chair', etc."
 
-    async def execute(
+    def update_current_vars(
         self,
         current_x: float,
         current_y: float,
         current_yaw: float,
         image_b64: str,
         depth_payload: dict,
-        target_object: str,
         horizontal_fov: float = 60.0,
         vertical_fov: float = 40.0,
     ):
+        self.current_x = current_x
+        self.current_y = current_y
+        self.current_yaw = current_yaw
+        self.image_b64 = image_b64
+        self.depth_payload = depth_payload
+        self.horizontal_fov = horizontal_fov
+        self.vertical_fov = vertical_fov
+
+    async def execute(
+        self,
+        target_object: str,
+    ):
         print(
-            f"NavigateInSight: Starting navigation from ({current_x}, {current_y}) towards '{target_object}'"
+            f"NavigateInSight: Starting navigation from ({self.current_x}, {self.current_y}) towards '{target_object}'"
         )
 
         # Decode the provided image from base64 into a cv2 image.
         try:
-            image_bytes = base64.b64decode(image_b64)
+            image_bytes = base64.b64decode(self.image_b64)
             image_array = np.frombuffer(image_bytes, np.uint8)
             cv_image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
             if cv_image is None:
@@ -69,7 +76,7 @@ class NavigateInSight(Primitive):
         # Assume depth_data is a JSON string with keys like "height", "width", "encoding", "data", [and optionally "is_bigendian"].
         depth_array = None
         try:
-            depth_array = decode_depth_payload(depth_payload)
+            depth_array = decode_depth_payload(self.depth_payload)
         except Exception as e:
             print(
                 f"Failed to decode depth payload: {e}. Traceback: {traceback.format_exc()}"
@@ -101,8 +108,8 @@ class NavigateInSight(Primitive):
             cv_image,
             refined_target,
             depth_array,
-            horizontal_fov,
-            vertical_fov,
+            self.horizontal_fov,
+            self.vertical_fov,
         )
         if segmentation_masks is None or len(segmentation_masks) == 0:
             print("Segmentation failed. Aborting navigation.")
@@ -127,8 +134,7 @@ class NavigateInSight(Primitive):
         #   target_x = current_x + (corrected_distance * cos(next_yaw))
         #   target_y = current_y + (corrected_distance * sin(next_yaw))
         # --------------------------------------------------------------------
-        current_yaw = 0.0
-        next_yaw = current_yaw - np.radians(target_info["angle_horizontal"])
+        next_yaw = self.current_yaw - np.radians(target_info["angle_horizontal"])
 
         max_travelling_distance = 2.0  # meters
         closest_distance = 0.2  # meters
@@ -145,8 +151,8 @@ class NavigateInSight(Primitive):
         )
         corrected_distance = max(0, corrected_distance - closest_distance)
 
-        target_x = current_x + corrected_distance * np.cos(next_yaw)
-        target_y = current_y + corrected_distance * np.sin(next_yaw)
+        target_x = self.current_x + corrected_distance * np.cos(next_yaw)
+        target_y = self.current_y + corrected_distance * np.sin(next_yaw)
 
         navigation_command = {
             "x": target_x,

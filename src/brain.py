@@ -245,15 +245,16 @@ class Brain:
                 None,
             )
 
-            msg, result, navigation_command = await nav_in_sight.execute(
+            nav_in_sight.update_current_vars(
                 current_x=robot_coords["x"],
                 current_y=robot_coords["y"],
                 current_yaw=robot_coords["theta"],
                 image_b64=base64_img,
                 depth_payload=depth_payload,
-                target_object="shelf",
-                horizontal_fov=horizontal_fov,
-                vertical_fov=vertical_fov,
+            )
+
+            msg, result, navigation_command = await nav_in_sight.execute(
+                **vision_output.next_task["inputs"]
             )
 
             # Only replace the output with a navigation task if the execution was successful
