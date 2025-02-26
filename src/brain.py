@@ -269,6 +269,14 @@ class Brain:
                     },
                 )
                 vision_output.next_task = navigation_to_position_task
+
+                # Update the primitive_in_execution to reflect that we're now executing a navigate_to_position
+                # primitive that was derived from a navigate_in_sight request
+                self.primitive_in_execution = navigation_to_position_task
+
+                print(
+                    f"[Brain {self.connection_id}] Converted navigate_in_sight to navigate_to_position with inputs: {navigation_to_position_task.inputs}. Initial coords were: {robot_coords}"
+                )
             else:
                 # If the execution failed, update the vision output to reflect the failure
                 vision_output.stop_current_task = True
@@ -341,16 +349,31 @@ class Brain:
         Processes the primitive activation and sends an acknowledgment.
         """
         primitive_name = message.payload["primitive_name"]
-        print(f"[Brain {self.connection_id}] Primitive '{primitive_name}' activated.")
-        matched_prim = next(
-            (prim for prim in self.primitives_list if prim.name == primitive_name),
-            None,
+        print(
+            f"\033[92m[Brain {self.connection_id}] Primitive '{primitive_name}' activated.\033[0m"
         )
-        if matched_prim is not None:
-            # Convert the dict to a PrimitiveDefinition instance
-            self.primitive_in_execution = primitive_to_object(matched_prim)
+
+        # Check if this is a navigate_to_position primitive that was derived from navigate_in_sight
+        if (
+            primitive_name == "navigate_to_position"
+            and self.primitive_in_execution
+            and self.primitive_in_execution.name == "navigate_in_sight"
+        ):
+            # This is a special case - we're actually executing a navigate_to_position that was
+            # derived from a navigate_in_sight request, so we don't need to do anything
+            pass
         else:
-            self.primitive_in_execution = None
+            # Normal case - just set the primitive_in_execution based on the primitive_name
+            matched_prim = next(
+                (prim for prim in self.primitives_list if prim.name == primitive_name),
+                None,
+            )
+            if matched_prim is not None:
+                # Convert the dict to a PrimitiveDefinition instance
+                self.primitive_in_execution = primitive_to_object(matched_prim)
+            else:
+                self.primitive_in_execution = None
+
         await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_unknown(self, message: MessageIn):
