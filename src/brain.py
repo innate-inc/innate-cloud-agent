@@ -152,10 +152,16 @@ class Brain:
         # Call VLM and get output
         vision_output = await self.call_visual_language_model(vlm_inputs)
 
+        vision_output.next_task = (
+            PrimitiveDefinition.model_validate(vision_output.next_task)
+            if vision_output.next_task
+            else None
+        )
+
         # Handle special case for navigate_in_sight
         if (
             vision_output.next_task
-            and vision_output.next_task["name"] == "navigate_in_sight"
+            and vision_output.next_task.name == "navigate_in_sight"
         ):
             vision_output = await self._handle_navigate_in_sight(
                 vision_output, robot_coords, base64_img, depth_payload
@@ -212,10 +218,6 @@ class Brain:
         else:
             user_prompt_text = None
 
-        print(
-            f"[Brain {self.connection_id}] Message payload contains the following keys: {message.payload.keys()}"
-        )
-
         # Convert the current primitive in execution (if any) into a PrimitiveDefinition instance.
         primitive_in_execution = None
         if self.primitive_in_execution:
@@ -251,7 +253,7 @@ class Brain:
         )
 
         msg, result, navigation_command = await nav_in_sight.execute(
-            **vision_output.next_task["inputs"]
+            **vision_output.next_task.inputs
         )
 
         # Only replace the output with a navigation task if the execution was successful
@@ -284,13 +286,6 @@ class Brain:
         return vision_output
 
     async def _send_vision_output(self, vision_output):
-        next_task_type = (
-            vision_output.next_task["name"] if vision_output.next_task else "None"
-        )
-        print(
-            f"[Brain {self.connection_id}] Agent decided next task to be: {next_task_type}"
-        )
-
         # Record the vision agent output in the history.
         self.history.add(
             HistoryEntryType.VISION_AGENT_OUTPUT,
@@ -300,9 +295,6 @@ class Brain:
         # Send the vision output to the client.
         response = MessageOut(
             type="vision_agent_output", payload=vision_output.model_dump()
-        )
-        print(
-            f"[Brain {self.connection_id}] Sending vision output to client: {response}"
         )
         await self.send_callback(response)
 
