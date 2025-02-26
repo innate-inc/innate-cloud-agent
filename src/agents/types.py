@@ -7,7 +7,6 @@ class PrimitiveDefinition(BaseModel):
     # This field will accept either a key named "description" (via the alias) or "guideline"
     guideline: Optional[str] = Field(
         default=None,
-        alias="description",
         description="Guideline for the task. Can be provided as 'description' in inputs.",
     )
     inputs: Dict[str, Any]
