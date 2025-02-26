@@ -157,7 +157,7 @@ class NavigateInSight(Primitive):
         navigation_command = {
             "x": target_x,
             "y": target_y,
-            "w": next_yaw,
+            "theta": next_yaw,
         }
         print(f"Computed navigation command: {navigation_command}")
 
@@ -267,7 +267,6 @@ class NavigateInSight(Primitive):
             contours, _ = cv2.findContours(
                 mask_np_resized, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
             )
-            print(f"Mask is {mask_np_resized.shape}")
             if contours and len(contours) > 0:
                 M = cv2.moments(contours[0])
                 if M["m00"] != 0:

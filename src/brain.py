@@ -265,7 +265,7 @@ class Brain:
                     inputs={
                         "x": navigation_command["x"],
                         "y": navigation_command["y"],
-                        "w": navigation_command["w"],
+                        "theta": navigation_command["theta"],
                     },
                 )
                 vision_output.next_task = navigation_to_position_task
