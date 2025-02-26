@@ -136,55 +136,75 @@ class Brain:
             )
 
     async def handle_image(self, message: MessageIn):
-        """
-        Handle messages of type 'image'.
-        Processes the image and uses a visual language model to decide the next action,
-        sending back a structured vision agent output.
-        """
-        # Retrieve the base64 image from the payload.
-        base64_img = message.payload["image_b64"]
+        """Handle messages of type 'image'."""
+        # Extract data from payload
+        base64_img, depth_payload, robot_coords = self._extract_image_data(
+            message.payload
+        )
 
-        horizontal_fov = message.payload["horizontal_fov"]
-        vertical_fov = message.payload["vertical_fov"]
-
-        # Process the depth map if it exists.
-        depth_payload = message.payload.get("depth")
+        # Process depth map if available
         if depth_payload:
-            # Decode the depth map.
-            depth_map = decode_depth_payload(depth_payload)
+            self._print_depth_map_info(depth_payload)
 
-            # Compute min and max values from the depth map.
-            d_min = depth_map.min()
-            d_max = depth_map.max()
+        # Prepare VLM inputs
+        vlm_inputs = self._prepare_vlm_inputs(base64_img, robot_coords)
 
-            # Normalize the depth map so that the maximum value becomes 255.
-            if d_max > d_min:
-                normalized_depth = ((depth_map - d_min) / (d_max - d_min) * 255).astype(
-                    np.uint8
-                )
-            else:
-                normalized_depth = np.zeros_like(depth_map, dtype=np.uint8)
+        # Call VLM and get output
+        vision_output = await self.call_visual_language_model(vlm_inputs)
 
-            # Create a PIL image (L mode for grayscale) and convert it to RGB so we can add colored text.
-            img = Image.fromarray(normalized_depth, mode="L").convert("RGB")
-
-            # Prepare debug text showing the min and max values.
-            debug_text = f"Min: {d_min} Max: {d_max}"
-            draw = ImageDraw.Draw(img)
-            try:
-                font = ImageFont.truetype("arial.ttf", 20)
-            except IOError:
-                font = ImageFont.load_default()
-            # Draw the text at position (10, 10) with a contrasting color (red in this case).
-            draw.text((10, 10), debug_text, font=font, fill=(255, 0, 0))
-
-            # Save the annotated depth map as a PNG file.
-            os.makedirs("depth_maps", exist_ok=True)
-            img.save("depth_maps/depth_map.png")
-            print(
-                f"[Brain {self.connection_id}] Depth map saved as depth_map.png with debug info: {debug_text}"
+        # Handle special case for navigate_in_sight
+        if (
+            vision_output.next_task
+            and vision_output.next_task["name"] == "navigate_in_sight"
+        ):
+            vision_output = await self._handle_navigate_in_sight(
+                vision_output, robot_coords, base64_img, depth_payload
             )
 
+        # Send response and prepare for next image
+        await self._send_vision_output(vision_output)
+
+    def _extract_image_data(self, payload):
+        base64_img = payload["image_b64"]
+        depth_payload = payload.get("depth")
+        robot_coords = payload.get("robot_coords")
+        return base64_img, depth_payload, robot_coords
+
+    def _print_depth_map_info(self, depth_payload):
+        depth_map = decode_depth_payload(depth_payload)
+        # Compute min and max values from the depth map.
+        d_min = depth_map.min()
+        d_max = depth_map.max()
+
+        # Normalize the depth map so that the maximum value becomes 255.
+        if d_max > d_min:
+            normalized_depth = ((depth_map - d_min) / (d_max - d_min) * 255).astype(
+                np.uint8
+            )
+        else:
+            normalized_depth = np.zeros_like(depth_map, dtype=np.uint8)
+
+        # Create a PIL image (L mode for grayscale) and convert it to RGB so we can add colored text.
+        img = Image.fromarray(normalized_depth, mode="L").convert("RGB")
+
+        # Prepare debug text showing the min and max values.
+        debug_text = f"Min: {d_min} Max: {d_max}"
+        draw = ImageDraw.Draw(img)
+        try:
+            font = ImageFont.truetype("arial.ttf", 20)
+        except IOError:
+            font = ImageFont.load_default()
+        # Draw the text at position (10, 10) with a contrasting color (red in this case).
+        draw.text((10, 10), debug_text, font=font, fill=(255, 0, 0))
+
+        # Save the annotated depth map as a PNG file.
+        os.makedirs("depth_maps", exist_ok=True)
+        img.save("depth_maps/depth_map.png")
+        print(
+            f"[Brain {self.connection_id}] Depth map saved as depth_map.png with debug info: {debug_text}"
+        )
+
+    def _prepare_vlm_inputs(self, base64_img, robot_coords):
         # Use the latest stored user message if available.
         if self.latest_user_message:
             user_prompt_text = self.latest_user_message
@@ -201,9 +221,6 @@ class Brain:
         if self.primitive_in_execution:
             primitive_in_execution = primitive_to_object(self.primitive_in_execution)
 
-        # Get robot coordinates from the message payload.
-        robot_coords = message.payload.get("robot_coords")
-
         # Create a VisionAgentInput instance with validated data.
         vlm_inputs = VisionAgentInput(
             base64_img=base64_img,
@@ -215,10 +232,58 @@ class Brain:
             history_as_string=self.history.get_as_string(),
             robot_coords=robot_coords,
         )
+        return vlm_inputs
 
-        # Call the visual language model with the validated inputs.
-        vision_output = await self.call_visual_language_model(vlm_inputs)
+    async def _handle_navigate_in_sight(
+        self, vision_output, robot_coords, base64_img, depth_payload
+    ):
+        nav_in_sight = next(
+            (prim for prim in self.primitives_list if prim.name == "navigate_in_sight"),
+            None,
+        )
 
+        nav_in_sight.update_current_vars(
+            current_x=robot_coords["x"],
+            current_y=robot_coords["y"],
+            current_yaw=robot_coords["theta"],
+            image_b64=base64_img,
+            depth_payload=depth_payload,
+        )
+
+        msg, result, navigation_command = await nav_in_sight.execute(
+            **vision_output.next_task["inputs"]
+        )
+
+        # Only replace the output with a navigation task if the execution was successful
+        if result:
+            # Replace the output with a navigation_to_position primitive.
+            navigation_to_position_task = PrimitiveDefinition(
+                name="navigate_to_position",
+                inputs={
+                    "x": navigation_command["x"],
+                    "y": navigation_command["y"],
+                    "theta": navigation_command["theta"],
+                },
+            )
+            vision_output.next_task = navigation_to_position_task
+
+            # Update the primitive_in_execution to reflect that we're now executing a navigate_to_position
+            # primitive that was derived from a navigate_in_sight request
+            self.primitive_in_execution = navigation_to_position_task
+
+            print(
+                f"[Brain {self.connection_id}] Converted navigate_in_sight to navigate_to_position with inputs: {navigation_to_position_task.inputs}. Initial coords were: {robot_coords}"
+            )
+        else:
+            # If the execution failed, update the vision output to reflect the failure
+            vision_output.stop_current_task = True
+            vision_output.observation = f"Navigation in sight failed: {msg}"
+            vision_output.next_task = None
+            vision_output.to_tell_user = f"I couldn't navigate to the shelf: {msg}"
+
+        return vision_output
+
+    async def _send_vision_output(self, vision_output):
         next_task_type = (
             vision_output.next_task["name"] if vision_output.next_task else "None"
         )
@@ -231,58 +296,6 @@ class Brain:
             HistoryEntryType.VISION_AGENT_OUTPUT,
             description=json.dumps(vision_output.model_dump()),
         )
-
-        # Sometimes a primitive will actually call another primitive, especially if it's
-        # activated on the agent side. Here, in the case of navigate_in_sight, we need to
-        # return the navigation to position primitive after getting the navigation command.
-        if next_task_type == "navigate_in_sight":
-            nav_in_sight = next(
-                (
-                    prim
-                    for prim in self.primitives_list
-                    if prim.name == "navigate_in_sight"
-                ),
-                None,
-            )
-
-            nav_in_sight.update_current_vars(
-                current_x=robot_coords["x"],
-                current_y=robot_coords["y"],
-                current_yaw=robot_coords["theta"],
-                image_b64=base64_img,
-                depth_payload=depth_payload,
-            )
-
-            msg, result, navigation_command = await nav_in_sight.execute(
-                **vision_output.next_task["inputs"]
-            )
-
-            # Only replace the output with a navigation task if the execution was successful
-            if result:
-                # Replace the output with a navigation_to_position primitive.
-                navigation_to_position_task = PrimitiveDefinition(
-                    name="navigate_to_position",
-                    inputs={
-                        "x": navigation_command["x"],
-                        "y": navigation_command["y"],
-                        "theta": navigation_command["theta"],
-                    },
-                )
-                vision_output.next_task = navigation_to_position_task
-
-                # Update the primitive_in_execution to reflect that we're now executing a navigate_to_position
-                # primitive that was derived from a navigate_in_sight request
-                self.primitive_in_execution = navigation_to_position_task
-
-                print(
-                    f"[Brain {self.connection_id}] Converted navigate_in_sight to navigate_to_position with inputs: {navigation_to_position_task.inputs}. Initial coords were: {robot_coords}"
-                )
-            else:
-                # If the execution failed, update the vision output to reflect the failure
-                vision_output.stop_current_task = True
-                vision_output.observation = f"Navigation in sight failed: {msg}"
-                vision_output.next_task = None
-                vision_output.to_tell_user = f"I couldn't navigate to the shelf: {msg}"
 
         # Send the vision output to the client.
         response = MessageOut(
