@@ -24,3 +24,11 @@ client<llm> OpenAIClient {
         supports_streaming false 
     }
 }
+
+client<llm> AnthropicClient {
+  provider anthropic
+  options {
+    model claude-3-7-sonnet-20250219
+    api_key env.ANTHROPIC_API_KEY
+  }
+}

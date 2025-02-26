@@ -13,7 +13,7 @@ class VisionAgentOutput {
 }
 
 function VisionAgent(img: image, context_text: string, primitives_list_string: string) -> VisionAgentOutput {
-    client OpenAIClient
+    client AnthropicClient
     prompt #"
         {{_.role("user")}}
 

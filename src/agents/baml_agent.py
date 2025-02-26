@@ -23,7 +23,7 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
       - history_as_string: A history of events.
       - robot_coords: (Optional) A dictionary with the robot's coordinates.
     """
-    img = Image.from_base64("image/png", vlm_inputs.base64_img)
+    img = Image.from_base64("image/jpeg", vlm_inputs.base64_img)
     tb = create_type_builder(vlm_inputs.primitives_list)
     primitive_names = [prim.name for prim in vlm_inputs.primitives_list]
     primitives_list_string = ", ".join(primitive_names)
