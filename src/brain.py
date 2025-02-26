@@ -1,16 +1,13 @@
 import asyncio
 import json
 import time
-import traceback
-import os
 
-import numpy as np
-from PIL import Image, ImageDraw, ImageFont
 
 from src.message_types import (
     MessageIn,
     MessageInType,
     MessageOut,
+    MessageOutType,
 )
 from src.primitives.navigate_to_position import NavigateToPosition
 from src.primitives.transforms import primitive_to_object
@@ -91,6 +88,8 @@ class Brain:
                 await self.handle_primitive_completed(message)
             elif message_type == MessageInType.PRIMITIVE_ACTIVATED:
                 await self.handle_primitive_activated(message)
+            elif message_type == MessageInType.REGISTER_PRIMITIVES:
+                await self.handle_register_primitives(message)
             else:
                 await self.handle_unknown(message)
 
@@ -254,6 +253,61 @@ class Brain:
             payload={"text": f"Unhandled message type: {message.type}"},
         )
         await self.send_callback(response)
+
+    async def handle_register_primitives(self, message: MessageIn):
+        """
+        Handle messages of type 'register_primitives'.
+        Registers new primitives provided by the client.
+        """
+        primitives_data = message.payload.get("primitives", [])
+        registered_count = 0
+
+        for primitive_data in primitives_data:
+            try:
+                name = primitive_data.get("name")
+                guideline = primitive_data.get("guideline")
+                inputs = primitive_data.get("inputs", {})
+
+                # Validate required fields
+                if not name:
+                    self.logger.error(
+                        f"Primitive registration missing required 'name' field: {primitive_data}"
+                    )
+                    continue
+
+                # Check if a primitive with this name already exists
+                existing_primitive = next(
+                    (p for p in self.primitives_list if p.name == name), None
+                )
+                if existing_primitive:
+                    self.logger.info(f"Primitive '{name}' already registered, skipping")
+                    continue
+
+                # Create and add the primitive definition directly
+                from src.agents.types import PrimitiveDefinition
+
+                new_primitive = PrimitiveDefinition(
+                    name=name, guideline=guideline, inputs=inputs
+                )
+                self.primitives_list.append(new_primitive)
+                registered_count += 1
+                self.logger.info(f"Registered new primitive: {name}")
+
+            except Exception as e:
+                self.logger.error(f"Error registering primitive: {e}")
+
+        # Acknowledge the registration
+        response = MessageOut(
+            type=MessageOutType.PRIMITIVES_REGISTERED,
+            payload={
+                "success": True,
+                "count": registered_count,
+                "message": f"Successfully registered {registered_count} primitives",
+            },
+        )
+        await self.send_callback(response)
+
+        self.logger.info(f"Registered {registered_count} primitives.")
 
     async def stop(self):
         """

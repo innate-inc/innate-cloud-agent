@@ -14,6 +14,7 @@ class MessageInType(str, Enum):
     PRIMITIVE_COMPLETED = "primitive_completed"
     PRIMITIVE_INTERRUPTED = "primitive_interrupted"
     PRIMITIVE_FAILED = "primitive_failed"
+    REGISTER_PRIMITIVES = "register_primitives"
 
 
 # Outgoing messages from the server/agent
@@ -22,6 +23,8 @@ class MessageOutType(str, Enum):
     VISION_AGENT_OUTPUT = "vision_agent_output"
     DIRECTIVE_ACK = "directive_ack"  # Example: acknowledgment for a directive
     CHAT_OUT = "chat_out"
+    THOUGHTS = "thoughts"
+    PRIMITIVES_REGISTERED = "primitives_registered"
 
 
 class MessageIn(BaseModel):

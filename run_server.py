@@ -3,7 +3,7 @@
 import asyncio
 import websockets
 
-import os
+# import os
 
 # os.environ["BAML_LOG"] = "off"
 

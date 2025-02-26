@@ -1,6 +1,6 @@
 import traceback
 from src.agents.baml_agent import vision_agent
-from src.agents.types import VisionAgentInput, PrimitiveDefinition
+from src.agents.types import VisionAgentInput
 from src.baml_client.types import VisionAgentOutput
 from src.primitives.transforms import primitive_to_object
 
