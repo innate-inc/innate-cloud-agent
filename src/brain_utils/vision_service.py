@@ -43,7 +43,7 @@ class VisionService:
                 base64_img=base64_img,
                 user_prompt_text=user_prompt_text,
                 primitive_in_execution=primitive_object,
-                primitives_list=[primitive_to_object(prim) for prim in primitives_list],
+                primitives_list=primitives_list,
                 history_as_string=history_as_string,
                 robot_coords=robot_coords,
             )

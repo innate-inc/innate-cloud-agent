@@ -9,7 +9,6 @@ from src.message_types import (
     MessageOut,
     MessageOutType,
 )
-from src.primitives.navigate_to_position import NavigateToPosition
 from src.primitives.transforms import primitive_to_object
 from src.history import History, HistoryEntryType
 from src.agents.types import PrimitiveDefinition
@@ -34,10 +33,10 @@ class Brain:
         self.forward_command_active = False
         # Store the latest user message that should be consumed once by the visual language model.
         self.latest_user_message = None
-        self.primitives_list = [
-            NavigateToPosition(),
+        self.primitives_list = []
+        self.local_primitives_list = [
             NavigateInSight(),
-        ]
+        ]  # These are the ones defined in the brain here, not registered with the server by the user
         self.primitive_in_execution = None
 
         # Initialize history to record chat messages and vision agent outputs.
@@ -108,12 +107,17 @@ class Brain:
         if depth_payload:
             self.image_processor.process_depth_map(depth_payload)
 
+        # Convert the local primitives list to a list of PrimitiveDefinition instances
+        local_primitives_list = [
+            primitive_to_object(prim) for prim in self.local_primitives_list
+        ]
+
         # Call VLM and get output
         vision_output = await self.vision_service.call_visual_language_model(
             base64_img=base64_img,
             user_prompt_text=self.latest_user_message,
             primitive_in_execution=self.primitive_in_execution,
-            primitives_list=self.primitives_list,
+            primitives_list=local_primitives_list + self.primitives_list,
             history_as_string=self.history.get_as_string(),
             robot_coords=robot_coords,
         )
@@ -275,16 +279,13 @@ class Brain:
                     )
                     continue
 
-                # Check if a primitive with this name already exists
+                # Check if a primitive with this name already exists in the local list
                 existing_primitive = next(
-                    (p for p in self.primitives_list if p.name == name), None
+                    (p for p in self.local_primitives_list if p.name == name), None
                 )
                 if existing_primitive:
                     self.logger.info(f"Primitive '{name}' already registered, skipping")
                     continue
-
-                # Create and add the primitive definition directly
-                from src.agents.types import PrimitiveDefinition
 
                 new_primitive = PrimitiveDefinition(
                     name=name, guideline=guideline, inputs=inputs
