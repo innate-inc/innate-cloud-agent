@@ -22,6 +22,20 @@ from src.utils import decode_depth_payload
 from src.primitives.navigate_in_sight import NavigateInSight
 
 
+class BrainLogger:
+    def __init__(self, connection_id):
+        self.connection_id = connection_id
+
+    def info(self, message):
+        print(f"[Brain {self.connection_id}] {message}")
+
+    def error(self, message, exception=None):
+        error_msg = f"[Brain {self.connection_id}] Error: {message}"
+        if exception:
+            error_msg += f". {str(exception)}\nTraceback: {traceback.format_exc()}"
+        print(error_msg)
+
+
 class Brain:
     def __init__(self, connection_id: str, send_callback):
         """
@@ -44,6 +58,9 @@ class Brain:
 
         # Initialize history to record chat messages and vision agent outputs.
         self.history = History()
+
+        # Initialize logger
+        self.logger = BrainLogger(connection_id)
 
     async def enqueue_message(self, message: MessageIn):
         """
@@ -71,7 +88,7 @@ class Brain:
         try:
             message_type = message.type
 
-            print(f"[Brain {self.connection_id}] Processing message: {message_type}")
+            self.logger.info(f"Processing message: {message_type}")
             time_start = time.time()
 
             if message_type == MessageInType.IMAGE:
@@ -87,13 +104,9 @@ class Brain:
             else:
                 await self.handle_unknown(message)
 
-            print(
-                f"[Brain {self.connection_id}] Processed message in {time.time() - time_start} seconds"
-            )
+            self.logger.info(f"Processed message in {time.time() - time_start} seconds")
         except Exception as e:
-            print(
-                f"[Brain {self.connection_id}] Error processing message: {e}. Traceback: {traceback.format_exc()}"
-            )
+            self.logger.error(f"Error processing message: {e}")
 
     async def call_visual_language_model(
         self, vlm_inputs: VisionAgentInput
@@ -108,12 +121,12 @@ class Brain:
                 if self.primitive_in_execution
                 else "None"
             )
-            print(
-                f"[Brain {self.connection_id}] Calling visual language model while current primitive is {current_primitive}"
+            self.logger.info(
+                f"Calling visual language model while current primitive is {current_primitive}"
             )
             if self.latest_user_message:
-                print(
-                    f"[Brain {self.connection_id}] Sending user message to vision agent: {vlm_inputs.user_prompt_text}"
+                self.logger.info(
+                    f"Sending user message to vision agent: {vlm_inputs.user_prompt_text}"
                 )
             completion = await vision_agent(vlm_inputs)
             if completion.next_task:  # Keep the current task if appropriate
@@ -122,9 +135,7 @@ class Brain:
                 )
             return completion
         except Exception as e:
-            print(
-                f"[Brain {self.connection_id}] Error calling visual language model: {e}. Traceback: {traceback.format_exc()}"
-            )
+            self.logger.error(f"Error calling visual language model: {e}")
             return VisionAgentOutput(
                 stop_current_task=True,
                 observation="The brain failed, so it stopped the current task.",
@@ -206,8 +217,8 @@ class Brain:
         # Save the annotated depth map as a PNG file.
         os.makedirs("depth_maps", exist_ok=True)
         img.save("depth_maps/depth_map.png")
-        print(
-            f"[Brain {self.connection_id}] Depth map saved as depth_map.png with debug info: {debug_text}"
+        self.logger.info(
+            f"Depth map saved as depth_map.png with debug info: {debug_text}"
         )
 
     def _prepare_vlm_inputs(self, base64_img, robot_coords):
@@ -273,8 +284,8 @@ class Brain:
             # primitive that was derived from a navigate_in_sight request
             self.primitive_in_execution = navigation_to_position_task
 
-            print(
-                f"[Brain {self.connection_id}] Converted navigate_in_sight to navigate_to_position with inputs: {navigation_to_position_task.inputs}. Initial coords were: {robot_coords}"
+            self.logger.info(
+                f"Converted navigate_in_sight to navigate_to_position with inputs: {navigation_to_position_task.inputs}. Initial coords were: {robot_coords}"
             )
         else:
             # If the execution failed, update the vision output to reflect the failure
@@ -325,7 +336,7 @@ class Brain:
         Processes the primitive completion and sends an acknowledgment.
         """
         primitive_name = message.payload["primitive_name"]
-        print(f"[Brain {self.connection_id}] Primitive '{primitive_name}' completed.")
+        self.logger.info(f"Primitive '{primitive_name}' completed.")
         if (
             self.primitive_in_execution
             and primitive_name == self.primitive_in_execution.name
@@ -354,7 +365,7 @@ class Brain:
         Processes the primitive activation and sends an acknowledgment.
         """
         primitive_name = message.payload["primitive_name"]
-        print(
+        self.logger.info(
             f"\033[92m[Brain {self.connection_id}] Primitive '{primitive_name}' activated.\033[0m"
         )
 
