@@ -35,6 +35,9 @@ function VisionAgent(img: image, context_text: string, primitives_list_string: s
 
         Consider the guidelines of the tasks available carefully before picking one to do (if any).
 
+        Also, don't talk to the user if they haven't talked to you. Or at least evaluate carefully if you need to tell something to them, especially if the last time you talked with them was recently.
+        If the last time you talked with them was seconds ago and you expect some answer from them, you should wait for example, an amount of time that seems appropriate.
+
         You can only use one of the following tasks: {{ primitives_list_string }}.
 
         {{ ctx.output_format }}

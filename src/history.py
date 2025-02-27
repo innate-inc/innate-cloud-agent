@@ -51,11 +51,23 @@ class History:
         self.check_and_summarize()
 
     def get_as_string(self) -> str:
-        lines = [
-            f"{entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} - {entry.type.value}: {entry.description}"
-            for entry in self.entries
-        ]
-        lines.append(f"\nCurrent time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        now = datetime.now()
+        lines = []
+        for entry in self.entries:
+            time_diff = now - entry.timestamp
+            seconds_diff = int(time_diff.total_seconds())
+
+            if seconds_diff < 60:
+                time_str = f"{seconds_diff} seconds ago"
+            else:
+                minutes_diff = seconds_diff // 60
+                time_str = (
+                    f"{minutes_diff} minute{'' if minutes_diff == 1 else 's'} ago"
+                )
+
+            lines.append(f"{time_str} - {entry.type.value}: {entry.description}")
+
+        lines.append(f"\nCurrent time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
         return "\n".join(lines)
 
     def check_and_summarize(self):
