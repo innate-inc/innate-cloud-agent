@@ -82,8 +82,6 @@ class Brain:
                 await self.handle_image(message)
             elif message_type == MessageInType.CHAT_IN:
                 await self.handle_chat_in(message)
-            elif message_type == MessageInType.DIRECTIVE:
-                await self.handle_directive(message)
             elif message_type == MessageInType.PRIMITIVE_COMPLETED:
                 await self.handle_primitive_completed(message)
             elif message_type == MessageInType.PRIMITIVE_ACTIVATED:
@@ -204,18 +202,6 @@ class Brain:
             raise ValueError(
                 f"[Brain {self.connection_id}] Primitive '{primitive_name}' is not the current primitive in execution. That's a weird bug."
             )
-
-    async def handle_directive(self, message: MessageIn):
-        """
-        Handle messages of type 'directive'.
-        Processes the directive and sends an acknowledgment.
-        """
-        directive = message.payload["directive"]
-        response = MessageOut(
-            type="directive_ack",
-            payload={"text": f"Directive '{directive}' processed."},
-        )
-        await self.send_callback(response)
 
     async def handle_primitive_activated(self, message: MessageIn):
         """

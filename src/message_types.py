@@ -7,7 +7,6 @@ from pydantic import BaseModel, field_serializer
 # SHOULD CORRESPOND TO THE SAME TYPE ON THE ROBOT SIDE
 class MessageInType(str, Enum):
     AUTH = "auth"
-    DIRECTIVE = "directive"
     IMAGE = "image"
     CHAT_IN = "chat_in"
     PRIMITIVE_ACTIVATED = "primitive_activated"
@@ -21,7 +20,6 @@ class MessageInType(str, Enum):
 class MessageOutType(str, Enum):
     READY_FOR_IMAGE = "ready_for_image"
     VISION_AGENT_OUTPUT = "vision_agent_output"
-    DIRECTIVE_ACK = "directive_ack"
     CHAT_OUT = "chat_out"
     THOUGHTS = "thoughts"
     PRIMITIVES_AND_DIRECTIVE_REGISTERED = "primitives_and_directive_registered"
