@@ -38,6 +38,7 @@ class Brain:
             NavigateInSight(),
         ]  # These are the ones defined in the brain here, not registered with the server by the user
         self.primitive_in_execution = None
+        self.directive = None  # Store the directive that will steer the VLM
 
         # Initialize history to record chat messages and vision agent outputs.
         self.history = History()
@@ -87,8 +88,8 @@ class Brain:
                 await self.handle_primitive_completed(message)
             elif message_type == MessageInType.PRIMITIVE_ACTIVATED:
                 await self.handle_primitive_activated(message)
-            elif message_type == MessageInType.REGISTER_PRIMITIVES:
-                await self.handle_register_primitives(message)
+            elif message_type == MessageInType.REGISTER_PRIMITIVES_AND_DIRECTIVE:
+                await self.handle_register_primitives_and_directive(message)
             else:
                 await self.handle_unknown(message)
 
@@ -120,6 +121,7 @@ class Brain:
             primitives_list=local_primitives_list + self.primitives_list,
             history_as_string=self.history.get_as_string(),
             robot_coords=robot_coords,
+            directive=self.directive,
         )
 
         # Clear the user message as it's been consumed
@@ -258,14 +260,17 @@ class Brain:
         )
         await self.send_callback(response)
 
-    async def handle_register_primitives(self, message: MessageIn):
+    async def handle_register_primitives_and_directive(self, message: MessageIn):
         """
-        Handle messages of type 'register_primitives'.
-        Registers new primitives provided by the client.
+        Handle messages of type 'register_primitives_and_directive'.
+        Registers new primitives and directive provided by the client.
         """
         primitives_data = message.payload.get("primitives", [])
+        directive = message.payload.get("directive")
         registered_count = 0
+        directive_registered = False
 
+        # Process primitives
         for primitive_data in primitives_data:
             try:
                 name = primitive_data.get("name")
@@ -297,18 +302,30 @@ class Brain:
             except Exception as e:
                 self.logger.error(f"Error registering primitive: {e}")
 
+        # Process directive if provided
+        if directive is not None:
+            try:
+                self.directive = directive
+                directive_registered = True
+                self.logger.info(f"Registered directive: {directive}")
+            except Exception as e:
+                self.logger.error(f"Error registering directive: {e}")
+
         # Acknowledge the registration
         response = MessageOut(
-            type=MessageOutType.PRIMITIVES_REGISTERED,
+            type=MessageOutType.PRIMITIVES_AND_DIRECTIVE_REGISTERED,
             payload={
                 "success": True,
                 "count": registered_count,
-                "message": f"Successfully registered {registered_count} primitives",
+                "directive_registered": directive_registered,
+                "message": f"Successfully registered {registered_count} primitives and {'a' if directive_registered else 'no'} directive.",
             },
         )
         await self.send_callback(response)
 
-        self.logger.info(f"Registered {registered_count} primitives.")
+        self.logger.info(
+            f"Registered {registered_count} primitives and {'a' if directive_registered else 'no'} directive."
+        )
 
     async def stop(self):
         """

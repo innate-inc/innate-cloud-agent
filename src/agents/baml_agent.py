@@ -22,6 +22,7 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
             - inputs: A dictionary mapping input fields to their type strings.
       - history_as_string: A history of events.
       - robot_coords: (Optional) A dictionary with the robot's coordinates.
+      - directive: (Optional) A directive to steer the vision language model.
     """
     img = Image.from_base64("image/jpeg", vlm_inputs.base64_img)
     tb = create_type_builder(vlm_inputs.primitives_list)
@@ -51,6 +52,11 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
             f"z={coords.get('z')}, theta={coords.get('theta')}"
         )
         context_text_lines.append(coords_text)
+
+    # If directive was provided, append it to the context
+    if vlm_inputs.directive:
+        directive_text = f"Your directive is: {vlm_inputs.directive}"
+        context_text_lines.append(directive_text)
 
     context_text = "\n".join(context_text_lines)
 

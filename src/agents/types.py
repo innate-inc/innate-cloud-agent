@@ -23,3 +23,4 @@ class VisionAgentInput(BaseModel):
     primitives_list: List[PrimitiveDefinition]
     history_as_string: str
     robot_coords: Optional[Dict[str, float]] = None
+    directive: Optional[str] = None

@@ -17,6 +17,7 @@ class VisionService:
         primitives_list,
         history_as_string,
         robot_coords,
+        directive=None,
     ) -> VisionAgentOutput:
         """
         Calls the external visual language model with the given inputs.
@@ -46,6 +47,7 @@ class VisionService:
                 primitives_list=primitives_list,
                 history_as_string=history_as_string,
                 robot_coords=robot_coords,
+                directive=directive,
             )
 
             completion = await vision_agent(vlm_inputs)
