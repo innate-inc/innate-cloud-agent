@@ -252,7 +252,7 @@ class Brain:
         Registers new primitives and directive provided by the client.
         """
         primitives_data = message.payload.get("primitives", [])
-        directive = message.payload.get("directive")
+        new_directive = message.payload.get("directive")
         registered_count = 0
         directive_registered = False
 
@@ -289,11 +289,24 @@ class Brain:
                 self.logger.error(f"Error registering primitive: {e}")
 
         # Process directive if provided
-        if directive is not None:
+        if new_directive is not None:
             try:
-                self.directive = directive
+                old_directive = self.directive
+                self.directive = new_directive
                 directive_registered = True
-                self.logger.info(f"Registered directive: {directive}")
+                self.logger.info(f"Registered directive: {new_directive}")
+
+                # Record the directive change in history
+                if old_directive is None:
+                    history_message = f"Directive set to '{new_directive}'"
+                else:
+                    history_message = (
+                        f"Directive changed from '{old_directive}' to '{new_directive}'"
+                    )
+
+                self.history.add(
+                    HistoryEntryType.SYSTEM_MESSAGE, description=history_message
+                )
             except Exception as e:
                 self.logger.error(f"Error registering directive: {e}")
 
