@@ -7,6 +7,7 @@ import json
 import pytest
 import websockets
 import base64  # <-- Import base64 for encoding the image
+import numpy as np
 
 import sys
 import os
@@ -58,6 +59,7 @@ async def basic_image_handling(websocket, image_path, image_type="JPEG"):
     """
     Opens an image from a local file, reduces its dimensions by half,
     encodes it in base64, and sends it over the provided websocket.
+    Also includes mock depth payload and robot coordinates.
     """
     with open(image_path, "rb") as img_file:
         image_bytes = img_file.read()
@@ -76,10 +78,36 @@ async def basic_image_handling(websocket, image_path, image_type="JPEG"):
     # Encode the image.
     encoded_image = base64.b64encode(resized_image_bytes).decode("utf-8")
 
-    # Send the image message.
+    # Create mock depth data (all pixels with value 1.0)
+    # Using the same dimensions as the resized image
+    width, height = new_size
+    depth_value = 1.0  # 1 meter depth uniformly
+
+    # Create a uniform depth array and encode to base64
+    depth_data = np.ones((height, width), dtype=np.float32) * depth_value
+    depth_bytes = depth_data.tobytes()
+    depth_b64 = base64.b64encode(depth_bytes).decode("utf-8")
+
+    # Create mock robot coordinates
+    robot_coords = {
+        "x": 0.0,
+        "y": 0.0,
+        "theta": 0.0,  # Robot is facing east (0 radians)
+    }
+
+    # Send the image message with required depth and robot_coords fields
     image_message = {
         "type": "image",
-        "payload": {"image_b64": encoded_image},
+        "payload": {
+            "image_b64": encoded_image,
+            "depth": {
+                "height": height,
+                "width": width,
+                "encoding": "32FC1",  # Using 32-bit float encoding
+                "data": depth_b64,
+            },
+            "robot_coords": robot_coords,
+        },
     }
     await websocket.send(json.dumps(image_message))
 
