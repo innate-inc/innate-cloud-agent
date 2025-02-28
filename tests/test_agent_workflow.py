@@ -29,7 +29,9 @@ async def common_setup():
     """
     port = 8766  # Ensure this port is free during testing.
     # Start the temporary WebSocket server.
-    server = await websockets.serve(connection_handler, "localhost", port)
+    server = await websockets.serve(
+        connection_handler, "localhost", port, max_size=10 * 1024 * 1024
+    )
     await asyncio.sleep(0.1)  # Allow time for the server to start.
 
     uri = f"ws://localhost:{port}"
