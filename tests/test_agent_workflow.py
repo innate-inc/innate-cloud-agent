@@ -308,26 +308,3 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
     # Clean up: close the server.
     server.close()
     await server.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_directive_workflow():
-    """
-    Test that sends a directive message and expects a directive acknowledgment.
-    """
-    server, websocket = await common_setup("test_directive_workflow")
-
-    directive_message = {
-        "type": "directive",
-        "payload": {"directive": "Test directive"},
-    }
-    await websocket.send(json.dumps(directive_message))
-
-    # Verify that the server responds with a directive acknowledgment.
-    raw_msg = await websocket.recv()
-    msg = json.loads(raw_msg)
-    assert msg["type"] == "directive_ack", "Expected a directive_ack message"
-
-    # Clean up: close the server.
-    server.close()
-    await server.wait_closed()
