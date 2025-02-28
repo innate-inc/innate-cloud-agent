@@ -16,9 +16,64 @@ class ImageProcessor:
         self.logger = logger
 
     def extract_image_data(self, payload):
+        """
+        Extract and validate image data from the payload.
+
+        Args:
+            payload (dict): Dictionary containing image data and metadata
+
+        Returns:
+            tuple: (base64_img, depth_payload, robot_coords)
+
+        Raises:
+            ValueError: If required data is missing or malformed
+        """
+        # Validate payload exists
+        if not payload:
+            raise ValueError("Empty payload received")
+
+        # Check for required image_b64 field
+        if "image_b64" not in payload:
+            raise ValueError("Missing required 'image_b64' in payload")
+
         base64_img = payload["image_b64"]
-        depth_payload = payload.get("depth")
-        robot_coords = payload.get("robot_coords")
+
+        # Validate base64_img is not empty
+        if not base64_img:
+            raise ValueError("Empty image data received")
+
+        # Validate required depth payload
+        if "depth" not in payload:
+            raise ValueError("Missing required 'depth' in payload")
+
+        depth_payload = payload["depth"]
+
+        # Verify depth payload contains required fields
+        required_depth_fields = ["height", "width", "encoding", "data"]
+        missing_fields = [
+            field for field in required_depth_fields if field not in depth_payload
+        ]
+        if missing_fields:
+            raise ValueError(
+                f"Depth payload missing required fields: {', '.join(missing_fields)}"
+            )
+
+        # Validate required robot coordinates
+        if "robot_coords" not in payload:
+            raise ValueError("Missing required 'robot_coords' in payload")
+
+        robot_coords = payload["robot_coords"]
+
+        # Verify robot_coords contains required fields
+        required_coord_fields = ["x", "y", "theta"]
+        missing_fields = [
+            field for field in required_coord_fields if field not in robot_coords
+        ]
+        if missing_fields:
+            raise ValueError(
+                f"Robot coordinates missing required fields: {', '.join(missing_fields)}"
+            )
+
         return base64_img, depth_payload, robot_coords
 
     def process_depth_map(self, depth_payload):
