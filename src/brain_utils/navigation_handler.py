@@ -1,8 +1,10 @@
 from src.agents.types import PrimitiveDefinition
+from src.primitives.types import Primitive
+from typing import List
 
 
 class NavigationHandler:
-    def __init__(self, logger, primitives_list):
+    def __init__(self, logger, primitives_list: List[Primitive]):
         self.logger = logger
         self.primitives_list = primitives_list
 

@@ -19,6 +19,10 @@ from src.brain_utils.vision_service import VisionService
 from src.brain_utils.navigation_handler import NavigationHandler
 
 
+def prim_list_to_prim_obj_list(prim_list):
+    return [primitive_to_object(prim) for prim in prim_list]
+
+
 class Brain:
     def __init__(self, connection_id: str, send_callback):
         """
@@ -47,7 +51,10 @@ class Brain:
         self.logger = BrainLogger(connection_id)
         self.image_processor = ImageProcessor(self.logger)
         self.vision_service = VisionService(self.logger)
-        self.navigation_handler = NavigationHandler(self.logger, self.primitives_list)
+        self.navigation_handler = NavigationHandler(
+            self.logger,
+            self.local_primitives_list,
+        )
 
     async def enqueue_message(self, message: MessageIn):
         """
@@ -107,9 +114,8 @@ class Brain:
             self.image_processor.process_depth_map(depth_payload)
 
         # Convert the local primitives list to a list of PrimitiveDefinition instances
-        local_primitives_list = [
-            primitive_to_object(prim) for prim in self.local_primitives_list
-        ]
+
+        local_primitives_list = prim_list_to_prim_obj_list(self.local_primitives_list)
 
         # Call VLM and get output
         vision_output = await self.vision_service.call_visual_language_model(
