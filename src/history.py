@@ -53,7 +53,11 @@ class History:
     def get_as_string(self) -> str:
         now = datetime.now()
         lines = []
-        for entry in self.entries:
+
+        # Get only the latest 50 entries
+        latest_entries = self.entries[-50:] if len(self.entries) > 50 else self.entries
+
+        for entry in latest_entries:
             time_diff = now - entry.timestamp
             seconds_diff = int(time_diff.total_seconds())
 
