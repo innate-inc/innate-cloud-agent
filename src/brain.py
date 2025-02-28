@@ -109,12 +109,24 @@ class Brain:
             self.image_processor.extract_image_data(message.payload)
         )
 
+        # Ensure image is in JPEG format
+        try:
+            base64_img = self.image_processor.ensure_jpeg_format(base64_img)
+        except ValueError as e:
+            self.logger.error(f"Image format error: {e}")
+            # Send error response to client
+            await self.send_callback(
+                MessageOut(type="error", payload={"text": f"Image format error: {e}"})
+            )
+            # Request a new image
+            await self.send_callback(MessageOut(type="ready_for_image", payload={}))
+            return
+
         # Process depth map if available
         if depth_payload:
             self.image_processor.process_depth_map(depth_payload)
 
         # Convert the local primitives list to a list of PrimitiveDefinition instances
-
         local_primitives_list = prim_list_to_prim_obj_list(self.local_primitives_list)
 
         # Call VLM and get output

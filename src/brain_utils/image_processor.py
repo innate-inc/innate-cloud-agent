@@ -1,6 +1,13 @@
 import os
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+import base64
+from io import BytesIO
+from PIL import Image
+import numpy as np
+import imghdr  # For detecting image format from binary data
+
+
 from src.utils import decode_depth_payload
 
 
@@ -49,3 +56,61 @@ class ImageProcessor:
         )
 
         return depth_map
+
+    def ensure_jpeg_format(self, base64_img):
+        """
+        Ensures the base64 encoded image is a JPEG.
+        Converts PNGs to JPEGs and rejects transparent images.
+
+        Args:
+            base64_img (str): Base64 encoded image
+
+        Returns:
+            str: Base64 encoded JPEG image
+
+        Raises:
+            ValueError: If the image has transparency which is not supported
+        """
+        # Decode base64 image
+        try:
+            img_data = base64.b64decode(base64_img)
+
+            # Detect the image format from the binary data
+            img_format = imghdr.what(None, h=img_data)
+
+            img = Image.open(BytesIO(img_data))
+
+            # Check if image has actual transparent pixels, not just an alpha channel
+            has_transparency = False
+
+            if img.mode == "RGBA":
+                # Check if any alpha values are less than 255 (not fully opaque)
+                alpha = np.array(img.split()[3])
+                if np.any(alpha < 255):
+                    has_transparency = True
+            elif img.mode == "P" and "transparency" in img.info:
+                # For palette mode with transparency
+                has_transparency = True
+
+            if has_transparency:
+                raise ValueError("Images with transparent pixels are not supported")
+
+            # If already JPEG, return as is
+            if img_format == "jpeg":
+                return base64_img
+
+            # Convert to RGB (in case of palette mode or other modes)
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+
+            # Convert to JPEG
+            buffer = BytesIO()
+            img.save(buffer, format="JPEG", quality=95)
+            jpeg_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+            self.logger.info(f"Converted image from {img_format or 'unknown'} to JPEG")
+            return jpeg_base64
+
+        except Exception as e:
+            self.logger.error(f"Error processing image format: {e}")
+            raise ValueError(f"Invalid image format: {e}")
