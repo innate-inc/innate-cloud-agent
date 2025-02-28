@@ -12,8 +12,12 @@ import sys
 import os
 from PIL import Image  # <-- Import Pillow for image processing.
 import io  # <-- Import io for in-memory byte streams.
+from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+# Load the environment variables
+load_dotenv()
 
 from run_server import connection_handler
 
