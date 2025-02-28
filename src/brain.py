@@ -1,20 +1,26 @@
 import asyncio
 import json
 import time
-import traceback
-from typing import Optional
-import openai  # Ensure the OpenAI SDK is installed
+
 
 from src.message_types import (
     MessageIn,
     MessageInType,
     MessageOut,
+    MessageOutType,
 )
-from src.agents.baml_agent import vision_agent
-from src.baml_client.types import VisionAgentOutput
-from src.primitives.navigate_to_position import NavigateToPosition
-from src.primitives.save_receipt import SaveReceipt
-from src.primitives.transforms import primitive_to_dict
+from src.primitives.transforms import primitive_to_object
+from src.history import History, HistoryEntryType
+from src.agents.types import PrimitiveDefinition
+from src.primitives.navigate_in_sight import NavigateInSight
+from src.brain_utils.logger import BrainLogger
+from src.brain_utils.image_processor import ImageProcessor
+from src.brain_utils.vision_service import VisionService
+from src.brain_utils.navigation_handler import NavigationHandler
+
+
+def prim_list_to_prim_obj_list(prim_list):
+    return [primitive_to_object(prim) for prim in prim_list]
 
 
 class Brain:
@@ -29,13 +35,26 @@ class Brain:
         self.running = True
         # Flag to override the next vision output (set via a chat_in command)
         self.forward_command_active = False
-        # NEW: Store the latest user message that should be consumed once by the vision language model.
+        # Store the latest user message that should be consumed once by the visual language model.
         self.latest_user_message = None
-        self.primitives_list = [
-            primitive_to_dict(NavigateToPosition()),
-            # primitive_to_dict(SaveReceipt()),
-        ]
+        self.primitives_list = []
+        self.local_primitives_list = [
+            NavigateInSight(),
+        ]  # These are the ones defined in the brain here, not registered with the server by the user
         self.primitive_in_execution = None
+        self.directive = None  # Store the directive that will steer the VLM
+
+        # Initialize history to record chat messages and vision agent outputs.
+        self.history = History()
+
+        # Initialize logger and helper modules
+        self.logger = BrainLogger(connection_id)
+        self.image_processor = ImageProcessor(self.logger)
+        self.vision_service = VisionService(self.logger)
+        self.navigation_handler = NavigationHandler(
+            self.logger,
+            self.local_primitives_list,
+        )
 
     async def enqueue_message(self, message: MessageIn):
         """
@@ -60,111 +79,115 @@ class Brain:
         Process a standardized message and dispatch it to the appropriate handler
         based on the message type.
         """
-        message_type = message.type
-
-        print(f"[Brain {self.connection_id}] Processing message: {message_type}")
-        time_start = time.time()
-
-        if message_type == MessageInType.IMAGE:
-            await self.handle_image(message)
-        elif message_type == MessageInType.CHAT_IN:
-            await self.handle_chat_in(message)
-        elif message_type == MessageInType.DIRECTIVE:
-            await self.handle_directive(message)
-        elif message_type == MessageInType.PRIMITIVE_COMPLETED:
-            await self.handle_primitive_completed(message)
-        elif message_type == MessageInType.PRIMITIVE_ACTIVATED:
-            await self.handle_primitive_activated(message)
-        else:
-            await self.handle_unknown(message)
-
-        print(
-            f"[Brain {self.connection_id}] Processed message in {time.time() - time_start} seconds"
-        )
-
-    async def call_visual_language_model(self, vlm_inputs: dict) -> VisionAgentOutput:
-        """
-        Calls the external visual language model (GPT-4-O 2024-11-20) with the given prompt.
-        Expects the model to return a JSON structure adhering to the VisionAgentOutput schema.
-        """
         try:
-            # Call the OpenAI chat completion API asynchronously using the new parsing format.
-            print(
-                f"[Brain {self.connection_id}] Calling visual language model while current primitive is {self.primitive_in_execution['name'] if self.primitive_in_execution else 'None'}"
-            )
-            if self.latest_user_message:
-                print(
-                    f"[Brain {self.connection_id}] Sending user message to vision agent: {vlm_inputs['user_prompt_text']}"
-                )
-            completion = await vision_agent(vlm_inputs)
-            if (
-                completion.next_task
-            ):  # Important so that we don't set primitive_in_execution to None
-                # here if we just didn't decide on changing one
-                self.primitive_in_execution = completion.next_task
+            message_type = message.type
 
-            return completion
+            self.logger.info(f"Processing message: {message_type}")
+            time_start = time.time()
+
+            if message_type == MessageInType.IMAGE:
+                await self.handle_image(message)
+            elif message_type == MessageInType.CHAT_IN:
+                await self.handle_chat_in(message)
+            elif message_type == MessageInType.PRIMITIVE_COMPLETED:
+                await self.handle_primitive_completed(message)
+            elif message_type == MessageInType.PRIMITIVE_ACTIVATED:
+                await self.handle_primitive_activated(message)
+            elif message_type == MessageInType.REGISTER_PRIMITIVES_AND_DIRECTIVE:
+                await self.handle_register_primitives_and_directive(message)
+            else:
+                await self.handle_unknown(message)
+
+            self.logger.info(f"Processed message in {time.time() - time_start} seconds")
         except Exception as e:
-            print(
-                f"[Brain {self.connection_id}] Error calling visual language model: {e}"
-            )
-            # Fallback logic: provide a default action if the model call fails.
-            return VisionAgentOutput(
-                stop_current_task=True,
-                observation="The brain failed, so it stopped the current task.",
-                thoughts=f"Fallback due to error: {str(e)}\nTraceback: {traceback.format_exc()}",
-                new_goal=None,
-                next_task=None,
-                anticipation=None,
-                to_tell_user="BEEP BOOP BEEP BOOP, the brain failed. Stopping the current task.",
-            )
+            self.logger.error(f"Error processing message: {e}")
 
     async def handle_image(self, message: MessageIn):
-        """
-        Handle messages of type 'image'.
-        Processes the image and uses a visual language model to decide the next action,
-        sending back a structured vision agent output.
-
-        This updated version makes sure to include any image provided in the message payload.
-        It checks for either an 'image_url' or an 'image_b64' field.
-        """
-        # Simulate image processing delay
-        await asyncio.sleep(1)
-
-        # Start with the latest stored user message if available.
-        if self.latest_user_message:
-            user_prompt_text = self.latest_user_message
-            self.latest_user_message = None
-        else:
-            user_prompt_text = None
-
-        # Check if the incoming message contains an image URL.
-        base64_img = message.payload["image_b64"]
-
-        vlm_inputs = {
-            "base64_img": base64_img,
-            "user_prompt_text": user_prompt_text,
-            "primitive_in_execution": self.primitive_in_execution,
-            "primitives_list": self.primitives_list,
-        }
-
-        # Call the visual language model with the combined prompt.
-        vision_output = await self.call_visual_language_model(vlm_inputs)
-
-        next_task_type = (
-            vision_output.next_task["type"] if vision_output.next_task else "None"
+        """Handle messages of type 'image'."""
+        # Extract data from payload
+        base64_img, depth_payload, robot_coords = (
+            self.image_processor.extract_image_data(message.payload)
         )
 
-        print(
-            f"[Brain {self.connection_id}] Agent decided next task to be: {next_task_type}"
+        # Ensure image is in JPEG format
+        try:
+            base64_img = self.image_processor.ensure_jpeg_format(base64_img)
+        except ValueError as e:
+            self.logger.error(f"Image format error: {e}")
+            # Send error response to client
+            await self.send_callback(
+                MessageOut(type="error", payload={"text": f"Image format error: {e}"})
+            )
+            # Request a new image
+            await self.send_callback(MessageOut(type="ready_for_image", payload={}))
+            return
+
+        # Process depth map if available
+        if depth_payload:
+            self.image_processor.process_depth_map(depth_payload)
+
+        # Convert the local primitives list to a list of PrimitiveDefinition instances
+        local_primitives_list = prim_list_to_prim_obj_list(self.local_primitives_list)
+
+        # Call VLM and get output
+        vision_output = await self.vision_service.call_visual_language_model(
+            base64_img=base64_img,
+            user_prompt_text=self.latest_user_message,
+            primitive_in_execution=self.primitive_in_execution,
+            primitives_list=local_primitives_list + self.primitives_list,
+            history_as_string=self.history.get_as_string(),
+            robot_coords=robot_coords,
+            directive=self.directive,
         )
 
-        # Build the response message using the structured output.
+        # Clear the user message as it's been consumed
+        self.latest_user_message = None
+
+        # Validate the next task
+        vision_output.next_task = (
+            PrimitiveDefinition.model_validate(vision_output.next_task)
+            if vision_output.next_task
+            else None
+        )
+
+        # Update primitive_in_execution if needed
+        if vision_output.next_task:
+            self.primitive_in_execution = PrimitiveDefinition.model_validate(
+                vision_output.next_task
+            )
+
+        # Handle special case for navigate_in_sight
+        if (
+            vision_output.next_task
+            and vision_output.next_task.name == "navigate_in_sight"
+        ):
+            vision_output = await self.navigation_handler.handle_navigate_in_sight(
+                vision_output, robot_coords, base64_img, depth_payload
+            )
+            # Make sure to update our primitive_in_execution to match what was created in navigate_in_sight
+            if vision_output.next_task:
+                self.primitive_in_execution = vision_output.next_task
+
+        # Send response and prepare for next image
+        await self._send_vision_output(vision_output)
+
+    async def _send_vision_output(self, vision_output):
+        # Record the vision agent output in the history.
+        self.history.add(
+            HistoryEntryType.VISION_AGENT_OUTPUT,
+            description=json.dumps(vision_output.model_dump()),
+        )
+
+        # Send the vision output to the client.
         response = MessageOut(
-            type="vision_agent_output",
-            payload=vision_output.model_dump(),
+            type="vision_agent_output", payload=vision_output.model_dump()
         )
         await self.send_callback(response)
+
+        # Save the entire history to a file
+        self.history.save()
+
+        # Notify the client that the server is ready for the next image.
         await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_chat_in(self, message: MessageIn):
@@ -175,8 +198,11 @@ class Brain:
         """
         text = message.payload["text"]
 
-        # Save the latest user message
+        # Save the latest user message for processing.
         self.latest_user_message = text
+
+        # Record this chat message in the history.
+        self.history.add(HistoryEntryType.CHAT_MESSAGE, description=text)
 
     async def handle_primitive_completed(self, message: MessageIn):
         """
@@ -184,25 +210,16 @@ class Brain:
         Processes the primitive completion and sends an acknowledgment.
         """
         primitive_name = message.payload["primitive_name"]
-        print(f"[Brain {self.connection_id}] Primitive '{primitive_name}' completed.")
-        if primitive_name == self.primitive_in_execution["name"]:
+        self.logger.info(f"Primitive '{primitive_name}' completed.")
+        if (
+            self.primitive_in_execution
+            and primitive_name == self.primitive_in_execution.name
+        ):
             self.primitive_in_execution = None
         else:
             raise ValueError(
                 f"[Brain {self.connection_id}] Primitive '{primitive_name}' is not the current primitive in execution. That's a weird bug."
             )
-
-    async def handle_directive(self, message: MessageIn):
-        """
-        Handle messages of type 'directive'.
-        Processes the directive and sends an acknowledgment.
-        """
-        directive = message.payload["directive"]
-        response = MessageOut(
-            type="directive_ack",
-            payload={"text": f"Directive '{directive}' processed."},
-        )
-        await self.send_callback(response)
 
     async def handle_primitive_activated(self, message: MessageIn):
         """
@@ -210,13 +227,31 @@ class Brain:
         Processes the primitive activation and sends an acknowledgment.
         """
         primitive_name = message.payload["primitive_name"]
-        print(f"[Brain {self.connection_id}] Primitive '{primitive_name}' activated.")
-        self.primitive_in_execution = next(
-            (prim for prim in self.primitives_list if prim["name"] == primitive_name),
-            None,
+        self.logger.info(
+            f"\033[92m[Brain {self.connection_id}] Primitive '{primitive_name}' activated.\033[0m"
         )
 
-        # Respond that we're ready for the next image
+        # Check if this is a navigate_to_position primitive that was derived from navigate_in_sight
+        if (
+            primitive_name == "navigate_to_position"
+            and self.primitive_in_execution
+            and self.primitive_in_execution.name == "navigate_in_sight"
+        ):
+            # This is a special case - we're actually executing a navigate_to_position that was
+            # derived from a navigate_in_sight request, so we don't need to do anything
+            pass
+        else:
+            # Normal case - just set the primitive_in_execution based on the primitive_name
+            matched_prim = next(
+                (prim for prim in self.primitives_list if prim.name == primitive_name),
+                None,
+            )
+            if matched_prim is not None:
+                # Convert the dict to a PrimitiveDefinition instance
+                self.primitive_in_execution = primitive_to_object(matched_prim)
+            else:
+                self.primitive_in_execution = None
+
         await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_unknown(self, message: MessageIn):
@@ -228,6 +263,86 @@ class Brain:
             payload={"text": f"Unhandled message type: {message.type}"},
         )
         await self.send_callback(response)
+
+    async def handle_register_primitives_and_directive(self, message: MessageIn):
+        """
+        Handle messages of type 'register_primitives_and_directive'.
+        Registers new primitives and directive provided by the client.
+        """
+        primitives_data = message.payload.get("primitives", [])
+        new_directive = message.payload.get("directive")
+        registered_count = 0
+        directive_registered = False
+
+        # Process primitives
+        for primitive_data in primitives_data:
+            try:
+                name = primitive_data.get("name")
+                guideline = primitive_data.get("guideline")
+                inputs = primitive_data.get("inputs", {})
+
+                # Validate required fields
+                if not name:
+                    self.logger.error(
+                        f"Primitive registration missing required 'name' field: {primitive_data}"
+                    )
+                    continue
+
+                # Check if a primitive with this name already exists in the local list
+                existing_primitive = next(
+                    (p for p in self.local_primitives_list if p.name == name), None
+                )
+                if existing_primitive:
+                    self.logger.info(f"Primitive '{name}' already registered, skipping")
+                    continue
+
+                new_primitive = PrimitiveDefinition(
+                    name=name, guideline=guideline, inputs=inputs
+                )
+                self.primitives_list.append(new_primitive)
+                registered_count += 1
+                self.logger.info(f"Registered new primitive: {name}")
+
+            except Exception as e:
+                self.logger.error(f"Error registering primitive: {e}")
+
+        # Process directive if provided
+        if new_directive is not None:
+            try:
+                old_directive = self.directive
+                self.directive = new_directive
+                directive_registered = True
+                self.logger.info(f"Registered directive: {new_directive}")
+
+                # Record the directive change in history
+                if old_directive is None:
+                    history_message = f"Directive set to '{new_directive}'"
+                else:
+                    history_message = (
+                        f"Directive changed from '{old_directive}' to '{new_directive}'"
+                    )
+
+                self.history.add(
+                    HistoryEntryType.SYSTEM_MESSAGE, description=history_message
+                )
+            except Exception as e:
+                self.logger.error(f"Error registering directive: {e}")
+
+        # Acknowledge the registration
+        response = MessageOut(
+            type=MessageOutType.PRIMITIVES_AND_DIRECTIVE_REGISTERED,
+            payload={
+                "success": True,
+                "count": registered_count,
+                "directive_registered": directive_registered,
+                "message": f"Successfully registered {registered_count} primitives and {'a' if directive_registered else 'no'} directive.",
+            },
+        )
+        await self.send_callback(response)
+
+        self.logger.info(
+            f"Registered {registered_count} primitives and {'a' if directive_registered else 'no'} directive."
+        )
 
     async def stop(self):
         """

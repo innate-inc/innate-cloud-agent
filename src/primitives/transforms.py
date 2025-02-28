@@ -1,10 +1,11 @@
 import inspect
+from src.agents.types import PrimitiveDefinition
 from src.primitives.types import Primitive
 
 from src.baml_client.type_builder import TypeBuilder
 
 
-def primitive_to_dict(primitive_obj: Primitive) -> dict:
+def primitive_to_object(primitive_obj: Primitive) -> PrimitiveDefinition:
     """
     Given a Primitive instance, returns a dict with:
       - "name": the name of the primitive
@@ -43,10 +44,10 @@ def primitive_to_dict(primitive_obj: Primitive) -> dict:
             inputs[name] = type_name
     result["inputs"] = inputs
 
-    return result
+    return PrimitiveDefinition.model_validate(result)
 
 
-def create_type_builder(primitives: list) -> TypeBuilder:
+def create_type_builder(primitives: list[PrimitiveDefinition]) -> TypeBuilder:
     """
     Creates a TypeBuilder instance and dynamically builds classes based on the given primitives.
 
@@ -60,15 +61,15 @@ def create_type_builder(primitives: list) -> TypeBuilder:
 
     # Process each primitive and create a new dynamic class.
     for i, prim in enumerate(primitives):
-        task_name = prim["name"]
-        task_desc = prim["guideline"]
+        task_name = prim.name
+        task_desc = prim.guideline
         dynamic_class_name = f"NextTask{i+1}"
 
         # Create the dynamic composite type for this primitive.
         task_class = tb.add_class(dynamic_class_name)
 
         # Add a mandatory 'type' field with the guideline embedded in its description.
-        task_class.add_property("type", tb.literal_string(task_name)).description(
+        task_class.add_property("name", tb.literal_string(task_name)).description(
             task_desc
         )
 
@@ -77,7 +78,7 @@ def create_type_builder(primitives: list) -> TypeBuilder:
         inputs_class = tb.add_class(inputs_class_name)
 
         # Add input fields for this task.
-        for field_name, field_type_str in prim.get("inputs", {}).items():
+        for field_name, field_type_str in prim.inputs.items():
             # Check for conflicting input field names within this inputs class.
             if field_name in [prop.name for prop in inputs_class.list_properties()]:
                 raise ValueError(

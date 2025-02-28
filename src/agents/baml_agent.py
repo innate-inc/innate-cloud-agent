@@ -3,51 +3,61 @@ from baml_py import Image
 from baml_py.errors import BamlValidationError
 from src.baml_client import b
 from src.primitives.transforms import create_type_builder
+from src.agents.types import VisionAgentInput
 from src.baml_client.types import VisionAgentOutput
 import asyncio
 
 
-async def vision_agent(vlm_inputs: dict) -> Optional[VisionAgentOutput]:
+async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutput]:
     """
     Calls the VisionAgent function with a dynamically built union for next_task.
 
-    The `primitives` argument should be a list of dictionaries with keys:
-      - "name": Unique name for the task (e.g., "ServeGlass")
-      - "description": Guideline for the task (e.g., "Serve a glass of water. The glass has to be in sight.")
-      - "inputs": A dict mapping input field names to their types as strings (e.g., {"distance": "float"})
-
-    Example:
-      primitives = [
-          {
-              "name": "ServeGlass",
-              "description": "Serve a glass of water. The glass has to be in sight.",
-              "inputs": {"distance": "float"}
-          },
-          {
-              "name": "GrabBottle",
-              "description": "Grab the bottle from the counter.",
-              "inputs": {"bottle_color": "string"}
-          }
-      ]
+    The VisionAgentInput model ensures the following keys are available:
+      - base64_img: A base64-encoded image.
+      - user_prompt_text: (Optional) The text provided by the user.
+      - primitive_in_execution: (Optional) The current primitive in execution.
+      - primitives_list: A list of primitives with fields:
+            - name: Unique name of the task.
+            - description: (Aliased to 'guideline' internally) Guidelines for the task.
+            - inputs: A dictionary mapping input fields to their type strings.
+      - history_as_string: A history of events.
+      - robot_coords: (Optional) A dictionary with the robot's coordinates.
+      - directive: (Optional) A directive to steer the vision language model.
     """
-    img = Image.from_base64("image/png", vlm_inputs["base64_img"])
-    tb = create_type_builder(vlm_inputs["primitives_list"])
-    primitive_names = [prim["name"] for prim in vlm_inputs["primitives_list"]]
+    img = Image.from_base64("image/jpeg", vlm_inputs.base64_img)
+    tb = create_type_builder(vlm_inputs.primitives_list)
+    primitive_names = [prim.name for prim in vlm_inputs.primitives_list]
     primitives_list_string = ", ".join(primitive_names)
     max_retries = 3
 
     context_text_lines = [
+        f"Below is the history of your actions and exchanges so far:\n{vlm_inputs.history_as_string}",
         (
-            f"The user said: {vlm_inputs['user_prompt_text']}"
-            if vlm_inputs["user_prompt_text"] is not None
+            f"The user said: {vlm_inputs.user_prompt_text}"
+            if vlm_inputs.user_prompt_text is not None
             else "The user did not say anything."
         ),
         (
-            f"The current task is: {vlm_inputs['primitive_in_execution']}"
-            if vlm_inputs["primitive_in_execution"] is not None
+            f"The current task is: {vlm_inputs.primitive_in_execution.model_dump_json()}"
+            if vlm_inputs.primitive_in_execution is not None
             else "You are not currently executing a task."
         ),
     ]
+
+    # If robot coordinates were provided, append them to the context.
+    if vlm_inputs.robot_coords:
+        coords = vlm_inputs.robot_coords
+        coords_text = (
+            f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, "
+            f"z={coords.get('z')}, theta={coords.get('theta')}"
+        )
+        context_text_lines.append(coords_text)
+
+    # If directive was provided, append it to the context
+    if vlm_inputs.directive:
+        directive_text = f"Your directive is: {vlm_inputs.directive}"
+        context_text_lines.append(directive_text)
+
     context_text = "\n".join(context_text_lines)
 
     response = await decreasesmax_retries(

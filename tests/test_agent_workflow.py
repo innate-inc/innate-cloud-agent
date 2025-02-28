@@ -7,25 +7,32 @@ import json
 import pytest
 import websockets
 import base64  # <-- Import base64 for encoding the image
+import numpy as np
 
 import sys
 import os
 from PIL import Image  # <-- Import Pillow for image processing.
 import io  # <-- Import io for in-memory byte streams.
+from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+# Load the environment variables
+load_dotenv()
 
 from run_server import connection_handler
 
 
-async def common_setup():
+async def common_setup(test_name):
     """
     Common setup that starts the server, connects the client,
     sends the auth message, and waits for the "ready_for_image" response.
     """
     port = 8766  # Ensure this port is free during testing.
     # Start the temporary WebSocket server.
-    server = await websockets.serve(connection_handler, "localhost", port)
+    server = await websockets.serve(
+        connection_handler, "localhost", port, max_size=10 * 1024 * 1024
+    )
     await asyncio.sleep(0.1)  # Allow time for the server to start.
 
     uri = f"ws://localhost:{port}"
@@ -34,7 +41,7 @@ async def common_setup():
     # Send authentication message.
     auth_message = {
         "type": "auth",
-        "payload": {"token": "MY_HARDCODED_TOKEN"},
+        "payload": {"token": f"MY_HARDCODED_TOKEN_{test_name}"},
     }
     await websocket.send(json.dumps(auth_message))
 
@@ -52,6 +59,7 @@ async def basic_image_handling(websocket, image_path, image_type="JPEG"):
     """
     Opens an image from a local file, reduces its dimensions by half,
     encodes it in base64, and sends it over the provided websocket.
+    Also includes mock depth payload and robot coordinates.
     """
     with open(image_path, "rb") as img_file:
         image_bytes = img_file.read()
@@ -70,10 +78,36 @@ async def basic_image_handling(websocket, image_path, image_type="JPEG"):
     # Encode the image.
     encoded_image = base64.b64encode(resized_image_bytes).decode("utf-8")
 
-    # Send the image message.
+    # Create mock depth data (all pixels with value 1.0)
+    # Using the same dimensions as the resized image
+    width, height = new_size
+    depth_value = 1.0  # 1 meter depth uniformly
+
+    # Create a uniform depth array and encode to base64
+    depth_data = np.ones((height, width), dtype=np.float32) * depth_value
+    depth_bytes = depth_data.tobytes()
+    depth_b64 = base64.b64encode(depth_bytes).decode("utf-8")
+
+    # Create mock robot coordinates
+    robot_coords = {
+        "x": 0.0,
+        "y": 0.0,
+        "theta": 0.0,  # Robot is facing east (0 radians)
+    }
+
+    # Send the image message with required depth and robot_coords fields
     image_message = {
         "type": "image",
-        "payload": {"image_b64": encoded_image},
+        "payload": {
+            "image_b64": encoded_image,
+            "depth": {
+                "height": height,
+                "width": width,
+                "encoding": "32FC1",  # Using 32-bit float encoding
+                "data": depth_b64,
+            },
+            "robot_coords": robot_coords,
+        },
     }
     await websocket.send(json.dumps(image_message))
 
@@ -84,7 +118,7 @@ async def test_chat_ask_receipt():
     """
     Test that uses a chat message and an image, then verifies the vision output.
     """
-    server, websocket = await common_setup()
+    server, websocket = await common_setup("test_chat_ask_receipt")
 
     # Send the chat message.
     chat_message = {
@@ -128,7 +162,30 @@ async def test_chat_ask_to_navigate():
     """
     Test that uses a chat message and an image, then verifies the vision output.
     """
-    server, websocket = await common_setup()
+    server, websocket = await common_setup("test_chat_ask_to_navigate")
+
+    # First, register the navigate_to_position primitive and a directive
+    register_message = {
+        "type": "register_primitives_and_directive",
+        "payload": {
+            "primitives": [
+                {
+                    "name": "navigate_to_position",
+                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
+                    "inputs": {"x": "float", "y": "float", "theta": "float"},
+                }
+            ],
+            "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
+        },
+    }
+    await websocket.send(json.dumps(register_message))
+
+    # Wait for acknowledgment of registration
+    raw_msg = await websocket.recv()
+    reg_response = json.loads(raw_msg)
+    assert (
+        reg_response["type"] == "primitives_and_directive_registered"
+    ), "Expected primitives_and_directive_registered acknowledgment"
 
     # Send the chat message.
     chat_message = {
@@ -147,8 +204,8 @@ async def test_chat_ask_to_navigate():
         vision_output["type"] == "vision_agent_output"
     ), "Expected vision_agent_output message"
 
-    # Check that the next task is the 'save_receipt' primitive.
-    next_task_type = vision_output["payload"].get("next_task", {}).get("type", "")
+    # Check that the next task is the 'navigate_to_position' primitive.
+    next_task_type = vision_output["payload"].get("next_task", {}).get("name", "")
     assert (
         next_task_type == "navigate_to_position"
     ), "Expected the navigate_to_position primitive to be called"
@@ -171,7 +228,32 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
     Test that uses a chat message and an image, verifies that the task started is navigate_to_position
     and then sends another image. That should not stop the task.
     """
-    server, websocket = await common_setup()
+    server, websocket = await common_setup(
+        "test_chat_ask_to_navigate_with_task_in_execution"
+    )
+
+    # First, register the navigate_to_position primitive and a directive
+    register_message = {
+        "type": "register_primitives_and_directive",
+        "payload": {
+            "primitives": [
+                {
+                    "name": "navigate_to_position",
+                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
+                    "inputs": {"x": "float", "y": "float", "theta": "float"},
+                }
+            ],
+            "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
+        },
+    }
+    await websocket.send(json.dumps(register_message))
+
+    # Wait for acknowledgment of registration
+    raw_msg = await websocket.recv()
+    reg_response = json.loads(raw_msg)
+    assert (
+        reg_response["type"] == "primitives_and_directive_registered"
+    ), "Expected primitives_and_directive_registered acknowledgment"
 
     # Send the first navigation command.
     chat_message_1 = {
@@ -189,7 +271,7 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
     assert (
         vision_output_1["type"] == "vision_agent_output"
     ), "Expected vision_agent_output message for first navigation command"
-    next_task_type_1 = vision_output_1["payload"].get("next_task", {}).get("type", "")
+    next_task_type_1 = vision_output_1["payload"].get("next_task", {}).get("name", "")
     assert (
         next_task_type_1 == "navigate_to_position"
     ), "Expected the navigate_to_position primitive to be called for first navigation"
@@ -222,29 +304,6 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
     assert (
         ready_msg_2["type"] == "ready_for_image"
     ), "Expected ready_for_image after vision output for second navigation attempt"
-
-    # Clean up: close the server.
-    server.close()
-    await server.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_directive_workflow():
-    """
-    Test that sends a directive message and expects a directive acknowledgment.
-    """
-    server, websocket = await common_setup()
-
-    directive_message = {
-        "type": "directive",
-        "payload": {"directive": "Test directive"},
-    }
-    await websocket.send(json.dumps(directive_message))
-
-    # Verify that the server responds with a directive acknowledgment.
-    raw_msg = await websocket.recv()
-    msg = json.loads(raw_msg)
-    assert msg["type"] == "directive_ack", "Expected a directive_ack message"
 
     # Clean up: close the server.
     server.close()
