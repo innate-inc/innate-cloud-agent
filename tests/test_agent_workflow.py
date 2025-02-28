@@ -23,7 +23,7 @@ load_dotenv()
 from run_server import connection_handler
 
 
-async def common_setup():
+async def common_setup(test_name):
     """
     Common setup that starts the server, connects the client,
     sends the auth message, and waits for the "ready_for_image" response.
@@ -41,7 +41,7 @@ async def common_setup():
     # Send authentication message.
     auth_message = {
         "type": "auth",
-        "payload": {"token": "MY_HARDCODED_TOKEN"},
+        "payload": {"token": f"MY_HARDCODED_TOKEN_{test_name}"},
     }
     await websocket.send(json.dumps(auth_message))
 
@@ -118,7 +118,7 @@ async def test_chat_ask_receipt():
     """
     Test that uses a chat message and an image, then verifies the vision output.
     """
-    server, websocket = await common_setup()
+    server, websocket = await common_setup("test_chat_ask_receipt")
 
     # Send the chat message.
     chat_message = {
@@ -162,7 +162,30 @@ async def test_chat_ask_to_navigate():
     """
     Test that uses a chat message and an image, then verifies the vision output.
     """
-    server, websocket = await common_setup()
+    server, websocket = await common_setup("test_chat_ask_to_navigate")
+
+    # First, register the navigate_to_position primitive and a directive
+    register_message = {
+        "type": "register_primitives_and_directive",
+        "payload": {
+            "primitives": [
+                {
+                    "name": "navigate_to_position",
+                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
+                    "inputs": {"x": "float", "y": "float", "theta": "float"},
+                }
+            ],
+            "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
+        },
+    }
+    await websocket.send(json.dumps(register_message))
+
+    # Wait for acknowledgment of registration
+    raw_msg = await websocket.recv()
+    reg_response = json.loads(raw_msg)
+    assert (
+        reg_response["type"] == "primitives_and_directive_registered"
+    ), "Expected primitives_and_directive_registered acknowledgment"
 
     # Send the chat message.
     chat_message = {
@@ -181,8 +204,8 @@ async def test_chat_ask_to_navigate():
         vision_output["type"] == "vision_agent_output"
     ), "Expected vision_agent_output message"
 
-    # Check that the next task is the 'save_receipt' primitive.
-    next_task_type = vision_output["payload"].get("next_task", {}).get("type", "")
+    # Check that the next task is the 'navigate_to_position' primitive.
+    next_task_type = vision_output["payload"].get("next_task", {}).get("name", "")
     assert (
         next_task_type == "navigate_to_position"
     ), "Expected the navigate_to_position primitive to be called"
@@ -205,7 +228,32 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
     Test that uses a chat message and an image, verifies that the task started is navigate_to_position
     and then sends another image. That should not stop the task.
     """
-    server, websocket = await common_setup()
+    server, websocket = await common_setup(
+        "test_chat_ask_to_navigate_with_task_in_execution"
+    )
+
+    # First, register the navigate_to_position primitive and a directive
+    register_message = {
+        "type": "register_primitives_and_directive",
+        "payload": {
+            "primitives": [
+                {
+                    "name": "navigate_to_position",
+                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
+                    "inputs": {"x": "float", "y": "float", "theta": "float"},
+                }
+            ],
+            "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
+        },
+    }
+    await websocket.send(json.dumps(register_message))
+
+    # Wait for acknowledgment of registration
+    raw_msg = await websocket.recv()
+    reg_response = json.loads(raw_msg)
+    assert (
+        reg_response["type"] == "primitives_and_directive_registered"
+    ), "Expected primitives_and_directive_registered acknowledgment"
 
     # Send the first navigation command.
     chat_message_1 = {
@@ -223,7 +271,7 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
     assert (
         vision_output_1["type"] == "vision_agent_output"
     ), "Expected vision_agent_output message for first navigation command"
-    next_task_type_1 = vision_output_1["payload"].get("next_task", {}).get("type", "")
+    next_task_type_1 = vision_output_1["payload"].get("next_task", {}).get("name", "")
     assert (
         next_task_type_1 == "navigate_to_position"
     ), "Expected the navigate_to_position primitive to be called for first navigation"
@@ -267,7 +315,7 @@ async def test_directive_workflow():
     """
     Test that sends a directive message and expects a directive acknowledgment.
     """
-    server, websocket = await common_setup()
+    server, websocket = await common_setup("test_directive_workflow")
 
     directive_message = {
         "type": "directive",
