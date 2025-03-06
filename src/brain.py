@@ -111,6 +111,8 @@ class Brain:
     async def handle_image(self, message: MessageIn):
         """Handle messages of type 'image'."""
         # Extract data from payload
+
+        self.logger.debug(f"Received image message: {message.payload.keys()}")
         base64_img, depth_payload, robot_coords = (
             self.image_processor.extract_image_data(message.payload)
         )
@@ -184,7 +186,7 @@ class Brain:
         x = message.payload.get("x", 0.0)
         y = message.payload.get("y", 0.0)
         theta = message.payload.get("theta", 0.0)
-        
+
         # Always use the connection_id as the user token for pose graph memory
         # Ignore any user_token in the payload
         user_token = self.connection_id
@@ -203,8 +205,14 @@ class Brain:
             # Use the PoseGraphMemory instance from the primitive
             pose_graph_memory = navigate_through_memory.pose_graph_memory
 
+            if not pose_graph_memory.should_add_node(user_token, x, y, theta):
+                self.logger.debug(
+                    f"Skipping image addition to pose graph because a close node already exists"
+                )
+                return
+
             # Add the image to the pose graph
-            self.logger.info(
+            self.logger.debug(
                 f"Adding image to pose graph with user_token: {user_token}"
             )
             node_id = pose_graph_memory.add_image_to_graph(
