@@ -7,7 +7,11 @@ import networkx as nx
 import numpy as np
 from datetime import datetime
 import base64
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, List, Any
+import google.generativeai as genai
+import json
+from PIL import Image
+from io import BytesIO
 
 
 class PoseGraphMemory:
@@ -44,6 +48,24 @@ class PoseGraphMemory:
         # Parameters for edge creation
         self.edge_distance_threshold = 0.8  # Maximum distance for edge creation
         self.edge_angle_threshold = np.radians(90)  # Maximum angle for edge creation
+
+        # Initialize Gemini API if API key is available
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key:
+            genai.configure(api_key=api_key)
+            self.gemini_model = genai.GenerativeModel(
+                model_name="gemini-1.5-pro",
+                generation_config={
+                    "temperature": 1,
+                    "top_p": 0.95,
+                    "top_k": 64,
+                    "max_output_tokens": 8192,
+                    "response_mime_type": "application/json",
+                },
+            )
+        else:
+            self.gemini_model = None
+            print("Warning: GEMINI_API_KEY not found in environment variables. VLM-based navigation will not be available.")
 
     def get_user_graph(self, user_token: str) -> nx.DiGraph:
         """Get the pose graph for a specific user, loading it if necessary."""
@@ -93,7 +115,7 @@ class PoseGraphMemory:
         self, user_token: str, description: str
     ) -> Optional[Tuple[float, float, float]]:
         """
-        Find a location in the graph that matches the given description.
+        Find a location in the graph that matches the given description using VLM.
 
         Args:
             user_token: The user/robot identifier
@@ -105,14 +127,130 @@ class PoseGraphMemory:
         graph = self.get_user_graph(user_token)
 
         if not graph.nodes:
+            print(f"No locations found for user {user_token}")
             return None
 
-        # For now, we'll use a simple approach - just return the most recent node
-        # In a real implementation, this would use semantic search
+        # If Gemini model is not available, fall back to most recent node
+        if self.gemini_model is None:
+            print("Gemini model not available. Falling back to most recent node.")
+            most_recent_node = max(
+                graph.nodes, key=lambda n: graph.nodes[n].get("timestamp", 0)
+            )
+            node_data = graph.nodes[most_recent_node]
+            return (
+                node_data["position"]["x"],
+                node_data["position"]["y"],
+                node_data["position"]["theta"],
+            )
+
+        try:
+            # Create a mapping from frame numbers to node IDs
+            frame_to_node_id = {}
+            message_parts = []
+
+            # Base prompt - improved to be more explicit
+            base_assistant_text = (
+                f"You are an AI assistant for a robot navigating through a space. "
+                f"Your goal is to help the robot find specific locations based on visual appearance. "
+                f"I will show you a series of images labeled as Frame 1, Frame 2, etc. "
+                f"Each image shows a different colored square. "
+                f"Then I will ask you to identify which frame best matches a color description. "
+                f"You must respond with a JSON object containing a 'frame_number' key with the "
+                f"number of the best matching frame as an integer value. "
+                f"For example: {{\"frame_number\": 2}} if Frame 2 is the best match. "
+                f"This is critical for the robot's navigation."
+            )
+            message_parts.append(base_assistant_text)
+            
+            print(f"DEBUG: Base prompt: {base_assistant_text}")
+            print(f"DEBUG: Number of nodes in graph: {len(graph.nodes)}")
+
+            # Add images to the prompt
+            for idx, (node_id, node_data) in enumerate(graph.nodes(data=True)):
+                frame_num = idx + 1
+                frame_to_node_id[frame_num] = node_id
+                
+                # Load and encode the image
+                image_path = node_data["image_path"]
+                print(f"DEBUG: Processing node {node_id}, frame {frame_num}, image path: {image_path}")
+                
+                if os.path.exists(image_path):
+                    with Image.open(image_path) as img:
+                        # Print image details
+                        print(f"DEBUG: Image mode: {img.mode}, size: {img.size}")
+                        
+                        # Convert to RGB if needed
+                        if img.mode != "RGB":
+                            img = img.convert("RGB")
+                        
+                        # Resize if too large
+                        if img.width > 800 or img.height > 800:
+                            img.thumbnail((800, 800))
+                            print(f"DEBUG: Resized image to {img.size}")
+                            
+                        # Create a Gemini image part
+                        buff = BytesIO()
+                        img.save(buff, format="JPEG")
+                        img_bytes = buff.getvalue()
+                        img_part = {"mime_type": "image/jpeg", "data": img_bytes}
+                        message_parts.append(img_part)
+                        message_parts.append(f"Frame {frame_num}.")
+                        print(f"DEBUG: Added frame {frame_num} to message parts")
+                else:
+                    print(f"DEBUG: Image file not found: {image_path}")
+
+            # Final question - improved to be more explicit
+            last_message = (
+                f"Based on these images, which frame best matches this description: \"{description}\"? "
+                f"Look carefully at the colors and visual elements in each frame. "
+                f"Pay special attention to the color of each square. "
+                f"Respond ONLY with a JSON object containing a 'frame_number' key with the "
+                f"number of the best matching frame as an integer value. "
+                f"For example: {{\"frame_number\": 2}} if Frame 2 is the best match."
+            )
+            message_parts.append(last_message)
+            print(f"DEBUG: Final question: {last_message}")
+            print(f"DEBUG: Total message parts: {len(message_parts)}")
+            print(f"DEBUG: Frame to node ID mapping: {frame_to_node_id}")
+
+            # Call Gemini model
+            print(f"DEBUG: Calling Gemini model with {len(message_parts)} message parts")
+            response = self.gemini_model.generate_content(message_parts)
+            print(f"DEBUG: Raw Gemini response: {response.text}")
+            
+            # Parse the response
+            try:
+                response_text = response.text
+                response_json = json.loads(response_text)
+                frame_number = response_json.get("frame_number")
+                
+                print(f"DEBUG: Parsed response JSON: {response_json}")
+                print(f"DEBUG: Frame number from response: {frame_number}")
+                
+                if frame_number and frame_number in frame_to_node_id:
+                    node_id = frame_to_node_id[frame_number]
+                    node_data = graph.nodes[node_id]
+                    print(f"VLM selected frame {frame_number} (node {node_id}) for description: {description}")
+                    return (
+                        node_data["position"]["x"],
+                        node_data["position"]["y"],
+                        node_data["position"]["theta"],
+                    )
+                else:
+                    print(f"Invalid frame number in VLM response: {response_text}")
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f"Error parsing VLM response: {e}. Response: {response.text}")
+        
+        except Exception as e:
+            print(f"Error using VLM for navigation: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Fall back to most recent node if VLM fails
+        print("Falling back to most recent node.")
         most_recent_node = max(
             graph.nodes, key=lambda n: graph.nodes[n].get("timestamp", 0)
         )
-
         node_data = graph.nodes[most_recent_node]
         return (
             node_data["position"]["x"],

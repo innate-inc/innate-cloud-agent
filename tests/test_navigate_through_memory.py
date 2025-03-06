@@ -74,6 +74,8 @@ class TestNavigateThroughMemory:
             self.edge_distance_threshold = 0.8
             self.edge_angle_threshold = np.radians(90)
             self._user_graphs = {}
+            # Initialize gemini_model to None for tests
+            self.gemini_model = None
             
         monkeypatch.setattr(PoseGraphMemory, "_initialize", patched_initialize)
 
