@@ -13,6 +13,8 @@ from src.primitives.transforms import primitive_to_object
 from src.history import History, HistoryEntryType
 from src.agents.types import PrimitiveDefinition
 from src.primitives.navigate_in_sight import NavigateInSight
+from src.primitives.navigate_through_memory import NavigateThroughMemory
+
 from src.brain_utils.logger import BrainLogger
 from src.brain_utils.image_processor import ImageProcessor
 from src.brain_utils.vision_service import VisionService
@@ -38,8 +40,10 @@ class Brain:
         # Store the latest user message that should be consumed once by the visual language model.
         self.latest_user_message = None
         self.primitives_list = []
+
         self.local_primitives_list = [
             NavigateInSight(),
+            NavigateThroughMemory(),
         ]  # These are the ones defined in the brain here, not registered with the server by the user
         self.primitive_in_execution = None
         self.directive = None  # Store the directive that will steer the VLM
@@ -87,6 +91,8 @@ class Brain:
 
             if message_type == MessageInType.IMAGE:
                 await self.handle_image(message)
+            elif message_type == MessageInType.POSE_IMAGE:
+                await self.handle_pose_image(message)
             elif message_type == MessageInType.CHAT_IN:
                 await self.handle_chat_in(message)
             elif message_type == MessageInType.PRIMITIVE_COMPLETED:
@@ -170,6 +176,41 @@ class Brain:
 
         # Send response and prepare for next image
         await self._send_vision_output(vision_output)
+
+    async def handle_pose_image(self, message: MessageIn):
+        """Handle messages of type 'pose_image'."""
+        # Extract data from payload
+        base64_img = message.payload.get("image", "")
+        x = message.payload.get("x", 0.0)
+        y = message.payload.get("y", 0.0)
+        theta = message.payload.get("theta", 0.0)
+        user_token = message.payload.get("user_token", self.connection_id)
+
+        # Find the NavigateThroughMemory primitive in the local_primitives_list
+        navigate_through_memory = next(
+            (
+                p
+                for p in self.local_primitives_list
+                if p.name == "navigate_through_memory"
+            ),
+            None,
+        )
+
+        if navigate_through_memory:
+            # Use the PoseGraphMemory instance from the primitive
+            pose_graph_memory = navigate_through_memory.pose_graph_memory
+
+            # Add the image to the pose graph
+            self.logger.info(
+                f"Adding image to pose graph with user_token: {user_token}"
+            )
+            node_id = pose_graph_memory.add_image_to_graph(
+                user_token, base64_img, x, y, theta
+            )
+
+            self.logger.info(f"Added image to pose graph with node ID: {node_id}")
+        else:
+            self.logger.error("NavigateThroughMemory primitive not found")
 
     async def _send_vision_output(self, vision_output):
         # Record the vision agent output in the history.
