@@ -184,7 +184,10 @@ class Brain:
         x = message.payload.get("x", 0.0)
         y = message.payload.get("y", 0.0)
         theta = message.payload.get("theta", 0.0)
-        user_token = message.payload.get("user_token", self.connection_id)
+        
+        # Always use the connection_id as the user token for pose graph memory
+        # Ignore any user_token in the payload
+        user_token = self.connection_id
 
         # Find the NavigateThroughMemory primitive in the local_primitives_list
         navigate_through_memory = next(

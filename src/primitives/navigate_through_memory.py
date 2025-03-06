@@ -394,7 +394,7 @@ class NavigateThroughMemory(Primitive):
 
         Args:
             description: Text description of the location to find
-            user_token: The user/robot identifier
+            user_token: The user/robot identifier (connection_id from the Brain)
 
         Returns:
             Tuple of (result message, success boolean)
