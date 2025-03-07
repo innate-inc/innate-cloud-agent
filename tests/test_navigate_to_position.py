@@ -125,12 +125,11 @@ async def test_absolute_navigation():
             "primitives": [
                 {
                     "name": "navigate_to_position",
-                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS. Set is_delta=True to use delta mode for relative movement.",
+                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
                     "inputs": {
                         "x": "float",
                         "y": "float",
                         "theta": "float",
-                        "is_delta": "bool",
                     },
                 }
             ],
@@ -205,12 +204,11 @@ async def test_relative_navigation_turn_around():
             "primitives": [
                 {
                     "name": "navigate_to_position",
-                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS. Set is_delta=True to use delta mode for relative movement.",
+                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
                     "inputs": {
                         "x": "float",
                         "y": "float",
                         "theta": "float",
-                        "is_delta": "bool",
                     },
                 }
             ],
@@ -291,12 +289,11 @@ async def test_relative_navigation_move_forward():
             "primitives": [
                 {
                     "name": "navigate_to_position",
-                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS. Set is_delta=True to use delta mode for relative movement.",
+                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
                     "inputs": {
                         "x": "float",
                         "y": "float",
                         "theta": "float",
-                        "is_delta": "bool",
                     },
                 }
             ],
@@ -358,3 +355,5 @@ async def test_relative_navigation_move_forward():
     # Clean up: close the server
     server.close()
     await server.wait_closed()
+
+
