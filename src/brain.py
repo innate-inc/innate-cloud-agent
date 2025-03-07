@@ -181,12 +181,48 @@ class Brain:
             vision_output.next_task
             and vision_output.next_task.name == "navigate_through_memory"
         ):
-            vision_output = await self.navigation_handler.handle_navigate_through_memory(
-                vision_output, self.connection_id
+            vision_output = (
+                await self.navigation_handler.handle_navigate_through_memory(
+                    vision_output, self.connection_id
+                )
             )
             # Make sure to update our primitive_in_execution to match what was created
             if vision_output.next_task:
                 self.primitive_in_execution = vision_output.next_task
+
+        # Handle special case for navigate_to_position with delta mode
+        if (
+            vision_output.next_task
+            and vision_output.next_task.name == "navigate_to_position"
+            and vision_output.next_task.inputs.get("is_delta", False)
+        ):
+            # Convert delta coordinates to absolute coordinates
+            delta_x = vision_output.next_task.inputs.get("x", 0.0)
+            delta_y = vision_output.next_task.inputs.get("y", 0.0)
+            delta_theta = vision_output.next_task.inputs.get("theta", 0.0)
+
+            # Calculate absolute coordinates
+            absolute_x = robot_coords["x"] + delta_x
+            absolute_y = robot_coords["y"] + delta_y
+            absolute_theta = robot_coords["theta"] + delta_theta
+
+            # Create a new navigate_to_position task with absolute coordinates
+            navigation_to_position_task = PrimitiveDefinition(
+                name="navigate_to_position",
+                inputs={
+                    "x": absolute_x,
+                    "y": absolute_y,
+                    "theta": absolute_theta,
+                },
+            )
+
+            # Update the vision output and primitive_in_execution
+            vision_output.next_task = navigation_to_position_task
+            self.primitive_in_execution = navigation_to_position_task
+
+            self.logger.info(
+                f"Converted delta navigation to absolute: delta({delta_x}, {delta_y}, {delta_theta}) -> absolute({absolute_x}, {absolute_y}, {absolute_theta})"
+            )
 
         # Send response and prepare for next image
         await self._send_vision_output(vision_output)
@@ -198,6 +234,9 @@ class Brain:
         x = message.payload.get("x", 0.0)
         y = message.payload.get("y", 0.0)
         theta = message.payload.get("theta", 0.0)
+
+        # Update current robot coordinates
+        self.current_robot_coords = {"x": x, "y": y, "theta": theta}
 
         # Always use the connection_id as the user token for pose graph memory
         # Ignore any user_token in the payload
