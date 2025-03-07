@@ -171,8 +171,8 @@ async def test_chat_ask_to_navigate():
             "primitives": [
                 {
                     "name": "navigate_to_position",
-                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
-                    "inputs": {"x": "float", "y": "float", "theta": "float"},
+                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS. Set is_delta=True to use delta mode for relative movement.",
+                    "inputs": {"x": "float", "y": "float", "theta": "float", "is_delta": "bool"},
                 }
             ],
             "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
@@ -239,8 +239,8 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
             "primitives": [
                 {
                     "name": "navigate_to_position",
-                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
-                    "inputs": {"x": "float", "y": "float", "theta": "float"},
+                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS. Set is_delta=True to use delta mode for relative movement.",
+                    "inputs": {"x": "float", "y": "float", "theta": "float", "is_delta": "bool"},
                 }
             ],
             "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
