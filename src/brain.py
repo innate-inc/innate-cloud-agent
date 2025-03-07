@@ -14,6 +14,7 @@ from src.history import History, HistoryEntryType
 from src.agents.types import PrimitiveDefinition
 from src.primitives.navigate_in_sight import NavigateInSight
 from src.primitives.navigate_through_memory import NavigateThroughMemory
+from src.primitives.turn_and_move import TurnAndMove
 
 from src.brain_utils.logger import BrainLogger
 from src.brain_utils.image_processor import ImageProcessor
@@ -44,6 +45,7 @@ class Brain:
         self.local_primitives_list = [
             NavigateInSight(),
             NavigateThroughMemory(),
+            TurnAndMove(),
         ]  # These are the ones defined in the brain here, not registered with the server by the user
         self.primitive_in_execution = None
         self.directive = None  # Store the directive that will steer the VLM
@@ -86,11 +88,16 @@ class Brain:
         try:
             message_type = message.type
 
-            self.logger.info(f"Processing message: {message_type}")
-            time_start = time.time()
+            # If the message is not a pose_image, log the time it takes to process the message
+            if message_type != MessageInType.POSE_IMAGE:
+                self.logger.info(f"Processing message: {message_type}")
+                time_start = time.time()
 
             if message_type == MessageInType.IMAGE:
                 await self.handle_image(message)
+                self.logger.info(
+                    f"Processed image message in {time.time() - time_start} seconds"
+                )
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)
             elif message_type == MessageInType.CHAT_IN:
@@ -104,7 +111,6 @@ class Brain:
             else:
                 await self.handle_unknown(message)
 
-            self.logger.info(f"Processed message in {time.time() - time_start} seconds")
         except Exception as e:
             self.logger.error(f"Error processing message: {e}")
 
@@ -185,6 +191,15 @@ class Brain:
                 await self.navigation_handler.handle_navigate_through_memory(
                     vision_output, self.connection_id
                 )
+            )
+            # Make sure to update our primitive_in_execution to match what was created
+            if vision_output.next_task:
+                self.primitive_in_execution = vision_output.next_task
+
+        # Handle special case for turn_and_move
+        if vision_output.next_task and vision_output.next_task.name == "turn_and_move":
+            vision_output = await self.navigation_handler.handle_turn_and_move(
+                vision_output, robot_coords
             )
             # Make sure to update our primitive_in_execution to match what was created
             if vision_output.next_task:

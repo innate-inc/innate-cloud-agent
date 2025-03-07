@@ -1,6 +1,7 @@
 from src.agents.types import PrimitiveDefinition
 from src.primitives.types import Primitive
 from typing import List
+import math
 
 
 class NavigationHandler:
@@ -94,4 +95,49 @@ class NavigationHandler:
             vision_output.next_task = None
             vision_output.to_tell_user = f"I couldn't navigate to that location: {result}"
             
+        return vision_output
+
+    async def handle_turn_and_move(self, vision_output, robot_coords):
+        """
+        Handle the turn_and_move primitive by converting it to a navigate_to_position task.
+        
+        This takes the angle to turn and distance to move forward, and calculates the
+        resulting x, y, theta coordinates for a navigate_to_position task.
+        """
+        # Get the angle and distance from the inputs
+        angle = vision_output.next_task.inputs.get("angle", 0.0)
+        distance = vision_output.next_task.inputs.get("distance", 0.0)
+        
+        # Get current robot coordinates
+        current_x = robot_coords.get("x", 0.0)
+        current_y = robot_coords.get("y", 0.0)
+        current_theta = robot_coords.get("theta", 0.0)
+        
+        # Calculate the new theta (current + angle to turn)
+        new_theta = current_theta + angle
+        
+        # Calculate the new x, y coordinates after moving forward
+        # Using trigonometry: x = current_x + distance * cos(new_theta)
+        #                     y = current_y + distance * sin(new_theta)
+        new_x = current_x + distance * math.cos(new_theta)
+        new_y = current_y + distance * math.sin(new_theta)
+        
+        # Create a navigate_to_position task with the calculated coordinates
+        navigation_to_position_task = PrimitiveDefinition(
+            name="navigate_to_position",
+            inputs={
+                "x": new_x,
+                "y": new_y,
+                "theta": new_theta,
+            },
+        )
+        
+        # Update the vision output
+        vision_output.next_task = navigation_to_position_task
+        
+        self.logger.info(
+            f"Converted turn_and_move (angle={angle}, distance={distance}) to navigate_to_position with inputs: "
+            f"x={new_x}, y={new_y}, theta={new_theta}. Initial coords were: {robot_coords}"
+        )
+        
         return vision_output
