@@ -176,6 +176,18 @@ class Brain:
             if vision_output.next_task:
                 self.primitive_in_execution = vision_output.next_task
 
+        # Handle special case for navigate_through_memory
+        if (
+            vision_output.next_task
+            and vision_output.next_task.name == "navigate_through_memory"
+        ):
+            vision_output = await self.navigation_handler.handle_navigate_through_memory(
+                vision_output, self.connection_id
+            )
+            # Make sure to update our primitive_in_execution to match what was created
+            if vision_output.next_task:
+                self.primitive_in_execution = vision_output.next_task
+
         # Send response and prepare for next image
         await self._send_vision_output(vision_output)
 

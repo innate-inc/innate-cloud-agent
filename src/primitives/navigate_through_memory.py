@@ -1,5 +1,4 @@
 from src.primitives.types import Primitive
-from src.primitives.navigate_to_position import NavigateToPosition
 import os
 import pickle
 import time
@@ -456,14 +455,15 @@ class NavigateThroughMemory(Primitive):
 
     async def execute(self, description: str, user_token: str):
         """
-        Navigate to a location in the robot's memory that matches the description.
+        Find a location in the robot's memory that matches the description and
+        return navigation parameters for a navigate_to_position command.
 
         Args:
             description: Text description of the location to find
             user_token: The user/robot identifier (connection_id from the Brain)
 
         Returns:
-            Tuple of (result message, success boolean)
+            Tuple of (result message, success boolean, navigation_command dict)
         """
         # Find the location in the pose graph
         location = self.pose_graph_memory.find_location_by_description(
@@ -474,15 +474,20 @@ class NavigateThroughMemory(Primitive):
             return (
                 f"Could not find a location matching '{description}' in memory",
                 False,
+                None,
             )
 
         x, y, theta = location
 
-        # Use navigate_to_position to go to the found location
-        navigate = NavigateToPosition()
-        result, success = await navigate.execute(x, y, theta)
+        # Create navigation command parameters
+        navigation_command = {
+            "x": x,
+            "y": y,
+            "theta": theta,
+        }
 
-        if success:
-            return f"Successfully navigated to location matching '{description}'", True
-        else:
-            return f"Failed to navigate to location matching '{description}'", False
+        return (
+            f"Found location matching '{description}' at coordinates ({x}, {y}, {theta})",
+            True,
+            navigation_command,
+        )

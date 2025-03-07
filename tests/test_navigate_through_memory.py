@@ -193,23 +193,23 @@ class TestNavigateThroughMemory:
             navigate_through_memory is not None
         ), "NavigateThroughMemory primitive not found"
 
-        # Mock the NavigateToPosition primitive
-        with patch(
-            "src.primitives.navigate_to_position.NavigateToPosition.execute"
-        ) as mock_execute:
-            mock_execute.return_value = ("Reached position (1.0, 2.0, 3.14)", True)
+        # Execute the NavigateThroughMemory primitive
+        result, success, navigation_command = await navigate_through_memory.execute(
+            "Find the red square", mock_brain.connection_id
+        )
 
-            # Execute the NavigateThroughMemory primitive
-            result, success = await navigate_through_memory.execute(
-                "Find the red square", mock_brain.connection_id
-            )
-
-            # Verify NavigateToPosition.execute was called with correct parameters
-            mock_execute.assert_called_once_with(1.0, 2.0, 3.14)
-
-            # Check the result
-            assert success is True, "Navigation failed"
-            assert "Successfully navigated" in result, f"Unexpected result: {result}"
+        # Check the result
+        assert success is True, "Navigation location finding failed"
+        assert "Found location matching" in result, f"Unexpected result: {result}"
+        
+        # Verify navigation command structure
+        assert navigation_command is not None, "Navigation command should not be None"
+        assert "x" in navigation_command, "Navigation command missing x coordinate"
+        assert "y" in navigation_command, "Navigation command missing y coordinate"
+        assert "theta" in navigation_command, "Navigation command missing theta value"
+        assert navigation_command["x"] == 1.0, "Incorrect x coordinate"
+        assert navigation_command["y"] == 2.0, "Incorrect y coordinate"
+        assert navigation_command["theta"] == 3.14, "Incorrect theta value"
 
     @pytest.mark.asyncio
     async def test_navigate_through_memory_no_locations(self, mock_brain):
@@ -229,13 +229,14 @@ class TestNavigateThroughMemory:
         ), "NavigateThroughMemory primitive not found"
 
         # Execute the NavigateThroughMemory primitive with a non-existent user
-        result, success = await navigate_through_memory.execute(
+        result, success, navigation_command = await navigate_through_memory.execute(
             "Find the red square", "non_existent_user"
         )
 
         # Check the result
         assert success is False, "Navigation should have failed"
         assert "Could not find a location" in result, f"Unexpected result: {result}"
+        assert navigation_command is None, "Navigation command should be None for failed navigation"
 
     @pytest.mark.asyncio
     async def test_multiple_pose_images(self, mock_brain):
@@ -287,22 +288,19 @@ class TestNavigateThroughMemory:
         assert len(user_graph.edges) > 0, "No edges were created between nodes"
 
         # Test navigation to the most recent node
-        with patch(
-            "src.primitives.navigate_to_position.NavigateToPosition.execute"
-        ) as mock_execute:
-            mock_execute.return_value = ("Reached position (3.0, 4.0, 3.14)", True)
+        result, success, navigation_command = await navigate_through_memory.execute(
+            "Find the red square", mock_brain.connection_id
+        )
 
-            # Execute the NavigateThroughMemory primitive
-            result, success = await navigate_through_memory.execute(
-                "Find the red square", mock_brain.connection_id
-            )
-
-            # Verify NavigateToPosition.execute called with correct parameters
-            mock_execute.assert_called_once_with(3.0, 4.0, 3.14)
-
-            # Check the result
-            assert success is True, "Navigation failed"
-            assert "Successfully navigated" in result, f"Unexpected result: {result}"
+        # Check the result
+        assert success is True, "Navigation location finding failed"
+        assert "Found location matching" in result, f"Unexpected result: {result}"
+        
+        # Verify navigation command structure
+        assert navigation_command is not None, "Navigation command should not be None"
+        assert navigation_command["x"] == 3.0, "Incorrect x coordinate"
+        assert navigation_command["y"] == 4.0, "Incorrect y coordinate"
+        assert navigation_command["theta"] == 3.14, "Incorrect theta value"
 
     @pytest.mark.asyncio
     async def test_edge_creation_within_threshold(self, mock_brain):
@@ -446,22 +444,19 @@ class TestNavigateThroughMemory:
         assert len(user_graph2.nodes) == 3, "New image was not added to the persisted pose graph"
         
         # Test navigation using the combined pose graph
-        with patch(
-            "src.primitives.navigate_to_position.NavigateToPosition.execute"
-        ) as mock_execute:
-            mock_execute.return_value = ("Reached position (3.0, 4.0, 3.14)", True)
-            
-            # Execute the NavigateThroughMemory primitive
-            result, success = await navigate_through_memory2.execute(
-                "Find the blue square", connection_id
-            )
-            
-            # Verify NavigateToPosition.execute was called with the most recent position
-            mock_execute.assert_called_once_with(3.0, 4.0, 3.14)
-            
-            # Check the result
-            assert success is True, "Navigation failed"
-            assert "Successfully navigated" in result, f"Unexpected result: {result}"
+        result, success, navigation_command = await navigate_through_memory2.execute(
+            "Find the blue square", connection_id
+        )
+        
+        # Check the result
+        assert success is True, "Navigation location finding failed"
+        assert "Found location matching" in result, f"Unexpected result: {result}"
+        
+        # Verify navigation command structure
+        assert navigation_command is not None, "Navigation command should not be None"
+        assert navigation_command["x"] == 3.0, "Incorrect x coordinate"
+        assert navigation_command["y"] == 4.0, "Incorrect y coordinate"
+        assert navigation_command["theta"] == 3.14, "Incorrect theta value"
         
         # Clean up
         await brain2.stop()
