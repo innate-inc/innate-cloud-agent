@@ -112,7 +112,8 @@ class Brain:
                 await self.handle_unknown(message)
 
         except Exception as e:
-            self.logger.error(f"Error processing message: {e}")
+            import traceback
+            self.logger.error(f"Error processing message: {e}\n{traceback.format_exc()}")
 
     async def handle_image(self, message: MessageIn):
         """Handle messages of type 'image'."""
