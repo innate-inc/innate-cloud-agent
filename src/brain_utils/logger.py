@@ -5,6 +5,10 @@ class BrainLogger:
     def __init__(self, connection_id):
         self.connection_id = connection_id
 
+    def debug(self, message):
+        pass  # For now, disable debug logging
+        # print(f"[Brain {self.connection_id}] {message}")
+
     def info(self, message):
         print(f"[Brain {self.connection_id}] {message}")
 

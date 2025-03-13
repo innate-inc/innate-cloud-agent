@@ -13,6 +13,9 @@ from src.primitives.transforms import primitive_to_object
 from src.history import History, HistoryEntryType
 from src.agents.types import PrimitiveDefinition
 from src.primitives.navigate_in_sight import NavigateInSight
+from src.primitives.navigate_through_memory import NavigateThroughMemory
+from src.primitives.turn_and_move import TurnAndMove
+
 from src.brain_utils.logger import BrainLogger
 from src.brain_utils.image_processor import ImageProcessor
 from src.brain_utils.vision_service import VisionService
@@ -38,8 +41,11 @@ class Brain:
         # Store the latest user message that should be consumed once by the visual language model.
         self.latest_user_message = None
         self.primitives_list = []
+
         self.local_primitives_list = [
             NavigateInSight(),
+            NavigateThroughMemory(),
+            TurnAndMove(),
         ]  # These are the ones defined in the brain here, not registered with the server by the user
         self.primitive_in_execution = None
         self.directive = None  # Store the directive that will steer the VLM
@@ -82,11 +88,18 @@ class Brain:
         try:
             message_type = message.type
 
-            self.logger.info(f"Processing message: {message_type}")
-            time_start = time.time()
+            # If the message is not a pose_image, log the time it takes to process the message
+            if message_type != MessageInType.POSE_IMAGE:
+                self.logger.info(f"Processing message: {message_type}")
+                time_start = time.time()
 
             if message_type == MessageInType.IMAGE:
                 await self.handle_image(message)
+                self.logger.info(
+                    f"Processed image message in {time.time() - time_start} seconds"
+                )
+            elif message_type == MessageInType.POSE_IMAGE:
+                await self.handle_pose_image(message)
             elif message_type == MessageInType.CHAT_IN:
                 await self.handle_chat_in(message)
             elif message_type == MessageInType.PRIMITIVE_COMPLETED:
@@ -98,13 +111,15 @@ class Brain:
             else:
                 await self.handle_unknown(message)
 
-            self.logger.info(f"Processed message in {time.time() - time_start} seconds")
         except Exception as e:
-            self.logger.error(f"Error processing message: {e}")
+            import traceback
+            self.logger.error(f"Error processing message: {e}\n{traceback.format_exc()}")
 
     async def handle_image(self, message: MessageIn):
         """Handle messages of type 'image'."""
         # Extract data from payload
+
+        self.logger.debug(f"Received image message: {message.payload.keys()}")
         base64_img, depth_payload, robot_coords = (
             self.image_processor.extract_image_data(message.payload)
         )
@@ -168,8 +183,112 @@ class Brain:
             if vision_output.next_task:
                 self.primitive_in_execution = vision_output.next_task
 
+        # Handle special case for navigate_through_memory
+        if (
+            vision_output.next_task
+            and vision_output.next_task.name == "navigate_through_memory"
+        ):
+            vision_output = (
+                await self.navigation_handler.handle_navigate_through_memory(
+                    vision_output, self.connection_id
+                )
+            )
+            # Make sure to update our primitive_in_execution to match what was created
+            if vision_output.next_task:
+                self.primitive_in_execution = vision_output.next_task
+
+        # Handle special case for turn_and_move
+        if vision_output.next_task and vision_output.next_task.name == "turn_and_move":
+            vision_output = await self.navigation_handler.handle_turn_and_move(
+                vision_output, robot_coords
+            )
+            # Make sure to update our primitive_in_execution to match what was created
+            if vision_output.next_task:
+                self.primitive_in_execution = vision_output.next_task
+
+        # Handle special case for navigate_to_position with delta mode
+        if (
+            vision_output.next_task
+            and vision_output.next_task.name == "navigate_to_position"
+            and vision_output.next_task.inputs.get("is_delta", False)
+        ):
+            # Convert delta coordinates to absolute coordinates
+            delta_x = vision_output.next_task.inputs.get("x", 0.0)
+            delta_y = vision_output.next_task.inputs.get("y", 0.0)
+            delta_theta = vision_output.next_task.inputs.get("theta", 0.0)
+
+            # Calculate absolute coordinates
+            absolute_x = robot_coords["x"] + delta_x
+            absolute_y = robot_coords["y"] + delta_y
+            absolute_theta = robot_coords["theta"] + delta_theta
+
+            # Create a new navigate_to_position task with absolute coordinates
+            navigation_to_position_task = PrimitiveDefinition(
+                name="navigate_to_position",
+                inputs={
+                    "x": absolute_x,
+                    "y": absolute_y,
+                    "theta": absolute_theta,
+                },
+            )
+
+            # Update the vision output and primitive_in_execution
+            vision_output.next_task = navigation_to_position_task
+            self.primitive_in_execution = navigation_to_position_task
+
+            self.logger.info(
+                f"Converted delta navigation to absolute: delta({delta_x}, {delta_y}, {delta_theta}) -> absolute({absolute_x}, {absolute_y}, {absolute_theta})"
+            )
+
         # Send response and prepare for next image
         await self._send_vision_output(vision_output)
+
+    async def handle_pose_image(self, message: MessageIn):
+        """Handle messages of type 'pose_image'."""
+        # Extract data from payload
+        base64_img = message.payload.get("image", "")
+        x = message.payload.get("x", 0.0)
+        y = message.payload.get("y", 0.0)
+        theta = message.payload.get("theta", 0.0)
+
+        # Update current robot coordinates
+        self.current_robot_coords = {"x": x, "y": y, "theta": theta}
+
+        # Always use the connection_id as the user token for pose graph memory
+        # Ignore any user_token in the payload
+        user_token = self.connection_id
+
+        # Find the NavigateThroughMemory primitive in the local_primitives_list
+        navigate_through_memory = next(
+            (
+                p
+                for p in self.local_primitives_list
+                if p.name == "navigate_through_memory"
+            ),
+            None,
+        )
+
+        if navigate_through_memory:
+            # Use the PoseGraphMemory instance from the primitive
+            pose_graph_memory = navigate_through_memory.pose_graph_memory
+
+            if not pose_graph_memory.should_add_node(user_token, x, y, theta):
+                self.logger.debug(
+                    f"Skipping image addition to pose graph because a close node already exists"
+                )
+                return
+
+            # Add the image to the pose graph
+            self.logger.debug(
+                f"Adding image to pose graph with user_token: {user_token}"
+            )
+            node_id = pose_graph_memory.add_image_to_graph(
+                user_token, base64_img, x, y, theta
+            )
+
+            self.logger.info(f"Added image to pose graph with node ID: {node_id}")
+        else:
+            self.logger.error("NavigateThroughMemory primitive not found")
 
     async def _send_vision_output(self, vision_output):
         # Record the vision agent output in the history.

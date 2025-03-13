@@ -1,20 +1,16 @@
 import os
-
-# os.environ["BAML_LOG"] = "off"
-
+import sys
+import pytest
 import asyncio
 import json
-import pytest
 import websockets
-import base64  # <-- Import base64 for encoding the image
+import base64
 import numpy as np
-
-import sys
-import os
-from PIL import Image  # <-- Import Pillow for image processing.
-import io  # <-- Import io for in-memory byte streams.
+from PIL import Image
+import io
 from dotenv import load_dotenv
 
+# Add the src directory to the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Load the environment variables
@@ -28,7 +24,7 @@ async def common_setup(test_name):
     Common setup that starts the server, connects the client,
     sends the auth message, and waits for the "ready_for_image" response.
     """
-    port = 8766  # Ensure this port is free during testing.
+    port = 8767  # Use a different port than other tests
     # Start the temporary WebSocket server.
     server = await websockets.serve(
         connection_handler, "localhost", port, max_size=10 * 1024 * 1024
@@ -55,7 +51,9 @@ async def common_setup(test_name):
     return server, websocket
 
 
-async def basic_image_handling(websocket, image_path, image_type="JPEG"):
+async def basic_image_handling(
+    websocket, image_path="tests/test_navigate.png", image_type="PNG"
+):
     """
     Opens an image from a local file, reduces its dimensions by half,
     encodes it in base64, and sends it over the provided websocket.
@@ -112,57 +110,13 @@ async def basic_image_handling(websocket, image_path, image_type="JPEG"):
     await websocket.send(json.dumps(image_message))
 
 
-@pytest.mark.skip(reason="Temporarily deactivated the receipt test")
 @pytest.mark.asyncio
-async def test_chat_ask_receipt():
+async def test_absolute_navigation():
     """
-    Test that uses a chat message and an image, then verifies the vision output.
+    Test that when the user asks to go to a specific position,
+    the robot navigates to the absolute coordinates.
     """
-    server, websocket = await common_setup("test_chat_ask_receipt")
-
-    # Send the chat message.
-    chat_message = {
-        "type": "chat_in",
-        "payload": {
-            "text": "Hello agent. Can you save this receipt and confirm it by telling me what you did?"
-        },
-    }
-    await websocket.send(json.dumps(chat_message))
-
-    # Send the image using the helper.
-    await basic_image_handling(websocket, "tests/test_receipt.jpg")
-
-    # Expect a vision output response.
-    raw_msg = await websocket.recv()
-    vision_output = json.loads(raw_msg)
-    assert (
-        vision_output["type"] == "vision_agent_output"
-    ), "Expected vision_agent_output message"
-
-    # Check that the next task is the 'save_receipt' primitive.
-    next_task_type = vision_output["payload"].get("next_task", {}).get("type", "")
-    assert (
-        next_task_type == "save_receipt"
-    ), "Expected the save_receipt primitive to be called"
-
-    # Next, the server should send a "ready_for_image" message.
-    raw_msg = await websocket.recv()
-    msg = json.loads(raw_msg)
-    assert (
-        msg["type"] == "ready_for_image"
-    ), "Expected ready_for_image after vision output"
-
-    # Clean up: close the server.
-    server.close()
-    await server.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_chat_ask_to_navigate():
-    """
-    Test that uses a chat message and an image, then verifies the vision output.
-    """
-    server, websocket = await common_setup("test_chat_ask_to_navigate")
+    server, websocket = await common_setup("test_absolute_navigation")
 
     # First, register the navigate_to_position primitive and a directive
     register_message = {
@@ -171,8 +125,12 @@ async def test_chat_ask_to_navigate():
             "primitives": [
                 {
                     "name": "navigate_to_position",
-                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS. Set is_delta=True to use delta mode for relative movement.",
-                    "inputs": {"x": "float", "y": "float", "theta": "float", "is_delta": "bool"},
+                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
+                    "inputs": {
+                        "x": "float",
+                        "y": "float",
+                        "theta": "float",
+                    },
                 }
             ],
             "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
@@ -187,50 +145,57 @@ async def test_chat_ask_to_navigate():
         reg_response["type"] == "primitives_and_directive_registered"
     ), "Expected primitives_and_directive_registered acknowledgment"
 
-    # Send the chat message.
+    # Send the chat message for absolute navigation
     chat_message = {
         "type": "chat_in",
-        "payload": {"text": "Hello agent. Can you navigate to x=100, y=100?"},
+        "payload": {"text": "Go to position x=5, y=10"},
     }
     await websocket.send(json.dumps(chat_message))
 
-    # Send the image using the helper.
-    await basic_image_handling(websocket, "tests/test_navigate.png", "PNG")
+    # Send the image
+    await basic_image_handling(websocket)
 
-    # Expect a vision output response.
+    # Expect a vision output response
     raw_msg = await websocket.recv()
     vision_output = json.loads(raw_msg)
     assert (
         vision_output["type"] == "vision_agent_output"
     ), "Expected vision_agent_output message"
 
-    # Check that the next task is the 'navigate_to_position' primitive.
-    next_task_type = vision_output["payload"].get("next_task", {}).get("name", "")
+    # Check that the next task is the 'navigate_to_position' primitive
+    next_task = vision_output["payload"].get("next_task", {})
     assert (
-        next_task_type == "navigate_to_position"
-    ), "Expected the navigate_to_position primitive to be called"
+        next_task.get("name") == "navigate_to_position"
+    ), "Expected navigate_to_position primitive"
 
-    # Next, the server should send a "ready_for_image" message.
+    # Check that the coordinates are absolute (not using delta mode)
+    inputs = next_task.get("inputs", {})
+    assert (
+        abs(inputs.get("x", 0) - 5.0) < 0.1
+    ), "Expected x coordinate to be close to 5.0"
+    assert (
+        abs(inputs.get("y", 0) - 10.0) < 0.1
+    ), "Expected y coordinate to be close to 10.0"
+
+    # Next, the server should send a "ready_for_image" message
     raw_msg = await websocket.recv()
     msg = json.loads(raw_msg)
     assert (
         msg["type"] == "ready_for_image"
     ), "Expected ready_for_image after vision output"
 
-    # Clean up: close the server.
+    # Clean up: close the server
     server.close()
     await server.wait_closed()
 
 
 @pytest.mark.asyncio
-async def test_chat_ask_to_navigate_with_task_in_execution():
+async def test_relative_navigation_turn_around():
     """
-    Test that uses a chat message and an image, verifies that the task started is navigate_to_position
-    and then sends another image. That should not stop the task.
+    Test that when the user asks to turn around,
+    the robot uses a 180-degree rotation.
     """
-    server, websocket = await common_setup(
-        "test_chat_ask_to_navigate_with_task_in_execution"
-    )
+    server, websocket = await common_setup("test_relative_navigation_turn_around")
 
     # First, register the navigate_to_position primitive and a directive
     register_message = {
@@ -239,8 +204,12 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
             "primitives": [
                 {
                     "name": "navigate_to_position",
-                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS. Set is_delta=True to use delta mode for relative movement.",
-                    "inputs": {"x": "float", "y": "float", "theta": "float", "is_delta": "bool"},
+                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
+                    "inputs": {
+                        "x": "float",
+                        "y": "float",
+                        "theta": "float",
+                    },
                 }
             ],
             "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
@@ -255,56 +224,136 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
         reg_response["type"] == "primitives_and_directive_registered"
     ), "Expected primitives_and_directive_registered acknowledgment"
 
-    # Send the first navigation command.
-    chat_message_1 = {
+    # Send the chat message for turning around
+    chat_message = {
         "type": "chat_in",
-        "payload": {"text": "Hello agent. Can you navigate to x=100, y=100?"},
+        "payload": {"text": "Turn around"},
     }
-    await websocket.send(json.dumps(chat_message_1))
+    await websocket.send(json.dumps(chat_message))
 
-    # Send the image for the first command.
-    await basic_image_handling(websocket, "tests/test_navigate.png", "PNG")
+    # Send the image
+    await basic_image_handling(websocket)
 
-    # Expect vision output response for the first command.
+    # Expect a vision output response
     raw_msg = await websocket.recv()
-    vision_output_1 = json.loads(raw_msg)
+    vision_output = json.loads(raw_msg)
     assert (
-        vision_output_1["type"] == "vision_agent_output"
-    ), "Expected vision_agent_output message for first navigation command"
-    next_task_type_1 = vision_output_1["payload"].get("next_task", {}).get("name", "")
-    assert (
-        next_task_type_1 == "navigate_to_position"
-    ), "Expected the navigate_to_position primitive to be called for first navigation"
+        vision_output["type"] == "vision_agent_output"
+    ), "Expected vision_agent_output message"
 
-    # Expect the server to send a "ready_for_image" message.
+    # Check that the next task is the 'navigate_to_position' primitive
+    next_task = vision_output["payload"].get("next_task", {})
+    assert (
+        next_task.get("name") == "navigate_to_position"
+    ), "Expected navigate_to_position primitive"
+
+    # Check that the theta value is close to π (3.14) radians for a 180-degree turn
+    inputs = next_task.get("inputs", {})
+    theta = inputs.get("theta", 0)
+    assert (
+        abs(theta - np.pi) < 0.1 or abs(theta + np.pi) < 0.1
+    ), "Expected theta to be close to π radians (180 degrees)"
+
+    # For a turn in place, x and y should be close to 0
+    assert (
+        abs(inputs.get("x", 999)) < 0.1
+    ), "Expected x to be close to 0 for turning in place"
+    assert (
+        abs(inputs.get("y", 999)) < 0.1
+    ), "Expected y to be close to 0 for turning in place"
+
+    # Next, the server should send a "ready_for_image" message
     raw_msg = await websocket.recv()
-    ready_msg_1 = json.loads(raw_msg)
+    msg = json.loads(raw_msg)
     assert (
-        ready_msg_1["type"] == "ready_for_image"
-    ), "Expected ready_for_image after vision output for first navigation"
+        msg["type"] == "ready_for_image"
+    ), "Expected ready_for_image after vision output"
 
-    # Send the image for the second navigation attempt.
-    await basic_image_handling(websocket, "tests/test_navigate.png", "PNG")
-
-    # Expect vision output response for the second navigation attempt.
-    raw_msg = await websocket.recv()
-    vision_output_2 = json.loads(raw_msg)
-    assert (
-        vision_output_2["type"] == "vision_agent_output"
-    ), "Expected vision_agent_output message for second navigation attempt"
-    # Since a task is already in execution, no new task should be created.
-    next_task_2 = vision_output_2["payload"].get("next_task", None)
-    assert (
-        next_task_2 is None
-    ), "Expected no new task to be created while a navigation task is already executing"
-
-    # The server should indicate readiness for a new image.
-    raw_msg = await websocket.recv()
-    ready_msg_2 = json.loads(raw_msg)
-    assert (
-        ready_msg_2["type"] == "ready_for_image"
-    ), "Expected ready_for_image after vision output for second navigation attempt"
-
-    # Clean up: close the server.
+    # Clean up: close the server
     server.close()
     await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_relative_navigation_move_forward():
+    """
+    Test that when the user asks to move forward,
+    the robot uses a positive x value.
+    """
+    server, websocket = await common_setup("test_relative_navigation_move_forward")
+
+    # First, register the navigate_to_position primitive and a directive
+    register_message = {
+        "type": "register_primitives_and_directive",
+        "payload": {
+            "primitives": [
+                {
+                    "name": "navigate_to_position",
+                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
+                    "inputs": {
+                        "x": "float",
+                        "y": "float",
+                        "theta": "float",
+                    },
+                }
+            ],
+            "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
+        },
+    }
+    await websocket.send(json.dumps(register_message))
+
+    # Wait for acknowledgment of registration
+    raw_msg = await websocket.recv()
+    reg_response = json.loads(raw_msg)
+    assert (
+        reg_response["type"] == "primitives_and_directive_registered"
+    ), "Expected primitives_and_directive_registered acknowledgment"
+
+    # Send the chat message for moving forward
+    chat_message = {
+        "type": "chat_in",
+        "payload": {"text": "Move forward 2 meters"},
+    }
+    await websocket.send(json.dumps(chat_message))
+
+    # Send the image
+    await basic_image_handling(websocket)
+
+    # Expect a vision output response
+    raw_msg = await websocket.recv()
+    vision_output = json.loads(raw_msg)
+    assert (
+        vision_output["type"] == "vision_agent_output"
+    ), "Expected vision_agent_output message"
+
+    # Check that the next task is the 'navigate_to_position' primitive
+    next_task = vision_output["payload"].get("next_task", {})
+    assert (
+        next_task.get("name") == "navigate_to_position"
+    ), "Expected navigate_to_position primitive"
+
+    # The x value should be positive for moving forward
+    inputs = next_task.get("inputs", {})
+    x = inputs.get("x", 0)
+    assert x > 1.5, "Expected x to be positive and close to 2.0 for moving forward"
+
+    # For moving straight forward, y should be close to 0 and theta should be close to 0
+    assert (
+        abs(inputs.get("y", 999)) < 0.1
+    ), "Expected y to be close to 0 for moving straight"
+    assert (
+        abs(inputs.get("theta", 999)) < 0.1
+    ), "Expected theta to be close to 0 for moving straight"
+
+    # Next, the server should send a "ready_for_image" message
+    raw_msg = await websocket.recv()
+    msg = json.loads(raw_msg)
+    assert (
+        msg["type"] == "ready_for_image"
+    ), "Expected ready_for_image after vision output"
+
+    # Clean up: close the server
+    server.close()
+    await server.wait_closed()
+
+

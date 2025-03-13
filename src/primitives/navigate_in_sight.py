@@ -32,7 +32,7 @@ class NavigateInSight(Primitive):
         return "navigate_in_sight"
 
     def guidelines(self):
-        return "To use to navigate to an object or target in sight. Provide a target object name, such as 'shelf', 'table', 'chair', etc."
+        return "To use to navigate to an object or target in sight. Is a much better primitive than navigate_to_position to use when it's to navigate to a target in sight. Provide a target object name, such as 'shelf', 'table', 'chair', etc."
 
     def update_current_vars(
         self,

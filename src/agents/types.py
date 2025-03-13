@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class PrimitiveDefinition(BaseModel):
@@ -11,9 +11,10 @@ class PrimitiveDefinition(BaseModel):
     )
     inputs: Dict[str, Any]
 
-    class Config:
+    model_config = ConfigDict(
         # Allow population using the field name (guideline) even if an alias is provided.
-        allow_population_by_field_name = True
+        populate_by_name=True
+    )
 
 
 class VisionAgentInput(BaseModel):
