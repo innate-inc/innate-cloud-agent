@@ -5,6 +5,7 @@ from src.baml_client import b
 from src.primitives.transforms import create_type_builder
 from src.agents.types import VisionAgentInput
 from src.baml_client.types import VisionAgentOutput
+from src.agents.exceptions import MaxRetriesExceededException
 import asyncio
 
 
@@ -67,17 +68,18 @@ async def gemini_vision_agent(
 
     context_text = "\n".join(context_text_lines)
 
-    response = await decreasesmax_retries(
-        img,
-        context_text,
-        primitives_list_string,
-        tb,
-        max_retries,
-    )
-
-    # Some post-processing if necessary
-
-    return response
+    try:
+        response = await decreasesmax_retries(
+            img,
+            context_text,
+            primitives_list_string,
+            tb,
+            max_retries,
+        )
+        return response
+    except MaxRetriesExceededException as e:
+        # Re-raise the exception to be handled by the caller
+        raise e
 
 
 async def decreasesmax_retries(
@@ -104,7 +106,7 @@ async def decreasesmax_retries(
         GeminiVisionAgentOutput: The output returned by GeminiVisionAgent.
 
     Raises:
-        BamlValidationError: When the GeminiVisionAgent call fails on the final attempt.
+        MaxRetriesExceededException: When the maximum number of retries is exceeded.
     """
     try:
         output = await b.GeminiVisionAgent(
@@ -115,11 +117,13 @@ async def decreasesmax_retries(
         )
         return output
     except BamlValidationError as e:
-        print(
-            f"\033[1;31mBamlValidationError on attempt {attempt}/{max_retries}: {e}\033[0m"
-        )
+        error_msg = f"BamlValidationError on attempt {attempt}/{max_retries}: {e}"
+        print(f"\033[1;31m{error_msg}\033[0m")
         if attempt == max_retries:
-            return None
+            # Raise a custom exception instead of returning None
+            raise MaxRetriesExceededException(
+                agent_type="gemini_flash", max_retries=max_retries, last_error=e
+            )
         await asyncio.sleep(1)
         return await decreasesmax_retries(
             img,

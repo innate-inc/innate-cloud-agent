@@ -6,6 +6,7 @@ from src.agents.baml_agent import vision_agent
 from src.agents.gemini_flash_baml_agent import gemini_vision_agent
 from src.agents.types import VisionAgentInput
 from src.baml_client.types import VisionAgentOutput
+from src.agents.exceptions import MaxRetriesExceededException
 from src.primitives.transforms import primitive_to_object
 
 
@@ -83,10 +84,33 @@ class VisionService:
             else:
                 raise ValueError(f"Unsupported agent type: {agent_type}")
 
+        except MaxRetriesExceededException as e:
+            # Handle the max retries exceeded exception specifically
+            self.logger.error(
+                f"Maximum retries exceeded for {e.agent_type} vision model: {e}"
+            )
+            return VisionAgentOutput(
+                stop_current_task=False,
+                observation=(
+                    "The brain failed after multiple attempts, "
+                    "so it stopped the current task."
+                ),
+                thoughts=(
+                    f"Maximum retries exceeded: {str(e)}\n"
+                    f"The {e.agent_type} vision agent failed to produce a valid "
+                    f"response after {e.max_retries} attempts."
+                ),
+                new_goal=None,
+                next_task=None,
+                anticipation=None,
+                to_tell_user=(
+                    "BEEP BOOP BEEP BOOP, the brain failed after multiple attempts. "
+                    "Maybe next time it will work?"
+                ),
+            )
         except Exception as e:
+            # Handle other exceptions
             self.logger.error(f"Error calling {agent_type.value} vision model: {e}")
-
-            # Create the appropriate output type based on the agent_type
             return VisionAgentOutput(
                 stop_current_task=True,
                 observation="The brain failed, so it stopped the current task.",

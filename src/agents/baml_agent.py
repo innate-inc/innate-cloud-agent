@@ -5,6 +5,7 @@ from src.baml_client import b
 from src.primitives.transforms import create_type_builder
 from src.agents.types import VisionAgentInput
 from src.baml_client.types import VisionAgentOutput
+from src.agents.exceptions import MaxRetriesExceededException
 import asyncio
 
 
@@ -31,14 +32,18 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
     max_retries = 3
 
     context_text_lines = [
-        f"Below is the history of your actions and exchanges so far:\n{vlm_inputs.history_as_string}",
+        (
+            f"Below is the history of your actions and exchanges so far:\n"
+            f"{vlm_inputs.history_as_string}"
+        ),
         (
             f"The user said: {vlm_inputs.user_prompt_text}"
             if vlm_inputs.user_prompt_text is not None
             else "The user did not say anything."
         ),
         (
-            f"The current task is: {vlm_inputs.primitive_in_execution.model_dump_json()}"
+            f"The current task is: "
+            f"{vlm_inputs.primitive_in_execution.model_dump_json()}"
             if vlm_inputs.primitive_in_execution is not None
             else "You are not currently executing a task."
         ),
@@ -48,7 +53,8 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
     if vlm_inputs.robot_coords:
         coords = vlm_inputs.robot_coords
         coords_text = (
-            f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, "
+            f"Your coordinates if useful to know are: "
+            f"x={coords.get('x')}, y={coords.get('y')}, "
             f"z={coords.get('z')}, theta={coords.get('theta')}"
         )
         context_text_lines.append(coords_text)
@@ -60,17 +66,18 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
 
     context_text = "\n".join(context_text_lines)
 
-    response = await decreasesmax_retries(
-        img,
-        context_text,
-        primitives_list_string,
-        tb,
-        max_retries,
-    )
-
-    # Some post-processing if necessary
-
-    return response
+    try:
+        response = await decreasesmax_retries(
+            img,
+            context_text,
+            primitives_list_string,
+            tb,
+            max_retries,
+        )
+        return response
+    except MaxRetriesExceededException as e:
+        # Re-raise the exception to be handled by the caller
+        raise e
 
 
 async def decreasesmax_retries(
@@ -82,12 +89,13 @@ async def decreasesmax_retries(
     attempt: int = 1,
 ) -> Optional[VisionAgentOutput]:
     """
-    Recursively attempts to call VisionAgent until either a successful output is produced
-    or the number of allowed retries (max_retries) is exhausted.
+    Recursively attempts to call VisionAgent until either a successful output
+    is produced or the number of allowed retries (max_retries) is exhausted.
 
     Args:
         img (Image): The image instance built from the base64 string.
-        user_prompt_text (Optional[str]): The user prompt text (or None).
+        context_text (Optional[str]): The context text.
+        primitives_list_string (str): String representation of available primitives.
         tb: The type builder used in calling VisionAgent.
         max_retries (int): The maximum number of attempts allowed.
         attempt (int, optional): The current attempt number. Defaults to 1.
@@ -96,7 +104,7 @@ async def decreasesmax_retries(
         VisionAgentOutput: The output returned by VisionAgent.
 
     Raises:
-        BamlValidationError: When the VisionAgent call fails on the final attempt.
+        MaxRetriesExceededException: When the maximum number of retries is exceeded.
     """
     try:
         output = await b.VisionAgent(
@@ -107,11 +115,13 @@ async def decreasesmax_retries(
         )
         return output
     except BamlValidationError as e:
-        print(
-            f"\033[1;31mBamlValidationError on attempt {attempt}/{max_retries}: {e}\033[0m"
-        )
+        error_msg = f"\033[1;31mBamlValidationError on attempt {attempt}/{max_retries}: {e}\033[0m"
+        print(error_msg)
         if attempt == max_retries:
-            return None
+            # Raise a custom exception instead of returning None
+            raise MaxRetriesExceededException(
+                agent_type="anthropic", max_retries=max_retries, last_error=e
+            )
         await asyncio.sleep(1)
         return await decreasesmax_retries(
             img,
