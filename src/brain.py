@@ -3,6 +3,7 @@ import json
 import time
 
 
+from src.baml_client.partial_types import VisionAgentOutput
 from src.message_types import (
     MessageIn,
     MessageInType,
@@ -113,7 +114,10 @@ class Brain:
 
         except Exception as e:
             import traceback
-            self.logger.error(f"Error processing message: {e}\n{traceback.format_exc()}")
+
+            self.logger.error(
+                f"Error processing message: {e}\n{traceback.format_exc()}"
+            )
 
     async def handle_image(self, message: MessageIn):
         """Handle messages of type 'image'."""
@@ -154,6 +158,20 @@ class Brain:
             robot_coords=robot_coords,
             directive=self.directive,
         )
+
+        if not vision_output:
+            self.logger.error(
+                f"No vision output received for connection {self.connection_id}"
+            )
+            vision_output = VisionAgentOutput(
+                stop_current_task=True,
+                observation="The brain failed, so it stopped the current task.",
+                thoughts="The brain failed, so it stopped the current task.",
+                new_goal=None,
+                next_task=None,
+                anticipation=None,
+                to_tell_user="BEEP BOOP BEEP BOOP, the brain failed. Stopping the current task.",
+            )
 
         # Clear the user message as it's been consumed
         self.latest_user_message = None
