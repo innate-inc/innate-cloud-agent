@@ -19,7 +19,7 @@ from src.primitives.turn_and_move import TurnAndMove
 
 from src.brain_utils.logger import BrainLogger
 from src.brain_utils.image_processor import ImageProcessor
-from src.brain_utils.vision_service import VisionService
+from src.brain_utils.vision_service import VisionAgentType, VisionService
 from src.brain_utils.navigation_handler import NavigationHandler
 
 
@@ -157,6 +157,7 @@ class Brain:
             history_as_string=self.history.get_as_string(),
             robot_coords=robot_coords,
             directive=self.directive,
+            agent_type=VisionAgentType.GEMINI_FLASH,
         )
 
         if not vision_output:

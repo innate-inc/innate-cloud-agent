@@ -8,9 +8,11 @@ from src.baml_client.types import VisionAgentOutput
 import asyncio
 
 
-async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutput]:
+async def gemini_vision_agent(
+    vlm_inputs: VisionAgentInput,
+) -> Optional[VisionAgentOutput]:
     """
-    Calls the VisionAgent function with a dynamically built union for next_task.
+    Calls the GeminiVisionAgent function with a dynamically built union for next_task.
 
     The VisionAgentInput model ensures the following keys are available:
       - base64_img: A base64-encoded image.
@@ -28,17 +30,21 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
     tb = create_type_builder(vlm_inputs.primitives_list)
     primitive_names = [prim.name for prim in vlm_inputs.primitives_list]
     primitives_list_string = ", ".join(primitive_names)
-    max_retries = 3
+    max_retries = 10
 
     context_text_lines = [
-        f"Below is the history of your actions and exchanges so far:\n{vlm_inputs.history_as_string}",
+        (
+            f"Below is the history of your actions and exchanges so far:\n"
+            f"{vlm_inputs.history_as_string}"
+        ),
         (
             f"The user said: {vlm_inputs.user_prompt_text}"
             if vlm_inputs.user_prompt_text is not None
             else "The user did not say anything."
         ),
         (
-            f"The current task is: {vlm_inputs.primitive_in_execution.model_dump_json()}"
+            f"The current task is: "
+            f"{vlm_inputs.primitive_in_execution.model_dump_json()}"
             if vlm_inputs.primitive_in_execution is not None
             else "You are not currently executing a task."
         ),
@@ -48,7 +54,8 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
     if vlm_inputs.robot_coords:
         coords = vlm_inputs.robot_coords
         coords_text = (
-            f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, "
+            f"Your coordinates if useful to know are: "
+            f"x={coords.get('x')}, y={coords.get('y')}, "
             f"z={coords.get('z')}, theta={coords.get('theta')}"
         )
         context_text_lines.append(coords_text)
@@ -82,24 +89,25 @@ async def decreasesmax_retries(
     attempt: int = 1,
 ) -> Optional[VisionAgentOutput]:
     """
-    Recursively attempts to call VisionAgent until either a successful output is produced
-    or the number of allowed retries (max_retries) is exhausted.
+    Recursively attempts to call GeminiVisionAgent until either a successful output
+    is produced or the number of allowed retries (max_retries) is exhausted.
 
     Args:
         img (Image): The image instance built from the base64 string.
-        user_prompt_text (Optional[str]): The user prompt text (or None).
-        tb: The type builder used in calling VisionAgent.
+        context_text (Optional[str]): The context text.
+        primitives_list_string (str): String representation of available primitives.
+        tb: The type builder used in calling GeminiVisionAgent.
         max_retries (int): The maximum number of attempts allowed.
         attempt (int, optional): The current attempt number. Defaults to 1.
 
     Returns:
-        VisionAgentOutput: The output returned by VisionAgent.
+        GeminiVisionAgentOutput: The output returned by GeminiVisionAgent.
 
     Raises:
-        BamlValidationError: When the VisionAgent call fails on the final attempt.
+        BamlValidationError: When the GeminiVisionAgent call fails on the final attempt.
     """
     try:
-        output = await b.VisionAgent(
+        output = await b.GeminiVisionAgent(
             img,
             context_text,
             primitives_list_string=primitives_list_string,

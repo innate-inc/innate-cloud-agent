@@ -32,3 +32,11 @@ client<llm> AnthropicClient {
     api_key env.ANTHROPIC_API_KEY
   }
 }
+
+client<llm> GeminiFlashClient {
+  provider google-ai
+  options {
+    model "gemini-2.0-flash"
+    api_key env.GEMINI_API_KEY
+  }
+}

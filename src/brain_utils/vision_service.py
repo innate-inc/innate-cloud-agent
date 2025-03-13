@@ -1,8 +1,17 @@
 import traceback
+from enum import Enum
+from typing import Union
+
 from src.agents.baml_agent import vision_agent
+from src.agents.gemini_flash_baml_agent import gemini_vision_agent
 from src.agents.types import VisionAgentInput
 from src.baml_client.types import VisionAgentOutput
 from src.primitives.transforms import primitive_to_object
+
+
+class VisionAgentType(str, Enum):
+    ANTHROPIC = "anthropic"
+    GEMINI_FLASH = "gemini_flash"
 
 
 class VisionService:
@@ -18,20 +27,34 @@ class VisionService:
         history_as_string,
         robot_coords,
         directive=None,
-    ) -> VisionAgentOutput:
+        agent_type: VisionAgentType = VisionAgentType.ANTHROPIC,
+    ) -> Union[VisionAgentOutput]:
         """
         Calls the external visual language model with the given inputs.
+
+        Args:
+            base64_img: A base64-encoded image.
+            user_prompt_text: The text provided by the user.
+            primitive_in_execution: The current primitive in execution.
+            primitives_list: A list of primitives.
+            history_as_string: A history of events.
+            robot_coords: A dictionary with the robot's coordinates.
+            directive: A directive to steer the vision language model.
+            agent_type: The type of vision agent to use (anthropic or gemini_flash).
         """
         try:
             current_primitive = (
                 primitive_in_execution.name if primitive_in_execution else "None"
             )
+            agent_name = agent_type.value
             self.logger.info(
-                f"Calling visual language model while current primitive is {current_primitive}"
+                f"Calling {agent_name} vision model while current primitive is "
+                f"{current_primitive}"
             )
             if user_prompt_text:
                 self.logger.info(
-                    f"Sending user message to vision agent: {user_prompt_text}"
+                    f"Sending user message to {agent_name} vision agent: "
+                    f"{user_prompt_text}"
                 )
 
             # Convert primitive_in_execution if needed
@@ -50,16 +73,32 @@ class VisionService:
                 directive=directive,
             )
 
-            completion = await vision_agent(vlm_inputs)
-            return completion
+            # Call the appropriate vision agent based on the agent_type
+            if agent_type == VisionAgentType.ANTHROPIC:
+                completion = await vision_agent(vlm_inputs)
+                return completion
+            elif agent_type == VisionAgentType.GEMINI_FLASH:
+                completion = await gemini_vision_agent(vlm_inputs)
+                return completion
+            else:
+                raise ValueError(f"Unsupported agent type: {agent_type}")
+
         except Exception as e:
-            self.logger.error(f"Error calling visual language model: {e}")
+            self.logger.error(f"Error calling {agent_type.value} vision model: {e}")
+
+            # Create the appropriate output type based on the agent_type
             return VisionAgentOutput(
                 stop_current_task=True,
                 observation="The brain failed, so it stopped the current task.",
-                thoughts=f"Fallback due to error: {str(e)}\nTraceback: {traceback.format_exc()}",
+                thoughts=(
+                    f"Fallback due to error: {str(e)}\n"
+                    f"Traceback: {traceback.format_exc()}"
+                ),
                 new_goal=None,
                 next_task=None,
                 anticipation=None,
-                to_tell_user="BEEP BOOP BEEP BOOP, the brain failed. Stopping the current task.",
+                to_tell_user=(
+                    "BEEP BOOP BEEP BOOP, the brain failed. "
+                    "Stopping the current task."
+                ),
             )
