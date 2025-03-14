@@ -27,3 +27,21 @@ class MaxRetriesExceededException(Exception):
             message += f" Last error: {str(last_error)}"
 
         super().__init__(message)
+
+
+class UnforeseenBamlClientError(Exception):
+    """
+    Exception raised when an unexpected BAML client error occurs that is not
+    handled by the retry mechanism.
+    """
+
+    def __init__(self, message: str, original_error: Exception = None):
+        """
+        Initialize the exception with information about the unexpected error.
+
+        Args:
+            message: A descriptive message about the error
+            original_error: The original exception that was caught
+        """
+        self.original_error = original_error
+        super().__init__(message)

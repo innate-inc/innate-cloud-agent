@@ -6,7 +6,7 @@ from src.agents.baml_agent import vision_agent
 from src.agents.gemini_flash_baml_agent import gemini_vision_agent
 from src.agents.types import VisionAgentInput
 from src.baml_client.types import VisionAgentOutput
-from src.agents.exceptions import MaxRetriesExceededException
+from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlClientError
 from src.primitives.transforms import primitive_to_object
 
 
@@ -106,6 +106,28 @@ class VisionService:
                 to_tell_user=(
                     "BEEP BOOP BEEP BOOP, the brain failed after multiple attempts. "
                     "Maybe next time it will work?"
+                ),
+            )
+        except UnforeseenBamlClientError as e:
+            # Handle unforeseen BAML client errors
+            self.logger.error(f"Unforeseen BAML client error: {e}")
+            has_original = hasattr(e, "original_error")
+            original_err = e.original_error if has_original else "Unknown"
+            return VisionAgentOutput(
+                stop_current_task=True,
+                observation=(
+                    "The brain encountered an unexpected error with the vision model."
+                ),
+                thoughts=(
+                    f"Unforeseen BAML client error: {str(e)}\n"
+                    f"Original error: {original_err}"
+                ),
+                new_goal=None,
+                next_task=None,
+                anticipation=None,
+                to_tell_user=(
+                    "BEEP BOOP BEEP BOOP, the brain encountered an unexpected error. "
+                    "Please try again later."
                 ),
             )
         except Exception as e:

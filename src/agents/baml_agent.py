@@ -115,7 +115,8 @@ async def decreasesmax_retries(
         )
         return output
     except BamlValidationError as e:
-        error_msg = f"\033[1;31mBamlValidationError on attempt {attempt}/{max_retries}: {e}\033[0m"
+        error_fmt = "\033[1;31mBamlValidationError on attempt {}/{}: {}\033[0m"
+        error_msg = error_fmt.format(attempt, max_retries, e)
         print(error_msg)
         if attempt == max_retries:
             # Raise a custom exception instead of returning None

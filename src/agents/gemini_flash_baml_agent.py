@@ -1,11 +1,11 @@
 from typing import Optional
 from baml_py import Image
-from baml_py.errors import BamlValidationError
+from baml_py.errors import BamlValidationError, BamlClientError
 from src.baml_client import b
 from src.primitives.transforms import create_type_builder
 from src.agents.types import VisionAgentInput
 from src.baml_client.types import VisionAgentOutput
-from src.agents.exceptions import MaxRetriesExceededException
+from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlClientError
 import asyncio
 
 
@@ -80,6 +80,9 @@ async def gemini_vision_agent(
     except MaxRetriesExceededException as e:
         # Re-raise the exception to be handled by the caller
         raise e
+    except UnforeseenBamlClientError as e:
+        # Re-raise the exception to be handled by the caller
+        raise e
 
 
 async def decreasesmax_retries(
@@ -107,6 +110,7 @@ async def decreasesmax_retries(
 
     Raises:
         MaxRetriesExceededException: When the maximum number of retries is exceeded.
+        UnforeseenBamlClientError: When an unexpected BAML client error occurs.
     """
     try:
         output = await b.GeminiVisionAgent(
@@ -133,3 +137,29 @@ async def decreasesmax_retries(
             max_retries,
             attempt + 1,
         )
+    except BamlClientError as e:
+        error_msg = f"BamlClientError on attempt {attempt}/{max_retries}: {e}"
+        print(f"\033[1;31m{error_msg}\033[0m")
+        if "hyper_util::client::legacy::Error(Connect, TimedOut)" in str(e):
+            # For timeout errors, retry
+            if attempt < max_retries:
+                await asyncio.sleep(1)
+                return await decreasesmax_retries(
+                    img,
+                    context_text,
+                    primitives_list_string,
+                    tb,
+                    max_retries,
+                    attempt + 1,
+                )
+            else:
+                # If we've reached max retries, raise the MaxRetriesExceededException
+                raise MaxRetriesExceededException(
+                    agent_type="gemini_flash", max_retries=max_retries, last_error=e
+                )
+        else:
+            # For other client errors, raise a specific exception
+            raise UnforeseenBamlClientError(
+                f"Unforeseen BamlClientError on attempt {attempt}/{max_retries}: {e}",
+                original_error=e,
+            )
