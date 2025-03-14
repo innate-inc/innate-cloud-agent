@@ -97,7 +97,7 @@ class Brain:
             if message_type == MessageInType.IMAGE:
                 await self.handle_image(message)
                 self.logger.info(
-                    f"Processed image message in {time.time() - time_start} seconds"
+                    f"Processed image message in {time.time() - time_start} seconds\n"
                 )
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)

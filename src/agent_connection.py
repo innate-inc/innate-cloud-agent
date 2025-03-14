@@ -91,9 +91,6 @@ class WebSocketAgentConnection:
                     continue
 
                 if message_in.type == MessageInType.IMAGE:
-                    print(
-                        f"[Brain {self.brain.connection_id}] Received image message. Enqueuing..."
-                    )
                     await self._save_incoming_image(message_in.payload["image_b64"])
 
                 await self.brain.enqueue_message(message_in)

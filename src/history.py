@@ -199,7 +199,5 @@ class History:
             )
             with open(filename_txt, "w") as f:
                 f.write(self.get_as_string())
-
-            print(f"History saved to {filename} and {filename_txt}")
         except Exception as e:
             print(f"Error saving history: {e}")

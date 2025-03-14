@@ -106,9 +106,6 @@ class ImageProcessor:
         # Save the annotated depth map as a PNG file.
         os.makedirs("depth_maps", exist_ok=True)
         img.save("depth_maps/depth_map.png")
-        self.logger.info(
-            f"Depth map saved as depth_map.png with debug info: {debug_text}"
-        )
 
         return depth_map
 
