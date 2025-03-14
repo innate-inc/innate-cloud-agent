@@ -53,9 +53,9 @@ class PoseGraphMemory:
         if api_key:
             genai.configure(api_key=api_key)
             self.gemini_model = genai.GenerativeModel(
-                model_name="gemini-1.5-pro",
+                model_name="gemini-2.0-flash",
                 generation_config={
-                    "temperature": 1,
+                    "temperature": 0,
                     "top_p": 0.95,
                     "top_k": 64,
                     "max_output_tokens": 8192,
