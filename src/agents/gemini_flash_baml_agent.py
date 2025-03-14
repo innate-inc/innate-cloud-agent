@@ -157,6 +157,23 @@ async def decreasesmax_retries(
                 raise MaxRetriesExceededException(
                     agent_type="gemini_flash", max_retries=max_retries, last_error=e
                 )
+        if "hyper_util::client::legacy::Error(Connect, Ssl(Error" in str(e):
+            # For SSL errors, retry
+            if attempt < max_retries:
+                await asyncio.sleep(1)
+                return await decreasesmax_retries(
+                    img,
+                    context_text,
+                    primitives_list_string,
+                    tb,
+                    max_retries,
+                    attempt + 1,
+                )
+            else:
+                # If we've reached max retries, raise the MaxRetriesExceededException
+                raise MaxRetriesExceededException(
+                    agent_type="gemini_flash", max_retries=max_retries, last_error=e
+                )
         else:
             # For other client errors, raise a specific exception
             raise UnforeseenBamlClientError(
