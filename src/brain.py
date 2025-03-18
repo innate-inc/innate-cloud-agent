@@ -358,6 +358,10 @@ class Brain:
             and primitive_name == self.primitive_in_execution.name
         ):
             self.primitive_in_execution = None
+            self.history.add(
+                HistoryEntryType.SYSTEM_MESSAGE,
+                description=f"Primitive '{primitive_name}' completed.",
+            )
         else:
             raise ValueError(
                 f"[Brain {self.connection_id}] Primitive '{primitive_name}' is not the current primitive in execution. That's a weird bug."
@@ -376,6 +380,10 @@ class Brain:
             and self.primitive_in_execution.name == primitive_name
         ):
             self.primitive_in_execution = None
+            self.history.add(
+                HistoryEntryType.SYSTEM_MESSAGE,
+                description=f"Primitive '{primitive_name}' failed.",
+            )
         else:
             raise ValueError(
                 f"[Brain {self.connection_id}] Primitive '{primitive_name}' is not the current primitive in execution. That's a weird bug."
@@ -409,6 +417,10 @@ class Brain:
             if matched_prim is not None:
                 # Convert the dict to a PrimitiveDefinition instance
                 self.primitive_in_execution = primitive_to_object(matched_prim)
+                self.history.add(
+                    HistoryEntryType.SYSTEM_MESSAGE,
+                    description=f"Primitive '{primitive_name}' activated.",
+                )
             else:
                 self.primitive_in_execution = None
 
