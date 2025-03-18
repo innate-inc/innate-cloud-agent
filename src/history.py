@@ -33,6 +33,13 @@ class History:
         self.history_start_time = datetime.now()
         self.is_summarizing = False
 
+    def reset(self):
+        """Reset the history to an empty state."""
+        self.entries = []
+        self.full_entries = []
+        self.history_start_time = datetime.now()
+        self.is_summarizing = False
+
     def add(
         self,
         entry_type: HistoryEntryType,

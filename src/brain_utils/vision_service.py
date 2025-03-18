@@ -50,7 +50,11 @@ class VisionService:
             agent_name = agent_type.value
             self.logger.info(
                 f"Calling {agent_name} vision model while current primitive is "
-                f"{current_primitive}"
+                + (
+                    f"\033[1;34m{current_primitive}\033[0m"
+                    if current_primitive != "None"
+                    else current_primitive
+                )
             )
             if user_prompt_text:
                 self.logger.info(

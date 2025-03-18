@@ -433,6 +433,29 @@ class PoseGraphMemory:
             print(f"Error loading graph: {e}")
             return nx.DiGraph()
 
+    def reset_user_data(self, user_token: str):
+        """Reset a user's pose graph and delete their image files."""
+        # Create a new empty graph for the user
+        self._user_graphs[user_token] = nx.DiGraph()
+
+        # Save the empty graph to disk
+        self._save_graph(user_token, self._user_graphs[user_token])
+
+        # Delete all image files associated with this user
+        try:
+            user_images_dir = os.path.join(self.images_dir, user_token)
+            if os.path.exists(user_images_dir):
+                for filename in os.listdir(user_images_dir):
+                    file_path = os.path.join(user_images_dir, filename)
+                    try:
+                        if os.path.isfile(file_path):
+                            os.unlink(file_path)
+                    except Exception as e:
+                        print(f"Error deleting image file {file_path}: {e}")
+                print(f"Cleared image directory for user {user_token}")
+        except Exception as e:
+            print(f"Error clearing images for user {user_token}: {e}")
+
 
 class NavigateThroughMemory(Primitive):
     """

@@ -109,6 +109,8 @@ class Brain:
                 await self.handle_primitive_activated(message)
             elif message_type == MessageInType.REGISTER_PRIMITIVES_AND_DIRECTIVE:
                 await self.handle_register_primitives_and_directive(message)
+            elif message_type == MessageInType.RESET:
+                await self.handle_reset(message)
             else:
                 await self.handle_unknown(message)
 
@@ -293,7 +295,7 @@ class Brain:
 
             if not pose_graph_memory.should_add_node(user_token, x, y, theta):
                 self.logger.debug(
-                    f"Skipping image addition to pose graph because a close node already exists"
+                    "Skipping image addition to pose graph because a close node exists"
                 )
                 return
 
@@ -369,17 +371,17 @@ class Brain:
             f"\033[92m[Brain {self.connection_id}] Primitive '{primitive_name}' activated.\033[0m"
         )
 
-        # Check if this is a navigate_to_position primitive that was derived from navigate_in_sight
+        # Check if this is a navigate_to_position primitive from navigate_in_sight
         if (
             primitive_name == "navigate_to_position"
             and self.primitive_in_execution
             and self.primitive_in_execution.name == "navigate_in_sight"
         ):
-            # This is a special case - we're actually executing a navigate_to_position that was
-            # derived from a navigate_in_sight request, so we don't need to do anything
+            # This is a special case - we're actually executing a navigate_to_position
+            # that was derived from a navigate_in_sight request, so we don't need to do anything
             pass
         else:
-            # Normal case - just set the primitive_in_execution based on the primitive_name
+            # Set primitive_in_execution based on primitive name
             matched_prim = next(
                 (prim for prim in self.primitives_list if prim.name == primitive_name),
                 None,
@@ -401,6 +403,51 @@ class Brain:
             payload={"text": f"Unhandled message type: {message.type}"},
         )
         await self.send_callback(response)
+
+    async def handle_reset(self, message: MessageIn):
+        """
+        Handle messages of type 'reset'.
+        Resets brain state: history, pose graph memory, and state variables.
+        """
+        self.logger.info(f"Resetting brain state for connection {self.connection_id}")
+
+        # Reset history
+        self.history.reset()
+
+        # Reset latest user message
+        self.latest_user_message = None
+
+        # Reset directive
+        self.directive = None
+
+        # Reset primitive in execution
+        self.primitive_in_execution = None
+
+        # Reset pose graph memory for this connection
+        navigate_through_memory = next(
+            (
+                p
+                for p in self.local_primitives_list
+                if p.name == "navigate_through_memory"
+            ),
+            None,
+        )
+
+        if navigate_through_memory:
+            pose_graph_memory = navigate_through_memory.pose_graph_memory
+            pose_graph_memory.reset_user_data(self.connection_id)
+            self.logger.info(
+                f"Reset pose graph memory for connection {self.connection_id}"
+            )
+        else:
+            self.logger.error(
+                "NavigateThroughMemory primitive not found, couldn't reset pose graph memory"
+            )
+
+        # Notify the client that the server is ready for the next image
+        await self.send_callback(
+            MessageOut(type=MessageOutType.READY_FOR_IMAGE, payload={})
+        )
 
     async def handle_register_primitives_and_directive(self, message: MessageIn):
         """
