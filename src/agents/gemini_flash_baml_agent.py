@@ -128,16 +128,14 @@ async def decreasesmax_retries(
         )
         return output
     except asyncio.TimeoutError:
-        error_msg = (
-            f"Operation timed out after 5 seconds on attempt {attempt}/{max_retries}"
-        )
+        error_msg = f"Operation timed out after {FLASH_EXECUTION_TIMEOUT} seconds on attempt {attempt}/{max_retries}"
         print(f"\033[1;31m{error_msg}\033[0m")
         if attempt == max_retries:
             raise MaxRetriesExceededException(
                 agent_type="gemini_flash",
                 max_retries=max_retries,
                 last_error=TimeoutError(
-                    "GeminiVisionAgent call exceeded 5 second timeout"
+                    f"GeminiVisionAgent call exceeded {FLASH_EXECUTION_TIMEOUT} second timeout"
                 ),
             )
         await asyncio.sleep(1)
