@@ -9,6 +9,9 @@ from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlCli
 import asyncio
 
 
+FLASH_EXECUTION_TIMEOUT = 3
+
+
 async def gemini_vision_agent(
     vlm_inputs: VisionAgentInput,
 ) -> Optional[VisionAgentOutput]:
@@ -113,13 +116,39 @@ async def decreasesmax_retries(
         UnforeseenBamlClientError: When an unexpected BAML client error occurs.
     """
     try:
-        output = await b.GeminiVisionAgent(
-            img,
-            context_text,
-            primitives_list_string=primitives_list_string,
-            baml_options={"tb": tb},
+        # Set a timeout of 5 seconds for the GeminiVisionAgent call
+        output = await asyncio.wait_for(
+            b.GeminiVisionAgent(
+                img,
+                context_text,
+                primitives_list_string=primitives_list_string,
+                baml_options={"tb": tb},
+            ),
+            timeout=FLASH_EXECUTION_TIMEOUT,
         )
         return output
+    except asyncio.TimeoutError:
+        error_msg = (
+            f"Operation timed out after 5 seconds on attempt {attempt}/{max_retries}"
+        )
+        print(f"\033[1;31m{error_msg}\033[0m")
+        if attempt == max_retries:
+            raise MaxRetriesExceededException(
+                agent_type="gemini_flash",
+                max_retries=max_retries,
+                last_error=TimeoutError(
+                    "GeminiVisionAgent call exceeded 5 second timeout"
+                ),
+            )
+        await asyncio.sleep(1)
+        return await decreasesmax_retries(
+            img,
+            context_text,
+            primitives_list_string,
+            tb,
+            max_retries,
+            attempt + 1,
+        )
     except BamlValidationError as e:
         error_msg = f"BamlValidationError on attempt {attempt}/{max_retries}: {e}"
         print(f"\033[1;31m{error_msg}\033[0m")
