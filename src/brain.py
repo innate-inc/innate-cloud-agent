@@ -107,6 +107,8 @@ class Brain:
                 await self.handle_primitive_completed(message)
             elif message_type == MessageInType.PRIMITIVE_ACTIVATED:
                 await self.handle_primitive_activated(message)
+            elif message_type == MessageInType.PRIMITIVE_FAILED:
+                await self.handle_primitive_failed(message)
             elif message_type == MessageInType.REGISTER_PRIMITIVES_AND_DIRECTIVE:
                 await self.handle_register_primitives_and_directive(message)
             elif message_type == MessageInType.RESET:
@@ -354,6 +356,24 @@ class Brain:
         if (
             self.primitive_in_execution
             and primitive_name == self.primitive_in_execution.name
+        ):
+            self.primitive_in_execution = None
+        else:
+            raise ValueError(
+                f"[Brain {self.connection_id}] Primitive '{primitive_name}' is not the current primitive in execution. That's a weird bug."
+            )
+
+    async def handle_primitive_failed(self, message: MessageIn):
+        """
+        Handle messages of type 'primitive_failed'.
+        Processes the primitive failure and sends an acknowledgment.
+        """
+        primitive_name = message.payload["primitive_name"]
+        self.logger.info(f"Primitive '{primitive_name}' failed.")
+
+        if (
+            self.primitive_in_execution
+            and self.primitive_in_execution.name == primitive_name
         ):
             self.primitive_in_execution = None
         else:

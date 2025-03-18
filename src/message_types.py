@@ -24,6 +24,7 @@ class MessageOutType(str, Enum):
     VISION_AGENT_OUTPUT = "vision_agent_output"
     CHAT_OUT = "chat_out"
     THOUGHTS = "thoughts"
+    ERROR = "error"
     PRIMITIVES_AND_DIRECTIVE_REGISTERED = "primitives_and_directive_registered"
 
 
