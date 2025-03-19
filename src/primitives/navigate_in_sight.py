@@ -284,6 +284,9 @@ class NavigateInSight(Primitive):
                         (0, 0, 255),
                         2,
                     )
+                else:
+                    print("No contours found for mask.")
+                    continue
             else:
                 print("No contours found for mask.")
                 continue
