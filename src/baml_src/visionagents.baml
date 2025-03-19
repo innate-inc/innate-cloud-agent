@@ -12,6 +12,19 @@ class VisionAgentOutput {
   @@dynamic
 }
 
+class NewVisionAgentOutput {
+  current_observation string
+  current_thoughts string
+
+  action_decision "continue" | "change_task" | "stop_task" | "start_task"
+
+  // next_task null @description("List of the tasks the agent can perform.")
+
+  to_tell_user string?
+  @@dynamic
+}
+
+
 function VisionAgent(img: image, context_text: string, primitives_list_string: string) -> VisionAgentOutput {
     client AnthropicClient
     prompt #"
@@ -44,8 +57,7 @@ function VisionAgent(img: image, context_text: string, primitives_list_string: s
     "#
 }
 
-
-function GeminiVisionAgent(img: image, context_text: string, primitives_list_string: string) -> VisionAgentOutput {
+function GeminiVisionAgent1(img: image, context_text: string, primitives_list_string: string) -> VisionAgentOutput {
     client GeminiFlashClient
     prompt #"
         {{_.role("user")}}
@@ -76,3 +88,92 @@ function GeminiVisionAgent(img: image, context_text: string, primitives_list_str
         {{ ctx.output_format }}
     "#
 } 
+
+
+function GeminiVisionAgent2(img: image, context_text: string, primitives_list_string: string) -> VisionAgentOutput {
+    client GeminiFlashClient
+    prompt #"
+        {{_.role("user")}}
+
+        You are a robot pursuing tasks in a home.
+
+        Your goal is to decide what to do right now based on the image and the context. You can stop the current task if you need to and if it fits more what you have to do, but be aware of not changing your mind too often.
+        Be also aware of when you are looping. Keep your thoughts clear and concise, and try to keep them diverse too.
+
+        You are being provided with what the user most recently said, the task that is currently being executed, and the image you see in front of you.
+        
+        This is what you see: {{ img }}.
+
+        {{ context_text }}.
+
+        Consider the guidelines of the tasks available carefully before picking one to do (if any).
+
+        Evaluate carefully if you need to tell something to the user, especially considering the time since you asked them something (as per the history).
+        If the last time you talked with them was seconds ago and you expect some answer from them, you should wait for example, an amount of time that seems appropriate.
+
+        You can only use one of the following tasks: {{ primitives_list_string }}.
+
+        {{ ctx.output_format }}
+    "#
+} 
+
+function GeminiVisionAgent3(img: image, context_text: string, primitives_list_string: string) -> NewVisionAgentOutput {
+    client GeminiFlashClient
+    prompt #"
+        {{_.role("user")}}
+
+        You are a robot navigating in a home.
+
+        Your goal is to decide what to do right now based on the image and the context.
+
+        You are being provided with what the user most recently said, the task that is currently being executed, and the image you see in front of you.
+
+        If there is no task currently being executed, you can choose to do one next or nothing depending on the context.
+        TO SET A NEW TASK, YOU HAVE TO HAVE BEEN EXPLICITLY TOLD TO DO IT BY THE USER. IF THE USER DID NOT SAY ANYTHING, YOU SHOULD NOT SET A NEW TASK.
+
+        If there is a task currently being executed, do not choose to do another task. Do not stop it either. 
+        THIS IS VERY IMPORTANT. I REPEAT, DO NOT STOP THE CURRENT TASK IF YOU ARE EXECUTING ONE.
+        
+        This is what you see: {{ img }}.
+
+        {{ context_text }}.
+
+        Consider the guidelines of the tasks available carefully before picking one to do (if any).
+
+        Also, don't talk to the user if they haven't talked to you. Or at least evaluate carefully if you need to tell something to them, especially if the last time you talked with them was recently.
+        If the last time you talked with them was seconds ago and you expect some answer from them, you should wait for example, an amount of time that seems appropriate.
+
+        You can only use one of the following tasks: {{ primitives_list_string }}.
+
+        {{ ctx.output_format }}
+    "#
+} 
+
+
+function GeminiVisionAgent4(img: image, context_text: string, primitives_list_string: string) -> NewVisionAgentOutput {
+    client GeminiFlashClient
+    prompt #"
+        {{_.role("user")}}
+
+        You are a robot pursuing tasks in a home.
+
+        Your goal is to decide what to do right now based on the image and the context. You can stop the current task if you need to and if it fits more what you have to do, but be aware of not changing your mind too often.
+        Be also aware of when you are looping. Keep your thoughts clear and concise, and try to keep them diverse too.
+
+        You are being provided with what the user most recently said, the task that is currently being executed, and the image you see in front of you.
+        
+        This is what you see: {{ img }}.
+
+        {{ context_text }}.
+
+        Consider the guidelines of the tasks available carefully before picking one to do (if any).
+
+        Evaluate carefully if you need to tell something to the user, especially considering the time since you asked them something (as per the history).
+        If the last time you talked with them was seconds ago and you expect some answer from them, you should wait for example, an amount of time that seems appropriate.
+
+        You can only use one of the following tasks: {{ primitives_list_string }}.
+
+        {{ ctx.output_format }}
+    "#
+} 
+

@@ -173,6 +173,7 @@ class Brain:
             robot_coords=robot_coords,
             directive=self.directive,
             agent_type=VisionAgentType.GEMINI_FLASH,
+            gemini_variant="gemini1",
         )
 
         if not vision_output:

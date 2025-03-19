@@ -29,6 +29,7 @@ class VisionService:
         robot_coords,
         directive=None,
         agent_type: VisionAgentType = VisionAgentType.ANTHROPIC,
+        gemini_variant: str = "gemini1",
     ) -> Union[VisionAgentOutput]:
         """
         Calls the external visual language model with the given inputs.
@@ -41,7 +42,12 @@ class VisionService:
             history_as_string: A history of events.
             robot_coords: A dictionary with the robot's coordinates.
             directive: A directive to steer the vision language model.
-            agent_type: The type of vision agent to use (anthropic or gemini_flash).
+            agent_type: The type of agent to use.
+            gemini_variant: The variant of Gemini agent to use if agent_type is
+                GEMINI_FLASH. Options: "gemini1", "gemini2", "gemini3", "gemini4"
+
+        Returns:
+            A VisionAgentOutput object.
         """
         try:
             current_primitive = (
@@ -83,7 +89,16 @@ class VisionService:
                 completion = await vision_agent(vlm_inputs)
                 return completion
             elif agent_type == VisionAgentType.GEMINI_FLASH:
-                completion = await gemini_vision_agent(vlm_inputs)
+                # Validate gemini_variant
+                if gemini_variant not in ("gemini1", "gemini2", "gemini3", "gemini4"):
+                    self.logger.warning(
+                        f"Invalid Gemini variant: {gemini_variant}. Using gemini1."
+                    )
+                    gemini_variant = "gemini1"
+
+                completion = await gemini_vision_agent(
+                    vlm_inputs, agent_variant=gemini_variant
+                )
                 return completion
             else:
                 raise ValueError(f"Unsupported agent type: {agent_type}")
