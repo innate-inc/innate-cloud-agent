@@ -33,6 +33,16 @@ class WebSocketAgentConnection:
         self.brain: Optional[Brain] = None
         self.brain_task = None  # Keep a reference to the brain task
 
+        # Check if memory commands are enabled from environment variable
+        default_value = "false"
+        env_key = "ENABLE_MEMORY_COMMANDS"
+        env_value = os.environ.get(env_key, default_value).lower()
+        self.enable_memory_commands = env_value == "true"
+        if self.enable_memory_commands:
+            print("[INFO] Memory state commands are enabled")
+        else:
+            print("[INFO] Memory state commands are disabled")
+
     async def handle_connection(self):
         """
         Main entrypoint after the server accepts a connection.
@@ -52,9 +62,17 @@ class WebSocketAgentConnection:
             print(f"[INFO] Created recording dir: {self.recording_dir}")
 
             # Step 3: Create a per-connection Brain that will process all messages.
-            self.brain = Brain(self.user_token, self.send_message)
+            # Pass memory commands configuration
+            brain_args = {
+                "connection_id": self.user_token,
+                "send_callback": self.send_message,
+                "enable_memory_commands": self.enable_memory_commands,
+            }
+            self.brain = Brain(**brain_args)
             self.brain_task = asyncio.create_task(self.brain.run())
             print(f"[INFO] Brain instance started for user: {self.user_token}")
+            if self.enable_memory_commands:
+                print("[INFO] Memory state commands are enabled for this brain")
 
             # Notify client that the server is ready for an image (or other messages)
             await self.send_message(

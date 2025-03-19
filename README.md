@@ -10,12 +10,44 @@ pip install -r requirements.txt
 
 ## Build and run the Docker image
 
+Standard mode (memory commands disabled):
 ```bash
 docker compose -f docker-compose.local.yml build
+docker compose -f docker-compose.local.yml up
 ```
 
+Benchmark mode (memory commands enabled):
 ```bash
-docker compose -f docker-compose.local.yml up
+docker compose -f docker-compose.benchmark.yml build
+docker compose -f docker-compose.benchmark.yml up
+```
+
+### Memory State Management
+
+Cloud Agent includes a memory state management feature that allows saving and loading brain states. This feature is:
+- **Disabled** by default in `docker-compose.local.yml`
+- **Enabled** by default in `docker-compose.benchmark.yml`
+
+To enable memory state management when running locally:
+
+```bash
+python run_server.py --enable-memory-commands
+```
+
+#### Memory Commands (when enabled)
+
+When memory state management is enabled, the following commands are available via chat:
+
+- `!save_memory NAME` - Saves the current brain state (history and pose graph memory)
+- `!load_memory NAME` - Loads a previously saved brain state
+- `!list_memory` - Lists all available saved memory states
+
+You can also provide a `memory_state` parameter in reset messages to load a specific state:
+
+```python
+reset_msg = MessageIn(
+    type=MessageInType.RESET, payload={"memory_state": "your_state_name"}
+)
 ```
 
 ## Build and deploy the Cloud Run service

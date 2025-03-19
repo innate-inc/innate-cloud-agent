@@ -1,7 +1,6 @@
 import asyncio
 import json
 import time
-import os
 
 
 from src.baml_client.partial_types import VisionAgentOutput
@@ -30,10 +29,13 @@ def prim_list_to_prim_obj_list(prim_list):
 
 
 class Brain:
-    def __init__(self, connection_id: str, send_callback):
+    def __init__(
+        self, connection_id: str, send_callback, enable_memory_commands: bool = False
+    ):
         """
         connection_id: an identifier for this brain instance (for logging/debugging)
         send_callback: an async function to send a response back to the client.
+        enable_memory_commands: whether to enable memory state save/load/list commands
         """
         self.connection_id = connection_id
         self.send_callback = send_callback
@@ -44,6 +46,8 @@ class Brain:
         # Store the latest user message that should be consumed once by the visual language model.
         self.latest_user_message = None
         self.primitives_list = []
+        # Whether memory state commands are enabled
+        self.enable_memory_commands = enable_memory_commands
 
         self.local_primitives_list = [
             NavigateInSight(),
@@ -65,14 +69,10 @@ class Brain:
             self.local_primitives_list,
         )
 
-        # Initialize memory state manager
-        self.memory_state_manager = MemoryStateManager(self.logger, connection_id)
-
-        # Create directory for memory states if it doesn't exist
-        self.memory_states_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "memory_states"
-        )
-        os.makedirs(self.memory_states_dir, exist_ok=True)
+        # Initialize memory state manager if commands are enabled
+        self.memory_state_manager = None
+        if self.enable_memory_commands:
+            self.memory_state_manager = MemoryStateManager(self.logger, connection_id)
 
     async def enqueue_message(self, message: MessageIn):
         """
@@ -348,52 +348,18 @@ class Brain:
         Handle messages of type 'chat_in'.
         Echoes back the text received and processes special commands.
 
-        Special commands:
+        Special commands (if enabled):
         - !save_memory NAME: Saves the current memory state
         - !load_memory NAME: Loads a saved memory state
         - !list_memory: Lists available memory states
         """
         text = message.payload["text"]
 
-        # Check for special commands
-        if text.startswith("!save_memory"):
-            parts = text.split(maxsplit=1)
-            state_name = parts[1] if len(parts) > 1 else ""
-
-            # Find the NavigateThroughMemory primitive
-            navigate_through_memory = next(
-                (
-                    p
-                    for p in self.local_primitives_list
-                    if p.name == "navigate_through_memory"
-                ),
-                None,
-            )
-
-            success = await self.memory_state_manager.save_memory_state(
-                state_name, self.history, navigate_through_memory
-            )
-
-            # Send response to user
-            if success:
-                response_text = f"Memory state '{state_name}' saved successfully"
-            else:
-                response_text = f"Failed to save memory state '{state_name}'"
-
-            await self.send_callback(
-                MessageOut(type="chat_out", payload={"text": response_text})
-            )
-            return
-
-        elif text.startswith("!load_memory"):
-            parts = text.split(maxsplit=1)
-            if len(parts) > 1:
-                state_name = parts[1]
-
-                # Reset state variables
-                self.latest_user_message = None
-                self.directive = None
-                self.primitive_in_execution = None
+        # Check for special commands if memory commands are enabled
+        if self.enable_memory_commands and self.memory_state_manager is not None:
+            if text.startswith("!save_memory"):
+                parts = text.split(maxsplit=1)
+                state_name = parts[1] if len(parts) > 1 else ""
 
                 # Find the NavigateThroughMemory primitive
                 navigate_through_memory = next(
@@ -405,26 +371,93 @@ class Brain:
                     None,
                 )
 
-                success = await self.memory_state_manager.load_memory_state(
+                success = await self.memory_state_manager.save_memory_state(
                     state_name, self.history, navigate_through_memory
                 )
 
                 # Send response to user
                 if success:
-                    response_text = f"Memory state '{state_name}' loaded successfully"
+                    response_text = f"Memory state '{state_name}' saved successfully"
                 else:
-                    response_text = f"Failed to load memory state '{state_name}'"
+                    response_text = f"Failed to save memory state '{state_name}'"
 
                 await self.send_callback(
                     MessageOut(type="chat_out", payload={"text": response_text})
                 )
                 return
-            else:
-                await self.send_callback(
-                    MessageOut(
-                        type="chat_out",
-                        payload={"text": "Please specify a memory state name to load"},
+
+            elif text.startswith("!load_memory"):
+                parts = text.split(maxsplit=1)
+                if len(parts) > 1:
+                    state_name = parts[1]
+
+                    # Reset state variables
+                    self.latest_user_message = None
+                    self.directive = None
+                    self.primitive_in_execution = None
+
+                    # Find the NavigateThroughMemory primitive
+                    navigate_through_memory = next(
+                        (
+                            p
+                            for p in self.local_primitives_list
+                            if p.name == "navigate_through_memory"
+                        ),
+                        None,
                     )
+
+                    success = await self.memory_state_manager.load_memory_state(
+                        state_name, self.history, navigate_through_memory
+                    )
+
+                    # Send response to user
+                    if success:
+                        response_text = (
+                            f"Memory state '{state_name}' loaded successfully"
+                        )
+                    else:
+                        response_text = f"Failed to load memory state '{state_name}'"
+
+                    await self.send_callback(
+                        MessageOut(type="chat_out", payload={"text": response_text})
+                    )
+                    return
+                else:
+                    await self.send_callback(
+                        MessageOut(
+                            type="chat_out",
+                            payload={
+                                "text": "Please specify a memory state name to load"
+                            },
+                        )
+                    )
+                    return
+
+            elif text.startswith("!list_memory"):
+                # Get list of available memory states
+                states = self.memory_state_manager.get_available_states()
+
+                if states:
+                    states_list = "\n- " + "\n- ".join(states)
+                    response_text = f"Available memory states:{states_list}"
+                else:
+                    response_text = "No memory states available"
+
+                await self.send_callback(
+                    MessageOut(type="chat_out", payload={"text": response_text})
+                )
+                return
+
+        # Handle memory command attempt when disabled or manager is None
+        if text.startswith("!"):
+            memory_commands = ["!save_memory", "!load_memory", "!list_memory"]
+            if any(text.startswith(cmd) for cmd in memory_commands):
+                response_text = (
+                    "Memory management commands are disabled. "
+                    "They can be enabled when starting the brain."
+                )
+                await self.send_callback(
+                    MessageOut(type="chat_out", payload={"text": response_text})
                 )
                 return
 
@@ -528,14 +561,18 @@ class Brain:
         """
         Handle messages of type 'reset'.
         Resets brain state: history, pose graph memory, and state variables.
-        If a memory_state parameter is provided, loads that state.
+        If a memory_state parameter is provided and memory commands are enabled, loads that state.
         """
         self.logger.info(f"Resetting brain state for connection {self.connection_id}")
 
         # Check if a memory state was provided in the payload
         memory_state = message.payload.get("memory_state")
 
-        if memory_state:
+        if (
+            memory_state
+            and self.enable_memory_commands
+            and self.memory_state_manager is not None
+        ):
             # Reset state variables
             self.latest_user_message = None
             self.directive = None
@@ -569,6 +606,12 @@ class Brain:
                 self.logger.error(
                     f"Failed to load memory state '{memory_state}', performing standard reset"
                 )
+        elif memory_state and (
+            not self.enable_memory_commands or self.memory_state_manager is None
+        ):
+            self.logger.warning(
+                f"Memory state '{memory_state}' provided, but memory commands are disabled"
+            )
 
         # Perform standard reset if no memory state was provided or loading failed
         # Reset history

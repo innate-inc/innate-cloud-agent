@@ -2,6 +2,8 @@
 
 import asyncio
 import websockets
+import argparse
+import os
 
 # import os
 
@@ -18,6 +20,17 @@ load_dotenv()
 WEBSOCKET_PORT = 8765
 
 
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description="Start the WebSocket server")
+    parser.add_argument(
+        "--enable-memory-commands",
+        action="store_true",
+        help="Enable memory state management commands",
+    )
+    return parser.parse_args()
+
+
 async def connection_handler(websocket):
     """
     This coroutine is called for every new client connection.
@@ -31,6 +44,17 @@ async def main():
     """
     Main entrypoint to start the server.
     """
+    # Parse arguments
+    args = parse_arguments()
+
+    # Set environment variable based on arguments
+    if args.enable_memory_commands:
+        os.environ["ENABLE_MEMORY_COMMANDS"] = "true"
+        print("Memory state commands are ENABLED")
+    else:
+        os.environ["ENABLE_MEMORY_COMMANDS"] = "false"
+        print("Memory state commands are DISABLED")
+
     print(f"Starting WebSocket server on port {WEBSOCKET_PORT}...")
     async with websockets.serve(
         connection_handler, "0.0.0.0", WEBSOCKET_PORT, max_size=10 * 1024 * 1024
