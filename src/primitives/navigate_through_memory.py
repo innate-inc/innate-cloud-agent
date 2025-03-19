@@ -220,8 +220,8 @@ class PoseGraphMemory:
             )
             message_parts.append(base_assistant_text)
 
-            print(f"DEBUG: Base prompt: {base_assistant_text}")
-            print(f"DEBUG: Number of nodes in graph: {len(graph.nodes)}")
+            print(f"MVLA: Base prompt: {base_assistant_text}")
+            print(f"MVLA: Number of nodes in graph: {len(graph.nodes)}")
 
             # Add images to the prompt
             for idx, (node_id, node_data) in enumerate(graph.nodes(data=True)):
@@ -230,15 +230,10 @@ class PoseGraphMemory:
 
                 # Load and encode the image
                 image_path = node_data["image_path"]
-                print(
-                    f"DEBUG: Processing node {node_id}, frame {frame_num}, image path: {image_path}"
-                )
+                images_not_found = []
 
                 if os.path.exists(image_path):
                     with Image.open(image_path) as img:
-                        # Print image details
-                        print(f"DEBUG: Image mode: {img.mode}, size: {img.size}")
-
                         # Convert to RGB if needed
                         if img.mode != "RGB":
                             img = img.convert("RGB")
@@ -246,7 +241,6 @@ class PoseGraphMemory:
                         # Resize if too large
                         if img.width > 800 or img.height > 800:
                             img.thumbnail((800, 800))
-                            print(f"DEBUG: Resized image to {img.size}")
 
                         # Create a Gemini image part
                         buff = BytesIO()
@@ -255,9 +249,11 @@ class PoseGraphMemory:
                         img_part = {"mime_type": "image/jpeg", "data": img_bytes}
                         message_parts.append(img_part)
                         message_parts.append(f"Frame {frame_num}.")
-                        print(f"DEBUG: Added frame {frame_num} to message parts")
                 else:
-                    print(f"DEBUG: Image file not found: {image_path}")
+                    images_not_found.append(image_path)
+
+            if images_not_found:
+                print(f"MVLA: Images not found: {images_not_found}")
 
             # Final question - improved to be more explicit
             last_message = (
@@ -269,16 +265,10 @@ class PoseGraphMemory:
                 f'For example: {{"frame_number": 2}} if Frame 2 is the best match.'
             )
             message_parts.append(last_message)
-            print(f"DEBUG: Final question: {last_message}")
-            print(f"DEBUG: Total message parts: {len(message_parts)}")
-            print(f"DEBUG: Frame to node ID mapping: {frame_to_node_id}")
+            print(f"MVLA: Final question: {last_message}")
 
             # Call Gemini model
-            print(
-                f"DEBUG: Calling Gemini model with {len(message_parts)} message parts"
-            )
             response = self.gemini_model.generate_content(message_parts)
-            print(f"DEBUG: Raw Gemini response: {response.text}")
 
             # Parse the response
             try:
@@ -286,15 +276,11 @@ class PoseGraphMemory:
                 response_json = json.loads(response_text)
                 frame_number = response_json.get("frame_number")
 
-                print(f"DEBUG: Parsed response JSON: {response_json}")
-                print(f"DEBUG: Frame number from response: {frame_number}")
+                print(f": Frame number from response: {frame_number}")
 
                 if frame_number and frame_number in frame_to_node_id:
                     node_id = frame_to_node_id[frame_number]
                     node_data = graph.nodes[node_id]
-                    print(
-                        f"VLM selected frame {frame_number} (node {node_id}) for description: {description}"
-                    )
                     return (
                         node_data["position"]["x"],
                         node_data["position"]["y"],
