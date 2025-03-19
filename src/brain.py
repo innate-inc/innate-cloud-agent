@@ -48,6 +48,8 @@ class Brain:
         self.primitives_list = []
         # Whether memory state commands are enabled
         self.enable_memory_commands = enable_memory_commands
+        # Current Gemini agent variant to use
+        self.gemini_variant = "gemini1"
 
         self.local_primitives_list = [
             NavigateInSight(),
@@ -173,7 +175,7 @@ class Brain:
             robot_coords=robot_coords,
             directive=self.directive,
             agent_type=VisionAgentType.GEMINI_FLASH,
-            gemini_variant="gemini1",
+            gemini_variant=self.gemini_variant,
         )
 
         if not vision_output:
@@ -353,8 +355,58 @@ class Brain:
         - !save_memory NAME: Saves the current memory state
         - !load_memory NAME: Loads a saved memory state
         - !list_memory: Lists available memory states
+
+        Other commands (always enabled):
+        - !gemini VERSION: Switches the Gemini version used by the vision agent
+                          Valid versions: gemini1, gemini2, gemini3, gemini4
         """
         text = message.payload["text"]
+
+        # Handle Gemini version switch command (always enabled)
+        if text.startswith("!gemini"):
+            parts = text.split(maxsplit=1)
+            if len(parts) > 1:
+                requested_variant = parts[1].strip().lower()
+                valid_variants = ["gemini1", "gemini2", "gemini3", "gemini4"]
+
+                if requested_variant in valid_variants:
+                    old_variant = self.gemini_variant
+                    self.gemini_variant = requested_variant
+
+                    response_text = (
+                        f"Gemini variant switched from '{old_variant}' "
+                        f"to '{requested_variant}'"
+                    )
+                    self.logger.info(response_text)
+
+                    # Add to history
+                    self.history.add(
+                        HistoryEntryType.SYSTEM_MESSAGE,
+                        description=response_text,
+                    )
+
+                    await self.send_callback(
+                        MessageOut(type="chat_out", payload={"text": response_text})
+                    )
+                else:
+                    response_text = (
+                        f"Invalid Gemini variant: '{requested_variant}'. "
+                        f"Valid options are: {', '.join(valid_variants)}"
+                    )
+                    await self.send_callback(
+                        MessageOut(type="chat_out", payload={"text": response_text})
+                    )
+                return
+            else:
+                response_text = (
+                    f"Current Gemini variant: '{self.gemini_variant}'\n"
+                    f"To change, use: !gemini VERSION\n"
+                    f"Valid versions: gemini1, gemini2, gemini3, gemini4"
+                )
+                await self.send_callback(
+                    MessageOut(type="chat_out", payload={"text": response_text})
+                )
+                return
 
         # Check for special commands if memory commands are enabled
         if self.enable_memory_commands and self.memory_state_manager is not None:
@@ -392,10 +444,11 @@ class Brain:
                 if len(parts) > 1:
                     state_name = parts[1]
 
-                    # Reset state variables
+                    # Reset state variables but preserve Gemini variant
                     self.latest_user_message = None
                     self.directive = None
                     self.primitive_in_execution = None
+                    # We explicitly don't reset self.gemini_variant here to preserve it
 
                     # Find the NavigateThroughMemory primitive
                     navigate_through_memory = next(
@@ -574,10 +627,11 @@ class Brain:
             and self.enable_memory_commands
             and self.memory_state_manager is not None
         ):
-            # Reset state variables
+            # Reset state variables but preserve Gemini variant
             self.latest_user_message = None
             self.directive = None
             self.primitive_in_execution = None
+            # We explicitly don't reset self.gemini_variant here to preserve it
 
             # Find the NavigateThroughMemory primitive
             navigate_through_memory = next(
@@ -626,6 +680,10 @@ class Brain:
 
         # Reset primitive in execution
         self.primitive_in_execution = None
+
+        # Reset Gemini variant to default
+        self.gemini_variant = "gemini1"
+        self.logger.info("Reset Gemini variant to default (gemini1)")
 
         # Reset pose graph memory for this connection
         navigate_through_memory = next(
