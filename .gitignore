@@ -18,3 +18,5 @@ depth_maps/
 *.bmp
 *.tiff
 *.webp
+
+memory_states/

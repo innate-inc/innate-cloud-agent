@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+import os
 
 
 from src.baml_client.partial_types import VisionAgentOutput
@@ -21,6 +22,7 @@ from src.brain_utils.logger import BrainLogger
 from src.brain_utils.image_processor import ImageProcessor
 from src.brain_utils.vision_service import VisionAgentType, VisionService
 from src.brain_utils.navigation_handler import NavigationHandler
+from src.brain_utils.memory_state_manager import MemoryStateManager
 
 
 def prim_list_to_prim_obj_list(prim_list):
@@ -62,6 +64,15 @@ class Brain:
             self.logger,
             self.local_primitives_list,
         )
+
+        # Initialize memory state manager
+        self.memory_state_manager = MemoryStateManager(self.logger, connection_id)
+
+        # Create directory for memory states if it doesn't exist
+        self.memory_states_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "memory_states"
+        )
+        os.makedirs(self.memory_states_dir, exist_ok=True)
 
     async def enqueue_message(self, message: MessageIn):
         """
@@ -335,10 +346,87 @@ class Brain:
     async def handle_chat_in(self, message: MessageIn):
         """
         Handle messages of type 'chat_in'.
-        Echoes back the text received and, if a special command is detected,
-        sets a flag to modify the next vision output.
+        Echoes back the text received and processes special commands.
+
+        Special commands:
+        - !save_memory NAME: Saves the current memory state
+        - !load_memory NAME: Loads a saved memory state
+        - !list_memory: Lists available memory states
         """
         text = message.payload["text"]
+
+        # Check for special commands
+        if text.startswith("!save_memory"):
+            parts = text.split(maxsplit=1)
+            state_name = parts[1] if len(parts) > 1 else ""
+
+            # Find the NavigateThroughMemory primitive
+            navigate_through_memory = next(
+                (
+                    p
+                    for p in self.local_primitives_list
+                    if p.name == "navigate_through_memory"
+                ),
+                None,
+            )
+
+            success = await self.memory_state_manager.save_memory_state(
+                state_name, self.history, navigate_through_memory
+            )
+
+            # Send response to user
+            if success:
+                response_text = f"Memory state '{state_name}' saved successfully"
+            else:
+                response_text = f"Failed to save memory state '{state_name}'"
+
+            await self.send_callback(
+                MessageOut(type="chat_out", payload={"text": response_text})
+            )
+            return
+
+        elif text.startswith("!load_memory"):
+            parts = text.split(maxsplit=1)
+            if len(parts) > 1:
+                state_name = parts[1]
+
+                # Reset state variables
+                self.latest_user_message = None
+                self.directive = None
+                self.primitive_in_execution = None
+
+                # Find the NavigateThroughMemory primitive
+                navigate_through_memory = next(
+                    (
+                        p
+                        for p in self.local_primitives_list
+                        if p.name == "navigate_through_memory"
+                    ),
+                    None,
+                )
+
+                success = await self.memory_state_manager.load_memory_state(
+                    state_name, self.history, navigate_through_memory
+                )
+
+                # Send response to user
+                if success:
+                    response_text = f"Memory state '{state_name}' loaded successfully"
+                else:
+                    response_text = f"Failed to load memory state '{state_name}'"
+
+                await self.send_callback(
+                    MessageOut(type="chat_out", payload={"text": response_text})
+                )
+                return
+            else:
+                await self.send_callback(
+                    MessageOut(
+                        type="chat_out",
+                        payload={"text": "Please specify a memory state name to load"},
+                    )
+                )
+                return
 
         # Save the latest user message for processing.
         self.latest_user_message = text
@@ -440,9 +528,49 @@ class Brain:
         """
         Handle messages of type 'reset'.
         Resets brain state: history, pose graph memory, and state variables.
+        If a memory_state parameter is provided, loads that state.
         """
         self.logger.info(f"Resetting brain state for connection {self.connection_id}")
 
+        # Check if a memory state was provided in the payload
+        memory_state = message.payload.get("memory_state")
+
+        if memory_state:
+            # Reset state variables
+            self.latest_user_message = None
+            self.directive = None
+            self.primitive_in_execution = None
+
+            # Find the NavigateThroughMemory primitive
+            navigate_through_memory = next(
+                (
+                    p
+                    for p in self.local_primitives_list
+                    if p.name == "navigate_through_memory"
+                ),
+                None,
+            )
+
+            # Load the specified memory state
+            success = await self.memory_state_manager.load_memory_state(
+                memory_state, self.history, navigate_through_memory
+            )
+
+            if success:
+                self.logger.info(
+                    f"Loaded memory state '{memory_state}' for connection {self.connection_id}"
+                )
+                # Notify the client that the server is ready for the next image
+                await self.send_callback(
+                    MessageOut(type=MessageOutType.READY_FOR_IMAGE, payload={})
+                )
+                return
+            else:
+                self.logger.error(
+                    f"Failed to load memory state '{memory_state}', performing standard reset"
+                )
+
+        # Perform standard reset if no memory state was provided or loading failed
         # Reset history
         self.history.reset()
 
