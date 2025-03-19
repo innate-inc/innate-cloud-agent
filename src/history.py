@@ -1,7 +1,7 @@
 from enum import Enum
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import json
 
@@ -30,14 +30,14 @@ class History:
         self.entries: List[HistoryEntry] = []
         # Full history including those that have been summarized.
         self.full_entries: List[HistoryEntry] = []
-        self.history_start_time = datetime.now()
+        self.history_start_time = datetime.now(timezone.utc)
         self.is_summarizing = False
 
     def reset(self):
         """Reset the history to an empty state."""
         self.entries = []
         self.full_entries = []
-        self.history_start_time = datetime.now()
+        self.history_start_time = datetime.now(timezone.utc)
         self.is_summarizing = False
 
     def add(
@@ -197,6 +197,7 @@ class History:
                 folder,
                 f"history_{self.history_start_time.strftime('%Y%m%d_%H%M%S')}.json",
             )
+            print(f"Saving history to {filename}")
             with open(filename, "w") as f:
                 json.dump(serializable_history, f, indent=2)
 

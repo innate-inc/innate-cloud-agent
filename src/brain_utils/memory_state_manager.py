@@ -235,39 +235,40 @@ class MemoryStateManager:
             # 3. Load history from files
             # This requires us to reconstruct the history from the saved files
             # Find the latest history files
-            if os.path.exists(src_history_dir):
-                # Find the most recent history file
-                history_files = [
-                    f
-                    for f in os.listdir(src_history_dir)
-                    if f.startswith("history_") and f.endswith(".json")
-                ]
-                if history_files:
-                    # Get the timestamp from the filename to set history_start_time
-                    latest_file = sorted(history_files)[-1]
-                    timestamp_str = latest_file.replace("history_", "").replace(
-                        ".json", ""
-                    )
-                    try:
-                        timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
-                        history.history_start_time = timestamp
+            # TODO: Implement this WHEN we need it! Not required FOR NOW
+            # if os.path.exists(src_history_dir):
+            #     # Find the most recent history file
+            #     history_files = [
+            #         f
+            #         for f in os.listdir(src_history_dir)
+            #         if f.startswith("history_") and f.endswith(".json")
+            #     ]
+            #     if history_files:
+            #         # Get the timestamp from the filename to set history_start_time
+            #         latest_file = sorted(history_files)[-1]
+            #         timestamp_str = latest_file.replace("history_", "").replace(
+            #             ".json", ""
+            #         )
+            #         try:
+            #             timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+            #             history.history_start_time = timestamp
 
-                        # Load entries from the file
-                        src_file = os.path.join(src_history_dir, latest_file)
-                        with open(src_file, "r") as f:
-                            entries_data = json.load(f)
+            #             # Load entries from the file
+            #             src_file = os.path.join(src_history_dir, latest_file)
+            #             with open(src_file, "r") as f:
+            #                 entries_data = json.load(f)
 
-                        # Reconstruct history entries
-                        for entry_data in entries_data:
-                            entry_type = HistoryEntryType(entry_data["type"])
-                            description = entry_data["description"]
-                            users_implicated = entry_data.get("users_implicated", [])
+            #             # Reconstruct history entries
+            #             for entry_data in entries_data:
+            #                 entry_type = HistoryEntryType(entry_data["type"])
+            #                 description = entry_data["description"]
+            #                 users_implicated = entry_data.get("users_implicated", [])
 
-                            # Add entry to history
-                            history.add(entry_type, description, users_implicated)
-                    except Exception as e:
-                        self.logger.error(f"Error loading history: {e}")
-                        # Continue with empty history
+            #                 # Add entry to history
+            #                 history.add(entry_type, description, users_implicated)
+            #         except Exception as e:
+            #             self.logger.error(f"Error loading history: {e}")
+            #             # Continue with empty history
 
             self.logger.info(f"Successfully loaded memory state '{state_name}'")
             return True
