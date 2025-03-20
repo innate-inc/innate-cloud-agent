@@ -28,8 +28,6 @@ class History:
     def __init__(self):
         # Entries that have not yet been summarized.
         self.entries: List[HistoryEntry] = []
-        # Full history including those that have been summarized.
-        self.full_entries: List[HistoryEntry] = []
         # Simple list for tracking discrepancies as timestamped strings
         self.discrepancies: List[Dict[str, Any]] = []
         self.history_start_time = datetime.now(timezone.utc)
@@ -38,7 +36,6 @@ class History:
     def reset(self):
         """Reset the history to an empty state."""
         self.entries = []
-        self.full_entries = []
         self.discrepancies = []
         self.history_start_time = datetime.now(timezone.utc)
         self.is_summarizing = False
@@ -152,15 +149,12 @@ class History:
     #         # Generate a textual summary.
     #         summary = self.generate_summary(to_summarize)
 
-    #         # Add the summarized items to the full history.
-    #         self.full_entries.extend(to_summarize)
+    #         # Replace the summarized block with a summary entry.
     #         summary_entry = HistoryEntry(
     #             timestamp=datetime.now(),
     #             type=HistoryEntryType.HISTORY_SUMMARY,
     #             description=summary,
     #         )
-    #         self.full_entries.append(summary_entry)
-
     #         # Replace the summarized block with the summary entry.
     #         self.entries = [summary_entry] + self.entries[
     #             self.NUM_HISTORY_TO_SUMMARIZE :
@@ -200,40 +194,10 @@ class History:
 
     def save(self):
         try:
-            # Save full (unsummarized) history.
-            serializable_full_history = [
-                {
-                    **entry.model_dump(),
-                    "timestamp": entry.timestamp.isoformat(),
-                    "type": entry.type.value,
-                }
-                for entry in self.full_entries
-            ]
             folder = os.path.expanduser("./histories/")
             os.makedirs(folder, exist_ok=True)
 
-            full_filename = os.path.join(
-                folder,
-                f"history_full_{self.history_start_time.strftime('%Y%m%d_%H%M%S')}.json",
-            )
-            with open(full_filename, "w") as f:
-                json.dump(serializable_full_history, f, indent=2)
-
-            full_filename_txt = os.path.join(
-                folder,
-                f"history_full_{self.history_start_time.strftime('%Y%m%d_%H%M%S')}.txt",
-            )
-            with open(full_filename_txt, "w") as f:
-                f.write(
-                    "\n".join(
-                        [
-                            f"{entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} - {entry.type.value}: {entry.description}"
-                            for entry in self.full_entries
-                        ]
-                    )
-                )
-
-            # Save summarized current history.
+            # Save current history
             serializable_history = [
                 {
                     **entry.model_dump(),
