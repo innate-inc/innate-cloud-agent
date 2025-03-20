@@ -78,31 +78,6 @@ class History:
         # Only add to the discrepancies list, not to the regular history
         self.discrepancies.append(discrepancy)
 
-    def get_discrepancies_as_string(self) -> str:
-        """Get a string representation of the discrepancy history."""
-        now = datetime.now()
-        lines = []
-
-        for entry in self.discrepancies:
-            time_diff = now - entry["timestamp"]
-            seconds_diff = int(time_diff.total_seconds())
-
-            if seconds_diff < 60:
-                time_str = f"{seconds_diff} seconds ago"
-            else:
-                minutes_diff = seconds_diff // 60
-                time_str = (
-                    f"{minutes_diff} minute{'' if minutes_diff == 1 else 's'} ago"
-                )
-
-            lines.append(f"{time_str} - {entry['message']}")
-            if entry["users_implicated"]:
-                users = ", ".join(entry["users_implicated"])
-                lines.append(f"  Users: {users}")
-
-        lines.append(f"\nCurrent time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-        return "\n".join(lines)
-
     def get_as_string(self) -> str:
         now = datetime.now()
         lines = []
@@ -238,13 +213,5 @@ class History:
                 print(f"Saving discrepancies to {discrepancy_filename}")
                 with open(discrepancy_filename, "w") as f:
                     json.dump(serializable_discrepancies, f, indent=2)
-
-                discrepancy_filename_txt = os.path.join(
-                    folder,
-                    f"discrepancies_"
-                    f"{self.history_start_time.strftime('%Y%m%d_%H%M%S')}.txt",
-                )
-                with open(discrepancy_filename_txt, "w") as f:
-                    f.write(self.get_discrepancies_as_string())
         except Exception as e:
             print(f"Error saving history: {e}")
