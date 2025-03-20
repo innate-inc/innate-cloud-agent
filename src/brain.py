@@ -192,15 +192,27 @@ class Brain:
                 to_tell_user="BEEP BOOP BEEP BOOP, the brain failed. Stopping the current task.",
             )
 
-        # Clear the user message as it's been consumed
-        self.latest_user_message = None
-
-        # Validate the next task
+            # Validate the next task
         vision_output.next_task = (
             PrimitiveDefinition.model_validate(vision_output.next_task)
             if vision_output.next_task
             else None
         )
+
+        # Look for discrepancies in the vision output
+        # Could be a function later
+        # Potential discrepancy 1: There's a primitive running, the VLM does not say stop_current_task and yet it returns a next_task
+        if (
+            not vision_output.stop_current_task
+            and vision_output.next_task is not None
+            and self.primitive_in_execution is not None
+        ):
+            self.history.record_discrepancy(
+                message=f"The VLM returned a next_task ({vision_output.next_task.name}) even though there is a task running ({self.primitive_in_execution.name}) and it did not say to stop the current task.",
+            )
+
+        # Clear the user message as it's been consumed
+        self.latest_user_message = None
 
         # Update primitive_in_execution if needed
         if vision_output.next_task:
