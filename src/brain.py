@@ -210,6 +210,8 @@ class Brain:
             self.history.record_discrepancy(
                 message=f"The VLM returned a next_task ({vision_output.next_task.name}) even though there is a task running ({self.primitive_in_execution.name}) and it did not say to stop the current task.",
             )
+            # For now, we force the next_task to be None if it's not strictly asked to be stopped.
+            vision_output.next_task = None
 
         # Clear the user message as it's been consumed
         self.latest_user_message = None
