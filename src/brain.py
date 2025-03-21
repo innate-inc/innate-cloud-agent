@@ -111,9 +111,9 @@ class Brain:
                 time_start = time.time()
 
             if message_type == MessageInType.IMAGE:
-                await self.handle_image(message)
+                vision_output = await self.handle_image(message)
                 self.logger.info(
-                    f"Processed image message in {time.time() - time_start} seconds\n"
+                    f"Processed image message in {time.time() - time_start} seconds, sent task: {vision_output.next_task.name if vision_output.next_task else 'None'}\n"
                 )
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)
@@ -125,6 +125,8 @@ class Brain:
                 await self.handle_primitive_activated(message)
             elif message_type == MessageInType.PRIMITIVE_FAILED:
                 await self.handle_primitive_failed(message)
+            elif message_type == MessageInType.PRIMITIVE_INTERRUPTED:
+                await self.handle_primitive_interrupted(message)
             elif message_type == MessageInType.REGISTER_PRIMITIVES_AND_DIRECTIVE:
                 await self.handle_register_primitives_and_directive(message)
             elif message_type == MessageInType.RESET:
@@ -262,6 +264,8 @@ class Brain:
 
         # Send response and prepare for next image
         await self._send_vision_output(vision_output, vision_output_to_write_in_history)
+
+        return vision_output
 
     async def handle_pose_image(self, message: MessageIn):
         """Handle messages of type 'pose_image'."""
@@ -561,6 +565,29 @@ class Brain:
             self.history.add(
                 HistoryEntryType.SYSTEM_MESSAGE,
                 description=f"Task '{self.primitive_in_execution.name}' failed.",
+            )
+            self.primitive_in_execution = None
+        else:
+            raise ValueError(
+                f"[Brain {self.connection_id}] Task '{primitive_name}' (ID: {primitive_id}) is not the current task in execution. That's a weird bug."
+            )
+
+    async def handle_primitive_interrupted(self, message: MessageIn):
+        """
+        Handle messages of type 'primitive_interrupted'.
+        Processes the primitive interruption and sends an acknowledgment.
+        """
+        primitive_id = message.payload["primitive_id"]
+        primitive_name = message.payload["primitive_name"]
+
+        if (
+            self.primitive_in_execution
+            and self.primitive_in_execution.primitive_id == primitive_id
+        ):
+            self.logger.info(f"Task '{self.primitive_in_execution.name}' interrupted.")
+            self.history.add(
+                HistoryEntryType.SYSTEM_MESSAGE,
+                description=f"Task '{self.primitive_in_execution.name}' interrupted.",
             )
             self.primitive_in_execution = None
         else:

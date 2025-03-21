@@ -113,7 +113,9 @@ class NavigateInSight(Primitive):
             self.vertical_fov,
         )
         if segmentation_masks is None or len(segmentation_masks) == 0:
-            print(f"Segmentation failed for target object '{refined_target}'.")
+            print(
+                f"\033[33mSegmentation failed for target object '{refined_target}'.\033[0m"
+            )
             # Save image with segmentation masks.
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             cv2.imwrite(

@@ -185,7 +185,6 @@ class History:
                 folder,
                 f"history_{self.history_start_time.strftime('%Y%m%d_%H%M%S')}.json",
             )
-            print(f"Saving history to {filename}")
             with open(filename, "w") as f:
                 json.dump(serializable_history, f, indent=2)
 
