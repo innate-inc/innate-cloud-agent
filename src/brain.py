@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+import uuid
 
 
 from src.baml_client.partial_types import VisionAgentOutput
@@ -218,6 +219,9 @@ class Brain:
 
         # Update primitive_in_execution if needed
         if vision_output.next_task:
+            # Make sure next_task has a primitive_id
+            if not vision_output.next_task.primitive_id:
+                vision_output.next_task.primitive_id = str(uuid.uuid4())
             self.primitive_in_execution = PrimitiveDefinition.model_validate(
                 vision_output.next_task
             )
@@ -316,11 +320,17 @@ class Brain:
         else:
             self.logger.error("NavigateThroughMemory primitive not found")
 
-    async def _send_vision_output(self, vision_output):
+    async def _send_vision_output(
+        self, vision_output, vision_output_to_write_in_history=None
+    ):
         # Record the vision agent output in the history.
         self.history.add(
             HistoryEntryType.VISION_AGENT_OUTPUT,
-            description=json.dumps(vision_output.model_dump()),
+            description=json.dumps(
+                vision_output_to_write_in_history.model_dump()
+                if vision_output_to_write_in_history
+                else vision_output.model_dump()
+            ),
         )
 
         # Send the vision output to the client.
@@ -516,10 +526,15 @@ class Brain:
         Processes the primitive completion and sends an acknowledgment.
         """
         primitive_name = message.payload["primitive_name"]
-        self.logger.info(f"Primitive '{primitive_name}' completed.")
+        primitive_id = message.payload["primitive_id"]
+        self.logger.info(
+            f"Primitive '{primitive_name}' (ID: {primitive_id}) completed."
+        )
+
+        # Check if we have a matching primitive in execution
         if (
             self.primitive_in_execution
-            and primitive_name == self.primitive_in_execution.name
+            and primitive_id == self.primitive_in_execution.primitive_id
         ):
             self.primitive_in_execution = None
             self.history.add(
@@ -528,7 +543,7 @@ class Brain:
             )
         else:
             raise ValueError(
-                f"[Brain {self.connection_id}] Primitive '{primitive_name}' is not the current primitive in execution. That's a weird bug."
+                f"[Brain {self.connection_id}] Primitive '{primitive_name} - ID: {primitive_id}' is not the current primitive in execution. That's a weird bug."
             )
 
     async def handle_primitive_failed(self, message: MessageIn):
@@ -537,11 +552,12 @@ class Brain:
         Processes the primitive failure and sends an acknowledgment.
         """
         primitive_name = message.payload["primitive_name"]
-        self.logger.info(f"Primitive '{primitive_name}' failed.")
+        primitive_id = message.payload["primitive_id"]
+        self.logger.info(f"Primitive '{primitive_name}' (ID: {primitive_id}) failed.")
 
         if (
             self.primitive_in_execution
-            and self.primitive_in_execution.name == primitive_name
+            and self.primitive_in_execution.primitive_id == primitive_id
         ):
             self.primitive_in_execution = None
             self.history.add(
@@ -550,7 +566,7 @@ class Brain:
             )
         else:
             raise ValueError(
-                f"[Brain {self.connection_id}] Primitive '{primitive_name}' is not the current primitive in execution. That's a weird bug."
+                f"[Brain {self.connection_id}] Primitive '{primitive_name} - ID: {primitive_id}' is not the current primitive in execution. That's a weird bug."
             )
 
     async def handle_primitive_activated(self, message: MessageIn):
@@ -559,8 +575,9 @@ class Brain:
         Processes the primitive activation and sends an acknowledgment.
         """
         primitive_name = message.payload["primitive_name"]
+        primitive_id = message.payload.get("primitive_id")
         self.logger.info(
-            f"\033[92m[Brain {self.connection_id}] Primitive '{primitive_name}' activated.\033[0m"
+            f"\033[92m[Brain {self.connection_id}] Primitive '{primitive_name}' (ID: {primitive_id}) activated.\033[0m"
         )
 
         # Check if this is a navigate_to_position primitive from navigate_in_sight
@@ -579,11 +596,15 @@ class Brain:
                 None,
             )
             if matched_prim is not None:
-                # Convert the dict to a PrimitiveDefinition instance
-                self.primitive_in_execution = primitive_to_object(matched_prim)
+                # Convert the dict to a PrimitiveDefinition instance with the ID
+                prim_obj = primitive_to_object(matched_prim)
+                # Override the ID if provided in the message
+                if primitive_id:
+                    prim_obj.primitive_id = primitive_id
+                self.primitive_in_execution = prim_obj
                 self.history.add(
                     HistoryEntryType.SYSTEM_MESSAGE,
-                    description=f"Primitive '{primitive_name}' activated.",
+                    description=f"Primitive '{primitive_name}' (ID: {primitive_id}) activated.",
                 )
             else:
                 self.primitive_in_execution = None
