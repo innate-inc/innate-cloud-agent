@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from typing import Dict
 import uuid
 
 
@@ -58,6 +59,7 @@ class Brain:
             TurnAndMove(),
         ]  # These are the ones defined in the brain here, not registered with the server by the user
         self.primitive_in_execution = None
+        self.primitive_ids_map: Dict[str, PrimitiveDefinition] = {}
         self.directive = None  # Store the directive that will steer the VLM
 
         # Initialize history to record chat messages and vision agent outputs.
@@ -222,9 +224,6 @@ class Brain:
             # Make sure next_task has a primitive_id
             if not vision_output.next_task.primitive_id:
                 vision_output.next_task.primitive_id = str(uuid.uuid4())
-            self.primitive_in_execution = PrimitiveDefinition.model_validate(
-                vision_output.next_task
-            )
 
         # Before replacing what we send to the client, we store it locally
         # as it will be used to write to the history.
@@ -241,9 +240,6 @@ class Brain:
             vision_output = await self.navigation_handler.handle_navigate_in_sight(
                 vision_output, robot_coords, base64_img, depth_payload
             )
-            # Make sure to update our primitive_in_execution to match what was created in navigate_in_sight
-            if vision_output.next_task:
-                self.primitive_in_execution = vision_output.next_task
 
         # Handle special case for navigate_through_memory
         if (
@@ -256,9 +252,6 @@ class Brain:
                     vision_output, self.connection_id
                 )
             )
-            # Make sure to update our primitive_in_execution to match what was created
-            if vision_output.next_task:
-                self.primitive_in_execution = vision_output.next_task
 
         # Handle special case for turn_and_move
         if vision_output.next_task and vision_output.next_task.name == "turn_and_move":
@@ -266,9 +259,6 @@ class Brain:
             vision_output = await self.navigation_handler.handle_turn_and_move(
                 vision_output, robot_coords
             )
-            # Make sure to update our primitive_in_execution to match what was created
-            if vision_output.next_task:
-                self.primitive_in_execution = vision_output.next_task
 
         # Send response and prepare for next image
         await self._send_vision_output(vision_output, vision_output_to_write_in_history)
@@ -323,6 +313,15 @@ class Brain:
     async def _send_vision_output(
         self, vision_output, vision_output_to_write_in_history=None
     ):
+        primitive_to_remember = (
+            vision_output_to_write_in_history.next_task
+            if vision_output_to_write_in_history
+            else vision_output.next_task
+        )
+        if primitive_to_remember:
+            self.primitive_ids_map[primitive_to_remember.primitive_id] = (
+                primitive_to_remember
+            )
         # Record the vision agent output in the history.
         self.history.add(
             HistoryEntryType.VISION_AGENT_OUTPUT,
@@ -525,25 +524,25 @@ class Brain:
         Handle messages of type 'primitive_completed'.
         Processes the primitive completion and sends an acknowledgment.
         """
-        primitive_name = message.payload["primitive_name"]
         primitive_id = message.payload["primitive_id"]
-        self.logger.info(
-            f"Primitive '{primitive_name}' (ID: {primitive_id}) completed."
-        )
+        primitive_name = message.payload["primitive_name"]
 
         # Check if we have a matching primitive in execution
         if (
             self.primitive_in_execution
             and primitive_id == self.primitive_in_execution.primitive_id
         ):
-            self.primitive_in_execution = None
+            self.logger.info(
+                f"Task '{self.primitive_in_execution.name}' (ID: {primitive_id}) completed."
+            )
             self.history.add(
                 HistoryEntryType.SYSTEM_MESSAGE,
-                description=f"Primitive '{primitive_name}' completed.",
+                description=f"Task '{self.primitive_in_execution.name}' completed.",
             )
+            self.primitive_in_execution = None
         else:
             raise ValueError(
-                f"[Brain {self.connection_id}] Primitive '{primitive_name} - ID: {primitive_id}' is not the current primitive in execution. That's a weird bug."
+                f"[Brain {self.connection_id}] Task '{primitive_name}' (ID: {primitive_id}) is not the current task in execution. That's a weird bug."
             )
 
     async def handle_primitive_failed(self, message: MessageIn):
@@ -551,22 +550,22 @@ class Brain:
         Handle messages of type 'primitive_failed'.
         Processes the primitive failure and sends an acknowledgment.
         """
-        primitive_name = message.payload["primitive_name"]
         primitive_id = message.payload["primitive_id"]
-        self.logger.info(f"Primitive '{primitive_name}' (ID: {primitive_id}) failed.")
-
+        primitive_name = message.payload["primitive_name"]
         if (
             self.primitive_in_execution
             and self.primitive_in_execution.primitive_id == primitive_id
         ):
-            self.primitive_in_execution = None
+            self.logger.info(f"Task '{self.primitive_in_execution.name}' failed.")
+
             self.history.add(
                 HistoryEntryType.SYSTEM_MESSAGE,
-                description=f"Primitive '{primitive_name}' failed.",
+                description=f"Task '{self.primitive_in_execution.name}' failed.",
             )
+            self.primitive_in_execution = None
         else:
             raise ValueError(
-                f"[Brain {self.connection_id}] Primitive '{primitive_name} - ID: {primitive_id}' is not the current primitive in execution. That's a weird bug."
+                f"[Brain {self.connection_id}] Task '{primitive_name}' (ID: {primitive_id}) is not the current task in execution. That's a weird bug."
             )
 
     async def handle_primitive_activated(self, message: MessageIn):
@@ -574,25 +573,27 @@ class Brain:
         Handle messages of type 'primitive_activated'.
         Processes the primitive activation and sends an acknowledgment.
         """
-        primitive_name = message.payload["primitive_name"]
-        primitive_id = message.payload.get("primitive_id")
-        self.logger.info(
-            f"\033[92m[Brain {self.connection_id}] Primitive '{primitive_name}' (ID: {primitive_id}) activated.\033[0m"
-        )
+        primitive_id = message.payload["primitive_id"]
+        primitive_activated = self.primitive_ids_map[primitive_id]
 
         # Check if this is a navigate_to_position primitive from navigate_in_sight
-        if (
-            primitive_name == "navigate_to_position"
-            and self.primitive_in_execution
-            and self.primitive_in_execution.name == "navigate_in_sight"
-        ):
-            # This is a special case - we're actually executing a navigate_to_position
-            # that was derived from a navigate_in_sight request, so we don't need to do anything
-            pass
+        if self.primitive_in_execution:
+            # The client has decided to activate a primitive that we didn't decide to activate.
+            # This is unexpected, so we log it and don't do anything.
+            self.logger.warn(
+                f"[Brain {self.connection_id}] Task '{self.primitive_in_execution.name}' (ID: {primitive_id}) was activated by the client, but we didn't activate it. This is unexpected."
+            )
         else:
-            # Set primitive_in_execution based on primitive name
+            # This is likely normal, we should just check that it corresponds to an id in our list of primitives.
+            self.logger.info(
+                f"\033[92m[Brain {self.connection_id}] Task '{primitive_activated.name}' (ID: {primitive_id}) activated.\033[0m"
+            )
             matched_prim = next(
-                (prim for prim in self.primitives_list if prim.name == primitive_name),
+                (
+                    prim
+                    for prim in self.primitives_list + self.local_primitives_list
+                    if prim.name == primitive_activated.name
+                ),
                 None,
             )
             if matched_prim is not None:
@@ -604,7 +605,7 @@ class Brain:
                 self.primitive_in_execution = prim_obj
                 self.history.add(
                     HistoryEntryType.SYSTEM_MESSAGE,
-                    description=f"Primitive '{primitive_name}' (ID: {primitive_id}) activated.",
+                    description=f"Primitive '{primitive_activated.name}' activated.",
                 )
             else:
                 self.primitive_in_execution = None
