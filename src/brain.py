@@ -345,8 +345,11 @@ class Brain:
         # Save the entire history to a file
         self.history.save()
 
-        # Notify the client that the server is ready for the next image.
-        await self.send_callback(MessageOut(type="ready_for_image", payload={}))
+        # Only notify the client that the server is ready for the next image if there's no next task.
+        # If there is a next task, we'll wait for the primitive_activated message before
+        # requesting next image.
+        if not vision_output.next_task:
+            await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_chat_in(self, message: MessageIn):
         """
@@ -599,6 +602,9 @@ class Brain:
         """
         Handle messages of type 'primitive_activated'.
         Processes the primitive activation and sends an acknowledgment.
+        After confirming activation, requests the next image from the client.
+        This completes the loop: we only request new images after primitive activation
+        has been confirmed by the client, preventing race conditions.
         """
         primitive_id = message.payload["primitive_id"]
         primitive_activated = self.primitive_ids_map[primitive_id]
