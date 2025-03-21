@@ -1,3 +1,4 @@
+from datetime import datetime
 import traceback
 from src.primitives.types import Primitive
 import asyncio
@@ -112,13 +113,25 @@ class NavigateInSight(Primitive):
             self.vertical_fov,
         )
         if segmentation_masks is None or len(segmentation_masks) == 0:
-            print("Segmentation failed. Aborting navigation.")
+            print(f"Segmentation failed for target object '{refined_target}'.")
+            # Save image with segmentation masks.
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            cv2.imwrite(
+                f"segmentation_failed_{refined_target}_{timestamp}.jpg", cv_image
+            )
             return "Segmentation failed", False, None
 
         # Select the segmentation mask with highest confidence.
         target_info = segmentation_masks.get("1")
         if not target_info:
-            print("No valid segmentation mask found.")
+            print(
+                f"No valid segmentation mask found for target object '{refined_target}'."
+            )
+            # Save image with segmentation masks.
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            cv2.imwrite(
+                f"segmentation_failed_{refined_target}_{timestamp}.jpg", cv_image
+            )
             return "Segmentation failed", False, None
 
         print(f"Segmentation result: {target_info}")

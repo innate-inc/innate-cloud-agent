@@ -222,11 +222,18 @@ class Brain:
                 vision_output.next_task
             )
 
+        # Before replacing what we send to the client, we store it locally
+        # as it will be used to write to the history.
+        # TODO: For benchmarking it might make sense to also send this one tothe client
+        # so that the benchmark is aware of the navigation choices.
+        vision_output_to_write_in_history = None
+
         # Handle special case for navigate_in_sight
         if (
             vision_output.next_task
             and vision_output.next_task.name == "navigate_in_sight"
         ):
+            vision_output_to_write_in_history = vision_output.model_copy()
             vision_output = await self.navigation_handler.handle_navigate_in_sight(
                 vision_output, robot_coords, base64_img, depth_payload
             )
@@ -239,6 +246,7 @@ class Brain:
             vision_output.next_task
             and vision_output.next_task.name == "navigate_through_memory"
         ):
+            vision_output_to_write_in_history = vision_output.model_copy()
             vision_output = (
                 await self.navigation_handler.handle_navigate_through_memory(
                     vision_output, self.connection_id
@@ -250,6 +258,7 @@ class Brain:
 
         # Handle special case for turn_and_move
         if vision_output.next_task and vision_output.next_task.name == "turn_and_move":
+            vision_output_to_write_in_history = vision_output.model_copy()
             vision_output = await self.navigation_handler.handle_turn_and_move(
                 vision_output, robot_coords
             )
@@ -258,7 +267,7 @@ class Brain:
                 self.primitive_in_execution = vision_output.next_task
 
         # Send response and prepare for next image
-        await self._send_vision_output(vision_output)
+        await self._send_vision_output(vision_output, vision_output_to_write_in_history)
 
     async def handle_pose_image(self, message: MessageIn):
         """Handle messages of type 'pose_image'."""
