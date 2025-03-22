@@ -19,6 +19,7 @@ load_dotenv()
 
 from run_server import connection_handler
 
+
 # Import the setup functions directly instead of from the other test file
 async def common_setup(test_name):
     """
@@ -176,14 +177,28 @@ async def test_turn_and_move_primitive():
     # - new_x should be close to 0 (cos(π/2) ≈ 0)
     # - new_y should be close to 2 (sin(π/2) ≈ 1)
     inputs = next_task.get("inputs", {})
-    assert abs(inputs.get("theta", 0) - math.pi/2) < 0.1, "Expected theta to be close to π/2 radians (90 degrees)"
+    assert (
+        abs(inputs.get("theta", 0) - math.pi / 2) < 0.1
+    ), "Expected theta to be close to π/2 radians (90 degrees)"
     assert abs(inputs.get("x", 0)) < 0.1, "Expected x to be close to 0"
     assert abs(inputs.get("y", 0) - 2.0) < 0.1, "Expected y to be close to 2.0"
+
+    # Again, confirm that we activate the primitive
+    activate_message = {
+        "type": "primitive_activated",
+        "payload": {
+            "primitive_id": next_task.get("primitive_id"),
+            "primitive_name": next_task.get("name"),
+        },
+    }
+    await websocket.send(json.dumps(activate_message))
 
     # Next, the server should send a "ready_for_image" message
     raw_msg = await websocket.recv()
     msg = json.loads(raw_msg)
-    assert msg["type"] == "ready_for_image", "Expected ready_for_image after vision output"
+    assert (
+        msg["type"] == "ready_for_image"
+    ), "Expected ready_for_image after vision output"
 
     # Clean up: close the server
     server.close()
