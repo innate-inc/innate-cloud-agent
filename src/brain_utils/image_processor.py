@@ -46,6 +46,11 @@ class ImageProcessor:
         if "depth" not in payload:
             raise ValueError("Missing required 'depth' in payload")
 
+        if "map" not in payload:
+            raise ValueError("Missing required 'map' in payload")
+
+        map_payload = payload["map"]
+
         depth_payload = payload["depth"]
 
         # Verify depth payload contains required fields
@@ -74,7 +79,7 @@ class ImageProcessor:
                 f"Robot coordinates missing required fields: {', '.join(missing_fields)}"
             )
 
-        return base64_img, depth_payload, robot_coords
+        return base64_img, depth_payload, robot_coords, map_payload
 
     def process_depth_map(self, depth_payload):
         depth_map = decode_depth_payload(depth_payload)

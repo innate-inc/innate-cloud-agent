@@ -146,7 +146,7 @@ class Brain:
         # Extract data from payload
 
         self.logger.debug(f"Received image message: {message.payload.keys()}")
-        base64_img, depth_payload, robot_coords = (
+        base64_img, depth_payload, robot_coords, map_payload = (
             self.image_processor.extract_image_data(message.payload)
         )
 
