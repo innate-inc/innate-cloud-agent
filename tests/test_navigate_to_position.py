@@ -177,6 +177,16 @@ async def test_absolute_navigation():
         abs(inputs.get("y", 0) - 10.0) < 0.1
     ), "Expected y coordinate to be close to 10.0"
 
+    # Again, confirm that we activate the primitive
+    activate_message = {
+        "type": "primitive_activated",
+        "payload": {
+            "primitive_id": next_task.get("primitive_id"),
+            "primitive_name": next_task.get("name"),
+        },
+    }
+    await websocket.send(json.dumps(activate_message))
+
     # Next, the server should send a "ready_for_image" message
     raw_msg = await websocket.recv()
     msg = json.loads(raw_msg)
@@ -262,6 +272,16 @@ async def test_relative_navigation_turn_around():
         abs(inputs.get("y", 999)) < 0.1
     ), "Expected y to be close to 0 for turning in place"
 
+    # Again, confirm that we activate the primitive
+    activate_message = {
+        "type": "primitive_activated",
+        "payload": {
+            "primitive_id": next_task.get("primitive_id"),
+            "primitive_name": next_task.get("name"),
+        },
+    }
+    await websocket.send(json.dumps(activate_message))
+
     # Next, the server should send a "ready_for_image" message
     raw_msg = await websocket.recv()
     msg = json.loads(raw_msg)
@@ -345,6 +365,16 @@ async def test_relative_navigation_move_forward():
         abs(inputs.get("theta", 999)) < 0.1
     ), "Expected theta to be close to 0 for moving straight"
 
+    # Again, confirm that we activate the primitive
+    activate_message = {
+        "type": "primitive_activated",
+        "payload": {
+            "primitive_id": next_task.get("primitive_id"),
+            "primitive_name": next_task.get("name"),
+        },
+    }
+    await websocket.send(json.dumps(activate_message))
+
     # Next, the server should send a "ready_for_image" message
     raw_msg = await websocket.recv()
     msg = json.loads(raw_msg)
@@ -355,5 +385,3 @@ async def test_relative_navigation_move_forward():
     # Clean up: close the server
     server.close()
     await server.wait_closed()
-
-

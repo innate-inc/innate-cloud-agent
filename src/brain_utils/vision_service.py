@@ -6,7 +6,7 @@ from src.agents.baml_agent import vision_agent
 from src.agents.gemini_flash_baml_agent import gemini_vision_agent
 from src.agents.types import VisionAgentInput
 from src.baml_client.types import VisionAgentOutput
-from src.agents.exceptions import MaxRetriesExceededException
+from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlClientError
 from src.primitives.transforms import primitive_to_object
 
 
@@ -29,6 +29,7 @@ class VisionService:
         robot_coords,
         directive=None,
         agent_type: VisionAgentType = VisionAgentType.ANTHROPIC,
+        gemini_variant: str = "gemini1",
     ) -> Union[VisionAgentOutput]:
         """
         Calls the external visual language model with the given inputs.
@@ -41,7 +42,12 @@ class VisionService:
             history_as_string: A history of events.
             robot_coords: A dictionary with the robot's coordinates.
             directive: A directive to steer the vision language model.
-            agent_type: The type of vision agent to use (anthropic or gemini_flash).
+            agent_type: The type of agent to use.
+            gemini_variant: The variant of Gemini agent to use if agent_type is
+                GEMINI_FLASH. Options: "gemini1", "gemini2", "gemini3", "gemini4"
+
+        Returns:
+            A VisionAgentOutput object.
         """
         try:
             current_primitive = (
@@ -50,7 +56,11 @@ class VisionService:
             agent_name = agent_type.value
             self.logger.info(
                 f"Calling {agent_name} vision model while current primitive is "
-                f"{current_primitive}"
+                + (
+                    f"\033[1;34m{current_primitive}\033[0m"
+                    if current_primitive != "None"
+                    else current_primitive
+                )
             )
             if user_prompt_text:
                 self.logger.info(
@@ -79,7 +89,16 @@ class VisionService:
                 completion = await vision_agent(vlm_inputs)
                 return completion
             elif agent_type == VisionAgentType.GEMINI_FLASH:
-                completion = await gemini_vision_agent(vlm_inputs)
+                # Validate gemini_variant
+                if gemini_variant not in ("gemini1", "gemini2", "gemini3", "gemini4"):
+                    self.logger.warning(
+                        f"Invalid Gemini variant: {gemini_variant}. Using gemini1."
+                    )
+                    gemini_variant = "gemini1"
+
+                completion = await gemini_vision_agent(
+                    vlm_inputs, agent_variant=gemini_variant
+                )
                 return completion
             else:
                 raise ValueError(f"Unsupported agent type: {agent_type}")
@@ -106,6 +125,28 @@ class VisionService:
                 to_tell_user=(
                     "BEEP BOOP BEEP BOOP, the brain failed after multiple attempts. "
                     "Maybe next time it will work?"
+                ),
+            )
+        except UnforeseenBamlClientError as e:
+            # Handle unforeseen BAML client errors
+            self.logger.error(f"Unforeseen BAML client error: {e}")
+            has_original = hasattr(e, "original_error")
+            original_err = e.original_error if has_original else "Unknown"
+            return VisionAgentOutput(
+                stop_current_task=True,
+                observation=(
+                    "The brain encountered an unexpected error with the vision model."
+                ),
+                thoughts=(
+                    f"Unforeseen BAML client error: {str(e)}\n"
+                    f"Original error: {original_err}"
+                ),
+                new_goal=None,
+                next_task=None,
+                anticipation=None,
+                to_tell_user=(
+                    "BEEP BOOP BEEP BOOP, the brain encountered an unexpected error. "
+                    "Please try again later."
                 ),
             )
         except Exception as e:

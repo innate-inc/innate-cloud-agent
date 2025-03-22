@@ -10,6 +10,10 @@ class PrimitiveDefinition(BaseModel):
         description="Guideline for the task. Can be provided as 'description' in inputs.",
     )
     inputs: Dict[str, Any]
+    primitive_id: Optional[str] = Field(
+        default=None,
+        description="Unique identifier for tracking this primitive instance across its lifecycle",
+    )
 
     model_config = ConfigDict(
         # Allow population using the field name (guideline) even if an alias is provided.

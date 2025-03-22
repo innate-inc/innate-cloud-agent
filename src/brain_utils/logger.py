@@ -9,6 +9,9 @@ class BrainLogger:
         pass  # For now, disable debug logging
         # print(f"[Brain {self.connection_id}] {message}")
 
+    def warn(self, message):
+        print(f"\033[93m[Brain {self.connection_id}] {message}\033[0m")
+
     def info(self, message):
         print(f"[Brain {self.connection_id}] {message}")
 

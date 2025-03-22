@@ -1,7 +1,7 @@
 from enum import Enum
 from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timezone
 import os
 import json
 
@@ -28,9 +28,16 @@ class History:
     def __init__(self):
         # Entries that have not yet been summarized.
         self.entries: List[HistoryEntry] = []
-        # Full history including those that have been summarized.
-        self.full_entries: List[HistoryEntry] = []
-        self.history_start_time = datetime.now()
+        # Simple list for tracking discrepancies as timestamped strings
+        self.discrepancies: List[Dict[str, Any]] = []
+        self.history_start_time = datetime.now(timezone.utc)
+        self.is_summarizing = False
+
+    def reset(self):
+        """Reset the history to an empty state."""
+        self.entries = []
+        self.discrepancies = []
+        self.history_start_time = datetime.now(timezone.utc)
         self.is_summarizing = False
 
     def add(
@@ -49,6 +56,27 @@ class History:
         )
         self.entries.append(entry)
         self.check_and_summarize()
+
+    def record_discrepancy(
+        self,
+        message: str,
+    ):
+        """
+        Record a discrepancy or anomaly that seems out of the ordinary.
+        This is intended to be called from outside the class.
+
+        Args:
+            message: A simple description of the discrepancy
+        """
+        print(f"\033[33mRecording discrepancy: {message}\033[0m")
+
+        discrepancy = {
+            "timestamp": datetime.now(),
+            "message": message,
+        }
+
+        # Only add to the discrepancies list, not to the regular history
+        self.discrepancies.append(discrepancy)
 
     def get_as_string(self) -> str:
         now = datetime.now()
@@ -96,15 +124,12 @@ class History:
     #         # Generate a textual summary.
     #         summary = self.generate_summary(to_summarize)
 
-    #         # Add the summarized items to the full history.
-    #         self.full_entries.extend(to_summarize)
+    #         # Replace the summarized block with a summary entry.
     #         summary_entry = HistoryEntry(
     #             timestamp=datetime.now(),
     #             type=HistoryEntryType.HISTORY_SUMMARY,
     #             description=summary,
     #         )
-    #         self.full_entries.append(summary_entry)
-
     #         # Replace the summarized block with the summary entry.
     #         self.entries = [summary_entry] + self.entries[
     #             self.NUM_HISTORY_TO_SUMMARIZE :
@@ -144,40 +169,10 @@ class History:
 
     def save(self):
         try:
-            # Save full (unsummarized) history.
-            serializable_full_history = [
-                {
-                    **entry.model_dump(),
-                    "timestamp": entry.timestamp.isoformat(),
-                    "type": entry.type.value,
-                }
-                for entry in self.full_entries
-            ]
             folder = os.path.expanduser("./histories/")
             os.makedirs(folder, exist_ok=True)
 
-            full_filename = os.path.join(
-                folder,
-                f"history_full_{self.history_start_time.strftime('%Y%m%d_%H%M%S')}.json",
-            )
-            with open(full_filename, "w") as f:
-                json.dump(serializable_full_history, f, indent=2)
-
-            full_filename_txt = os.path.join(
-                folder,
-                f"history_full_{self.history_start_time.strftime('%Y%m%d_%H%M%S')}.txt",
-            )
-            with open(full_filename_txt, "w") as f:
-                f.write(
-                    "\n".join(
-                        [
-                            f"{entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} - {entry.type.value}: {entry.description}"
-                            for entry in self.full_entries
-                        ]
-                    )
-                )
-
-            # Save summarized current history.
+            # Save current history
             serializable_history = [
                 {
                     **entry.model_dump(),
@@ -200,6 +195,22 @@ class History:
             with open(filename_txt, "w") as f:
                 f.write(self.get_as_string())
 
-            print(f"History saved to {filename} and {filename_txt}")
+            # Save discrepancy history if there are any discrepancies
+            if self.discrepancies:
+                serializable_discrepancies = [
+                    {
+                        **entry,
+                        "timestamp": entry["timestamp"].isoformat(),
+                    }
+                    for entry in self.discrepancies
+                ]
+                discrepancy_filename = os.path.join(
+                    folder,
+                    f"discrepancies_"
+                    f"{self.history_start_time.strftime('%Y%m%d_%H%M%S')}.json",
+                )
+                print(f"Saving discrepancies to {discrepancy_filename}")
+                with open(discrepancy_filename, "w") as f:
+                    json.dump(serializable_discrepancies, f, indent=2)
         except Exception as e:
             print(f"Error saving history: {e}")

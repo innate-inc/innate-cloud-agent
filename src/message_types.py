@@ -8,6 +8,7 @@ from pydantic import BaseModel, field_serializer
 class MessageInType(str, Enum):
     AUTH = "auth"
     IMAGE = "image"
+    RESET = "reset"
     POSE_IMAGE = "pose_image"
     CHAT_IN = "chat_in"
     PRIMITIVE_ACTIVATED = "primitive_activated"
@@ -23,6 +24,7 @@ class MessageOutType(str, Enum):
     VISION_AGENT_OUTPUT = "vision_agent_output"
     CHAT_OUT = "chat_out"
     THOUGHTS = "thoughts"
+    ERROR = "error"
     PRIMITIVES_AND_DIRECTIVE_REGISTERED = "primitives_and_directive_registered"
 
 

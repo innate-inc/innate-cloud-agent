@@ -1,4 +1,5 @@
 import inspect
+import uuid
 from src.agents.types import PrimitiveDefinition
 from src.primitives.types import Primitive
 
@@ -11,6 +12,7 @@ def primitive_to_object(primitive_obj: Primitive) -> PrimitiveDefinition:
       - "name": the name of the primitive
       - "guideline": the guidelines text (if a guidelines() method exists)
       - "inputs": a dict mapping each parameter (excluding 'self') of execute to its type name
+      - "primitive_id": a unique identifier for this primitive instance
     """
     result = {}
 
@@ -43,6 +45,12 @@ def primitive_to_object(primitive_obj: Primitive) -> PrimitiveDefinition:
                     type_name = str(param.annotation)
             inputs[name] = type_name
     result["inputs"] = inputs
+
+    # Generate a unique primitive_id if one doesn't exist
+    if hasattr(primitive_obj, "primitive_id") and primitive_obj.primitive_id:
+        result["primitive_id"] = primitive_obj.primitive_id
+    else:
+        result["primitive_id"] = str(uuid.uuid4())
 
     return PrimitiveDefinition.model_validate(result)
 

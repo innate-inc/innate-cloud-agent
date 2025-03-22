@@ -1,6 +1,8 @@
 import asyncio
 import json
 import time
+from typing import Dict
+import uuid
 
 
 from src.baml_client.partial_types import VisionAgentOutput
@@ -21,6 +23,7 @@ from src.brain_utils.logger import BrainLogger
 from src.brain_utils.image_processor import ImageProcessor
 from src.brain_utils.vision_service import VisionAgentType, VisionService
 from src.brain_utils.navigation_handler import NavigationHandler
+from src.brain_utils.memory_state_manager import MemoryStateManager
 
 
 def prim_list_to_prim_obj_list(prim_list):
@@ -28,10 +31,13 @@ def prim_list_to_prim_obj_list(prim_list):
 
 
 class Brain:
-    def __init__(self, connection_id: str, send_callback):
+    def __init__(
+        self, connection_id: str, send_callback, enable_memory_commands: bool = False
+    ):
         """
         connection_id: an identifier for this brain instance (for logging/debugging)
         send_callback: an async function to send a response back to the client.
+        enable_memory_commands: whether to enable memory state save/load/list commands
         """
         self.connection_id = connection_id
         self.send_callback = send_callback
@@ -42,6 +48,10 @@ class Brain:
         # Store the latest user message that should be consumed once by the visual language model.
         self.latest_user_message = None
         self.primitives_list = []
+        # Whether memory state commands are enabled
+        self.enable_memory_commands = enable_memory_commands
+        # Current Gemini agent variant to use
+        self.gemini_variant = "gemini1"
 
         self.local_primitives_list = [
             NavigateInSight(),
@@ -49,6 +59,7 @@ class Brain:
             TurnAndMove(),
         ]  # These are the ones defined in the brain here, not registered with the server by the user
         self.primitive_in_execution = None
+        self.primitive_ids_map: Dict[str, PrimitiveDefinition] = {}
         self.directive = None  # Store the directive that will steer the VLM
 
         # Initialize history to record chat messages and vision agent outputs.
@@ -62,6 +73,11 @@ class Brain:
             self.logger,
             self.local_primitives_list,
         )
+
+        # Initialize memory state manager if commands are enabled
+        self.memory_state_manager = None
+        if self.enable_memory_commands:
+            self.memory_state_manager = MemoryStateManager(self.logger, connection_id)
 
     async def enqueue_message(self, message: MessageIn):
         """
@@ -95,9 +111,9 @@ class Brain:
                 time_start = time.time()
 
             if message_type == MessageInType.IMAGE:
-                await self.handle_image(message)
+                vision_output = await self.handle_image(message)
                 self.logger.info(
-                    f"Processed image message in {time.time() - time_start} seconds"
+                    f"Processed image message in {time.time() - time_start} seconds, sent task: {vision_output.next_task.name if vision_output.next_task else 'None'}\n"
                 )
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)
@@ -107,8 +123,14 @@ class Brain:
                 await self.handle_primitive_completed(message)
             elif message_type == MessageInType.PRIMITIVE_ACTIVATED:
                 await self.handle_primitive_activated(message)
+            elif message_type == MessageInType.PRIMITIVE_FAILED:
+                await self.handle_primitive_failed(message)
+            elif message_type == MessageInType.PRIMITIVE_INTERRUPTED:
+                await self.handle_primitive_interrupted(message)
             elif message_type == MessageInType.REGISTER_PRIMITIVES_AND_DIRECTIVE:
                 await self.handle_register_primitives_and_directive(message)
+            elif message_type == MessageInType.RESET:
+                await self.handle_reset(message)
             else:
                 await self.handle_unknown(message)
 
@@ -158,6 +180,7 @@ class Brain:
             robot_coords=robot_coords,
             directive=self.directive,
             agent_type=VisionAgentType.GEMINI_FLASH,
+            gemini_variant=self.gemini_variant,
         )
 
         if not vision_output:
@@ -174,93 +197,75 @@ class Brain:
                 to_tell_user="BEEP BOOP BEEP BOOP, the brain failed. Stopping the current task.",
             )
 
-        # Clear the user message as it's been consumed
-        self.latest_user_message = None
-
-        # Validate the next task
+            # Validate the next task
         vision_output.next_task = (
             PrimitiveDefinition.model_validate(vision_output.next_task)
             if vision_output.next_task
             else None
         )
 
+        # Look for discrepancies in the vision output
+        # Could be a function later
+        # Potential discrepancy 1: There's a primitive running, the VLM does not say stop_current_task and yet it returns a next_task
+        if (
+            not vision_output.stop_current_task
+            and vision_output.next_task is not None
+            and self.primitive_in_execution is not None
+        ):
+            self.history.record_discrepancy(
+                message=f"The VLM returned a next_task ({vision_output.next_task.name}) even though there is a task running ({self.primitive_in_execution.name}) and it did not say to stop the current task.",
+            )
+            # For now, we force the next_task to be None if it's not strictly asked to be stopped.
+            vision_output.next_task = None
+
+        # Clear the user message as it's been consumed
+        self.latest_user_message = None
+
         # Update primitive_in_execution if needed
         if vision_output.next_task:
-            self.primitive_in_execution = PrimitiveDefinition.model_validate(
-                vision_output.next_task
-            )
+            # Make sure next_task has a primitive_id
+            if not vision_output.next_task.primitive_id:
+                vision_output.next_task.primitive_id = str(uuid.uuid4())
+
+        # Before replacing what we send to the client, we store it locally
+        # as it will be used to write to the history.
+        # TODO: For benchmarking it might make sense to also send this one tothe client
+        # so that the benchmark is aware of the navigation choices.
+        vision_output_to_write_in_history = None
 
         # Handle special case for navigate_in_sight
         if (
             vision_output.next_task
             and vision_output.next_task.name == "navigate_in_sight"
         ):
+            vision_output_to_write_in_history = vision_output.model_copy()
             vision_output = await self.navigation_handler.handle_navigate_in_sight(
                 vision_output, robot_coords, base64_img, depth_payload
             )
-            # Make sure to update our primitive_in_execution to match what was created in navigate_in_sight
-            if vision_output.next_task:
-                self.primitive_in_execution = vision_output.next_task
 
         # Handle special case for navigate_through_memory
         if (
             vision_output.next_task
             and vision_output.next_task.name == "navigate_through_memory"
         ):
+            vision_output_to_write_in_history = vision_output.model_copy()
             vision_output = (
                 await self.navigation_handler.handle_navigate_through_memory(
                     vision_output, self.connection_id
                 )
             )
-            # Make sure to update our primitive_in_execution to match what was created
-            if vision_output.next_task:
-                self.primitive_in_execution = vision_output.next_task
 
         # Handle special case for turn_and_move
         if vision_output.next_task and vision_output.next_task.name == "turn_and_move":
+            vision_output_to_write_in_history = vision_output.model_copy()
             vision_output = await self.navigation_handler.handle_turn_and_move(
                 vision_output, robot_coords
             )
-            # Make sure to update our primitive_in_execution to match what was created
-            if vision_output.next_task:
-                self.primitive_in_execution = vision_output.next_task
-
-        # Handle special case for navigate_to_position with delta mode
-        if (
-            vision_output.next_task
-            and vision_output.next_task.name == "navigate_to_position"
-            and vision_output.next_task.inputs.get("is_delta", False)
-        ):
-            # Convert delta coordinates to absolute coordinates
-            delta_x = vision_output.next_task.inputs.get("x", 0.0)
-            delta_y = vision_output.next_task.inputs.get("y", 0.0)
-            delta_theta = vision_output.next_task.inputs.get("theta", 0.0)
-
-            # Calculate absolute coordinates
-            absolute_x = robot_coords["x"] + delta_x
-            absolute_y = robot_coords["y"] + delta_y
-            absolute_theta = robot_coords["theta"] + delta_theta
-
-            # Create a new navigate_to_position task with absolute coordinates
-            navigation_to_position_task = PrimitiveDefinition(
-                name="navigate_to_position",
-                inputs={
-                    "x": absolute_x,
-                    "y": absolute_y,
-                    "theta": absolute_theta,
-                },
-            )
-
-            # Update the vision output and primitive_in_execution
-            vision_output.next_task = navigation_to_position_task
-            self.primitive_in_execution = navigation_to_position_task
-
-            self.logger.info(
-                f"Converted delta navigation to absolute: delta({delta_x}, {delta_y}, {delta_theta}) -> absolute({absolute_x}, {absolute_y}, {absolute_theta})"
-            )
 
         # Send response and prepare for next image
-        await self._send_vision_output(vision_output)
+        await self._send_vision_output(vision_output, vision_output_to_write_in_history)
+
+        return vision_output
 
     async def handle_pose_image(self, message: MessageIn):
         """Handle messages of type 'pose_image'."""
@@ -293,7 +298,7 @@ class Brain:
 
             if not pose_graph_memory.should_add_node(user_token, x, y, theta):
                 self.logger.debug(
-                    f"Skipping image addition to pose graph because a close node already exists"
+                    "Skipping image addition to pose graph because a close node exists"
                 )
                 return
 
@@ -309,11 +314,26 @@ class Brain:
         else:
             self.logger.error("NavigateThroughMemory primitive not found")
 
-    async def _send_vision_output(self, vision_output):
+    async def _send_vision_output(
+        self, vision_output, vision_output_to_write_in_history=None
+    ):
+        primitive_to_remember = (
+            vision_output_to_write_in_history.next_task
+            if vision_output_to_write_in_history
+            else vision_output.next_task
+        )
+        if primitive_to_remember:
+            self.primitive_ids_map[primitive_to_remember.primitive_id] = (
+                primitive_to_remember
+            )
         # Record the vision agent output in the history.
         self.history.add(
             HistoryEntryType.VISION_AGENT_OUTPUT,
-            description=json.dumps(vision_output.model_dump()),
+            description=json.dumps(
+                vision_output_to_write_in_history.model_dump()
+                if vision_output_to_write_in_history
+                else vision_output.model_dump()
+            ),
         )
 
         # Send the vision output to the client.
@@ -325,16 +345,180 @@ class Brain:
         # Save the entire history to a file
         self.history.save()
 
-        # Notify the client that the server is ready for the next image.
-        await self.send_callback(MessageOut(type="ready_for_image", payload={}))
+        # Only notify the client that the server is ready for the next image if there's no next task.
+        # If there is a next task, we'll wait for the primitive_activated message before
+        # requesting next image.
+        if not vision_output.next_task:
+            await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_chat_in(self, message: MessageIn):
         """
         Handle messages of type 'chat_in'.
-        Echoes back the text received and, if a special command is detected,
-        sets a flag to modify the next vision output.
+        Echoes back the text received and processes special commands.
+
+        Special commands (if enabled):
+        - !save_memory NAME: Saves the current memory state
+        - !load_memory NAME: Loads a saved memory state
+        - !list_memory: Lists available memory states
+
+        Other commands (always enabled):
+        - !gemini VERSION: Switches the Gemini version used by the vision agent
+                          Valid versions: gemini1, gemini2, gemini3, gemini4
         """
         text = message.payload["text"]
+
+        # Handle Gemini version switch command (always enabled)
+        if text.startswith("!gemini"):
+            parts = text.split(maxsplit=1)
+            if len(parts) > 1:
+                requested_variant = parts[1].strip().lower()
+                valid_variants = ["gemini1", "gemini2", "gemini3", "gemini4"]
+
+                if requested_variant in valid_variants:
+                    old_variant = self.gemini_variant
+                    self.gemini_variant = requested_variant
+
+                    response_text = (
+                        f"Gemini variant switched from '{old_variant}' "
+                        f"to '{requested_variant}'"
+                    )
+                    self.logger.info(response_text)
+
+                    # Add to history
+                    self.history.add(
+                        HistoryEntryType.SYSTEM_MESSAGE,
+                        description=response_text,
+                    )
+
+                    await self.send_callback(
+                        MessageOut(type="chat_out", payload={"text": response_text})
+                    )
+                else:
+                    response_text = (
+                        f"Invalid Gemini variant: '{requested_variant}'. "
+                        f"Valid options are: {', '.join(valid_variants)}"
+                    )
+                    await self.send_callback(
+                        MessageOut(type="chat_out", payload={"text": response_text})
+                    )
+                return
+            else:
+                response_text = (
+                    f"Current Gemini variant: '{self.gemini_variant}'\n"
+                    f"To change, use: !gemini VERSION\n"
+                    f"Valid versions: gemini1, gemini2, gemini3, gemini4"
+                )
+                await self.send_callback(
+                    MessageOut(type="chat_out", payload={"text": response_text})
+                )
+                return
+
+        # Check for special commands if memory commands are enabled
+        if self.enable_memory_commands and self.memory_state_manager is not None:
+            if text.startswith("!save_memory"):
+                parts = text.split(maxsplit=1)
+                state_name = parts[1] if len(parts) > 1 else ""
+
+                # Find the NavigateThroughMemory primitive
+                navigate_through_memory = next(
+                    (
+                        p
+                        for p in self.local_primitives_list
+                        if p.name == "navigate_through_memory"
+                    ),
+                    None,
+                )
+
+                success = await self.memory_state_manager.save_memory_state(
+                    state_name, self.history, navigate_through_memory
+                )
+
+                # Send response to user
+                if success:
+                    response_text = f"Memory state '{state_name}' saved successfully"
+                else:
+                    response_text = f"Failed to save memory state '{state_name}'"
+
+                await self.send_callback(
+                    MessageOut(type="chat_out", payload={"text": response_text})
+                )
+                return
+
+            elif text.startswith("!load_memory"):
+                parts = text.split(maxsplit=1)
+                if len(parts) > 1:
+                    state_name = parts[1]
+
+                    # Reset state variables but preserve Gemini variant
+                    self.latest_user_message = None
+                    self.directive = None
+                    self.primitive_in_execution = None
+                    # We explicitly don't reset self.gemini_variant here to preserve it
+
+                    # Find the NavigateThroughMemory primitive
+                    navigate_through_memory = next(
+                        (
+                            p
+                            for p in self.local_primitives_list
+                            if p.name == "navigate_through_memory"
+                        ),
+                        None,
+                    )
+
+                    success = await self.memory_state_manager.load_memory_state(
+                        state_name, self.history, navigate_through_memory
+                    )
+
+                    # Send response to user
+                    if success:
+                        response_text = (
+                            f"Memory state '{state_name}' loaded successfully"
+                        )
+                    else:
+                        response_text = f"Failed to load memory state '{state_name}'"
+
+                    await self.send_callback(
+                        MessageOut(type="chat_out", payload={"text": response_text})
+                    )
+                    return
+                else:
+                    await self.send_callback(
+                        MessageOut(
+                            type="chat_out",
+                            payload={
+                                "text": "Please specify a memory state name to load"
+                            },
+                        )
+                    )
+                    return
+
+            elif text.startswith("!list_memory"):
+                # Get list of available memory states
+                states = self.memory_state_manager.get_available_states()
+
+                if states:
+                    states_list = "\n- " + "\n- ".join(states)
+                    response_text = f"Available memory states:{states_list}"
+                else:
+                    response_text = "No memory states available"
+
+                await self.send_callback(
+                    MessageOut(type="chat_out", payload={"text": response_text})
+                )
+                return
+
+        # Handle memory command attempt when disabled or manager is None
+        if text.startswith("!"):
+            memory_commands = ["!save_memory", "!load_memory", "!list_memory"]
+            if any(text.startswith(cmd) for cmd in memory_commands):
+                response_text = (
+                    "Memory management commands are disabled. "
+                    "They can be enabled when starting the brain."
+                )
+                await self.send_callback(
+                    MessageOut(type="chat_out", payload={"text": response_text})
+                )
+                return
 
         # Save the latest user message for processing.
         self.latest_user_message = text
@@ -347,46 +531,115 @@ class Brain:
         Handle messages of type 'primitive_completed'.
         Processes the primitive completion and sends an acknowledgment.
         """
+        primitive_id = message.payload["primitive_id"]
         primitive_name = message.payload["primitive_name"]
-        self.logger.info(f"Primitive '{primitive_name}' completed.")
+
+        # Check if we have a matching primitive in execution
         if (
             self.primitive_in_execution
-            and primitive_name == self.primitive_in_execution.name
+            and primitive_id == self.primitive_in_execution.primitive_id
         ):
+            self.logger.info(
+                f"Task '{self.primitive_in_execution.name}' (ID: {primitive_id}) completed."
+            )
+            self.history.add(
+                HistoryEntryType.SYSTEM_MESSAGE,
+                description=f"Task '{self.primitive_in_execution.name}' completed.",
+            )
             self.primitive_in_execution = None
         else:
             raise ValueError(
-                f"[Brain {self.connection_id}] Primitive '{primitive_name}' is not the current primitive in execution. That's a weird bug."
+                f"[Brain {self.connection_id}] Task '{primitive_name}' (ID: {primitive_id}) is not the current task in execution. That's a weird bug."
+            )
+
+    async def handle_primitive_failed(self, message: MessageIn):
+        """
+        Handle messages of type 'primitive_failed'.
+        Processes the primitive failure and sends an acknowledgment.
+        """
+        primitive_id = message.payload["primitive_id"]
+        primitive_name = message.payload["primitive_name"]
+        if (
+            self.primitive_in_execution
+            and self.primitive_in_execution.primitive_id == primitive_id
+        ):
+            self.logger.info(f"Task '{self.primitive_in_execution.name}' failed.")
+
+            self.history.add(
+                HistoryEntryType.SYSTEM_MESSAGE,
+                description=f"Task '{self.primitive_in_execution.name}' failed.",
+            )
+            self.primitive_in_execution = None
+        else:
+            raise ValueError(
+                f"[Brain {self.connection_id}] Task '{primitive_name}' (ID: {primitive_id}) is not the current task in execution. That's a weird bug."
+            )
+
+    async def handle_primitive_interrupted(self, message: MessageIn):
+        """
+        Handle messages of type 'primitive_interrupted'.
+        Processes the primitive interruption and sends an acknowledgment.
+        """
+        primitive_id = message.payload["primitive_id"]
+        primitive_name = message.payload["primitive_name"]
+
+        if (
+            self.primitive_in_execution
+            and self.primitive_in_execution.primitive_id == primitive_id
+        ):
+            self.logger.info(f"Task '{self.primitive_in_execution.name}' interrupted.")
+            self.history.add(
+                HistoryEntryType.SYSTEM_MESSAGE,
+                description=f"Task '{self.primitive_in_execution.name}' interrupted.",
+            )
+            self.primitive_in_execution = None
+        else:
+            raise ValueError(
+                f"[Brain {self.connection_id}] Task '{primitive_name}' (ID: {primitive_id}) is not the current task in execution. That's a weird bug."
             )
 
     async def handle_primitive_activated(self, message: MessageIn):
         """
         Handle messages of type 'primitive_activated'.
         Processes the primitive activation and sends an acknowledgment.
+        After confirming activation, requests the next image from the client.
+        This completes the loop: we only request new images after primitive activation
+        has been confirmed by the client, preventing race conditions.
         """
-        primitive_name = message.payload["primitive_name"]
-        self.logger.info(
-            f"\033[92m[Brain {self.connection_id}] Primitive '{primitive_name}' activated.\033[0m"
-        )
+        primitive_id = message.payload["primitive_id"]
+        primitive_activated = self.primitive_ids_map[primitive_id]
 
-        # Check if this is a navigate_to_position primitive that was derived from navigate_in_sight
-        if (
-            primitive_name == "navigate_to_position"
-            and self.primitive_in_execution
-            and self.primitive_in_execution.name == "navigate_in_sight"
-        ):
-            # This is a special case - we're actually executing a navigate_to_position that was
-            # derived from a navigate_in_sight request, so we don't need to do anything
-            pass
+        # Check if this is a navigate_to_position primitive from navigate_in_sight
+        if self.primitive_in_execution:
+            # The client has decided to activate a primitive that we didn't decide to activate.
+            # This is unexpected, so we log it and don't do anything.
+            self.logger.warn(
+                f"[Brain {self.connection_id}] Task '{self.primitive_in_execution.name}' (ID: {primitive_id}) was activated by the client, but we didn't activate it. This is unexpected."
+            )
         else:
-            # Normal case - just set the primitive_in_execution based on the primitive_name
+            # This is likely normal, we should just check that it corresponds to an id in our list of primitives.
+            self.logger.info(
+                f"\033[92m[Brain {self.connection_id}] Task '{primitive_activated.name}' (ID: {primitive_id}) activated.\033[0m"
+            )
             matched_prim = next(
-                (prim for prim in self.primitives_list if prim.name == primitive_name),
+                (
+                    prim
+                    for prim in self.primitives_list + self.local_primitives_list
+                    if prim.name == primitive_activated.name
+                ),
                 None,
             )
             if matched_prim is not None:
-                # Convert the dict to a PrimitiveDefinition instance
-                self.primitive_in_execution = primitive_to_object(matched_prim)
+                # Convert the dict to a PrimitiveDefinition instance with the ID
+                prim_obj = primitive_to_object(matched_prim)
+                # Override the ID if provided in the message
+                if primitive_id:
+                    prim_obj.primitive_id = primitive_id
+                self.primitive_in_execution = prim_obj
+                self.history.add(
+                    HistoryEntryType.SYSTEM_MESSAGE,
+                    description=f"Primitive '{primitive_activated.name}' activated.",
+                )
             else:
                 self.primitive_in_execution = None
 
@@ -401,6 +654,106 @@ class Brain:
             payload={"text": f"Unhandled message type: {message.type}"},
         )
         await self.send_callback(response)
+
+    async def handle_reset(self, message: MessageIn):
+        """
+        Handle messages of type 'reset'.
+        Resets brain state: history, pose graph memory, and state variables.
+        If a memory_state parameter is provided and memory commands are enabled, loads that state.
+        """
+        self.logger.info(f"Resetting brain state for connection {self.connection_id}")
+
+        # Check if a memory state was provided in the payload
+        memory_state = message.payload.get("memory_state")
+
+        if (
+            memory_state
+            and self.enable_memory_commands
+            and self.memory_state_manager is not None
+        ):
+            # Reset state variables but preserve Gemini variant
+            self.latest_user_message = None
+            self.directive = None
+            self.primitive_in_execution = None
+            # We explicitly don't reset self.gemini_variant here to preserve it
+
+            # Find the NavigateThroughMemory primitive
+            navigate_through_memory = next(
+                (
+                    p
+                    for p in self.local_primitives_list
+                    if p.name == "navigate_through_memory"
+                ),
+                None,
+            )
+
+            # Load the specified memory state
+            success = await self.memory_state_manager.load_memory_state(
+                memory_state, self.history, navigate_through_memory
+            )
+
+            if success:
+                self.logger.info(
+                    f"Loaded memory state '{memory_state}' for connection {self.connection_id}"
+                )
+                # Notify the client that the server is ready for the next image
+                await self.send_callback(
+                    MessageOut(type=MessageOutType.READY_FOR_IMAGE, payload={})
+                )
+                return
+            else:
+                self.logger.error(
+                    f"Failed to load memory state '{memory_state}', performing standard reset"
+                )
+        elif memory_state and (
+            not self.enable_memory_commands or self.memory_state_manager is None
+        ):
+            self.logger.warning(
+                f"Memory state '{memory_state}' provided, but memory commands are disabled"
+            )
+
+        # Perform standard reset if no memory state was provided or loading failed
+        # Reset history
+        self.history.reset()
+
+        # Reset latest user message
+        self.latest_user_message = None
+
+        # Reset directive
+        self.directive = None
+
+        # Reset primitive in execution
+        self.primitive_in_execution = None
+
+        # Reset Gemini variant to default
+        self.gemini_variant = "gemini1"
+        self.logger.info("Reset Gemini variant to default (gemini1)")
+
+        # Reset pose graph memory for this connection
+        navigate_through_memory = next(
+            (
+                p
+                for p in self.local_primitives_list
+                if p.name == "navigate_through_memory"
+            ),
+            None,
+        )
+
+        if navigate_through_memory:
+            pose_graph_memory = navigate_through_memory.pose_graph_memory
+            pose_graph_memory.reset_user_data(self.connection_id)
+            self.logger.info(
+                f"Reset pose graph memory for connection {self.connection_id}"
+            )
+        else:
+            self.logger.error(
+                "NavigateThroughMemory primitive not found, couldn't reset pose graph memory"
+            )
+
+        # Notify the client that the server is ready for the next image
+        await self.send_callback(
+            MessageOut(type=MessageOutType.READY_FOR_IMAGE, payload={})
+        )
 
     async def handle_register_primitives_and_directive(self, message: MessageIn):
         """
