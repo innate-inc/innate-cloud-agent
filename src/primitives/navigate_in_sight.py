@@ -423,7 +423,7 @@ class NavigateInSight(Primitive):
         map_array,
         map_info,
         min_distance=0.5,
-        max_distance=3.0,
+        max_distance=2.5,
         min_obstacle_distance=0.25,
         num_samples=8,
     ):
@@ -455,18 +455,26 @@ class NavigateInSight(Primitive):
         # Sample points in a sector in front of the robot
         valid_points = []
 
-        # Convert robot position to grid coordinates
-        robot_grid_x = int((current_x - origin_x) / resolution)
-        robot_grid_y = int((current_y - origin_y) / resolution)
-
         # Calculate obstacle radius in grid cells
         obstacle_radius = int(min_obstacle_distance / resolution)
 
         # Sample angles in front of the robot (±60 degrees from current orientation)
         angle_range = 120 * (np.pi / 180)  # 120 degrees in radians
-        angles = np.linspace(
-            current_yaw - angle_range / 2, current_yaw + angle_range / 2, num_samples
+
+        # Distribute angles with more density in the middle of the view
+        half_samples = num_samples // 2
+
+        # Create two sets of angles: one focused in the center, one spread out
+        center_angles = np.linspace(
+            current_yaw - angle_range / 4, current_yaw + angle_range / 4, half_samples
         )
+
+        wide_angles = np.linspace(
+            current_yaw - angle_range / 2, current_yaw + angle_range / 2, half_samples
+        )
+
+        # Combine both sets
+        angles = np.concatenate([center_angles, wide_angles])
 
         # Sample distances
         distances = np.linspace(min_distance, max_distance, 3)  # 3 distances per angle
@@ -568,22 +576,63 @@ class NavigateInSight(Primitive):
                 "theta": point_theta,
             }
 
-            # Draw point with number
-            circle_radius = 15
+            # Draw point with number - larger and more visible
+            # First draw a thick black circle for contrast
+            circle_radius = 20
+            cv2.circle(
+                annotated_img,
+                (int(img_x), int(img_y)),
+                circle_radius + 2,
+                (0, 0, 0),
+                -1,
+            )
+
+            # Then draw the green circle
             cv2.circle(
                 annotated_img, (int(img_x), int(img_y)), circle_radius, (0, 255, 0), -1
             )
 
-            # Add number text
+            # Add number text with better visibility
+            font_size = 1.0
+            font_thickness = 2
+            text = str(point_id)
+            text_size, _ = cv2.getTextSize(
+                text, cv2.FONT_HERSHEY_SIMPLEX, font_size, font_thickness
+            )
+            text_x = int(img_x - text_size[0] / 2)
+            text_y = int(img_y + text_size[1] / 2)
+
+            # Draw text with black outline for better visibility
             cv2.putText(
                 annotated_img,
-                str(point_id),
-                (int(img_x - 5), int(img_y + 5)),
+                text,
+                (text_x, text_y),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
+                font_size,
                 (0, 0, 0),
-                2,
+                font_thickness + 2,
             )
+
+            cv2.putText(
+                annotated_img,
+                text,
+                (text_x, text_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_size,
+                (255, 255, 255),
+                font_thickness,
+            )
+
+        # Add a title with the target description
+        cv2.putText(
+            annotated_img,
+            "Navigation Points (Camera View)",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (0, 0, 255),
+            2,
+        )
 
         return annotated_img, point_mapping
 
@@ -673,7 +722,6 @@ class NavigateInSight(Primitive):
         import cv2
         import numpy as np
         import math
-        import os
 
         # Create a colored map visualization (grayscale to RGB)
         # 0 = free space (white), 100 = obstacle (black), -1 = unknown (gray)
@@ -693,11 +741,11 @@ class NavigateInSight(Primitive):
         robot_pixel_x = int((current_x - origin_x) / resolution)
         robot_pixel_y = int((current_y - origin_y) / resolution)
 
-        # Draw robot position (blue circle)
-        cv2.circle(vis_map, (robot_pixel_x, robot_pixel_y), 5, (255, 0, 0), -1)
+        # Draw robot position (blue circle with bigger radius)
+        cv2.circle(vis_map, (robot_pixel_x, robot_pixel_y), 8, (255, 0, 0), -1)
 
-        # Draw robot orientation (blue line)
-        orientation_length = 15
+        # Draw robot orientation (blue line, thicker)
+        orientation_length = 20
         endpoint_x = int(robot_pixel_x + orientation_length * math.cos(current_yaw))
         endpoint_y = int(robot_pixel_y + orientation_length * math.sin(current_yaw))
         cv2.line(
@@ -705,7 +753,18 @@ class NavigateInSight(Primitive):
             (robot_pixel_x, robot_pixel_y),
             (endpoint_x, endpoint_y),
             (255, 0, 0),
-            2,
+            3,
+        )
+
+        # Add robot position text
+        cv2.putText(
+            vis_map,
+            f"Robot",
+            (robot_pixel_x + 10, robot_pixel_y - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 0, 0),
+            1,
         )
 
         # Draw navigation points (green circles with numbers)
@@ -714,29 +773,142 @@ class NavigateInSight(Primitive):
             pixel_x = int((point_x - origin_x) / resolution)
             pixel_y = int((point_y - origin_y) / resolution)
 
-            # Draw point (green circle)
-            cv2.circle(vis_map, (pixel_x, pixel_y), 3, (0, 255, 0), -1)
+            # Draw point (green circle, bigger)
+            cv2.circle(vis_map, (pixel_x, pixel_y), 6, (0, 255, 0), -1)
 
-            # Draw ID number
-            cv2.putText(
+            # Draw a thick black outline around the circle for better visibility
+            cv2.circle(vis_map, (pixel_x, pixel_y), 7, (0, 0, 0), 1)
+
+            # Draw ID number (larger, with background for better visibility)
+            # Draw text background
+            text = str(i + 1)
+            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+            cv2.rectangle(
                 vis_map,
-                str(i + 1),
-                (pixel_x + 5, pixel_y + 5),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 0, 255),
-                1,
+                (pixel_x + 5, pixel_y - text_size[1] - 5),
+                (pixel_x + text_size[0] + 10, pixel_y + 5),
+                (255, 255, 255),
+                -1,
             )
 
-            # Draw orientation (green line)
-            orientation_length = 10
+            # Draw text
+            cv2.putText(
+                vis_map,
+                text,
+                (pixel_x + 7, pixel_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 0, 0),
+                2,
+            )
+
+            # Draw orientation (green line, thicker)
+            orientation_length = 15
             endpoint_x = int(pixel_x + orientation_length * math.cos(point_theta))
             endpoint_y = int(pixel_y + orientation_length * math.sin(point_theta))
             cv2.line(
-                vis_map, (pixel_x, pixel_y), (endpoint_x, endpoint_y), (0, 255, 0), 1
+                vis_map, (pixel_x, pixel_y), (endpoint_x, endpoint_y), (0, 255, 0), 2
             )
 
-        return vis_map
+        # Scale up the map for better visibility (2x larger)
+        scale_factor = 2
+        vis_map_large = cv2.resize(
+            vis_map,
+            (vis_map.shape[1] * scale_factor, vis_map.shape[0] * scale_factor),
+            interpolation=cv2.INTER_NEAREST,
+        )
+
+        # Add a border around the map
+        border_size = 50
+        map_with_border = (
+            np.ones(
+                (
+                    vis_map_large.shape[0] + 2 * border_size,
+                    vis_map_large.shape[1] + 2 * border_size,
+                    3,
+                ),
+                dtype=np.uint8,
+            )
+            * 200
+        )  # Light gray border
+
+        # Place the map in the center of the border
+        map_with_border[
+            border_size : border_size + vis_map_large.shape[0],
+            border_size : border_size + vis_map_large.shape[1],
+        ] = vis_map_large
+
+        # Add title with useful information
+        title = f"Navigation Map - Robot at ({current_x:.2f}, {current_y:.2f})"
+        cv2.putText(
+            map_with_border,
+            title,
+            (border_size, int(border_size / 2)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 0, 0),
+            2,
+        )
+
+        # Add legend
+        y_pos = border_size + vis_map_large.shape[0] + 15
+
+        # Robot legend
+        cv2.circle(map_with_border, (border_size + 15, y_pos), 8, (255, 0, 0), -1)
+        cv2.putText(
+            map_with_border,
+            "Robot",
+            (border_size + 30, y_pos + 5),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 0, 0),
+            1,
+        )
+
+        # Navigation point legend
+        cv2.circle(map_with_border, (border_size + 150, y_pos), 6, (0, 255, 0), -1)
+        cv2.circle(map_with_border, (border_size + 150, y_pos), 7, (0, 0, 0), 1)
+        cv2.putText(
+            map_with_border,
+            "Navigation Points",
+            (border_size + 165, y_pos + 5),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 0, 0),
+            1,
+        )
+
+        # Obstacle legend
+        cv2.rectangle(
+            map_with_border,
+            (border_size + 350, y_pos - 8),
+            (border_size + 366, y_pos + 8),
+            (0, 0, 0),
+            -1,
+        )
+        cv2.putText(
+            map_with_border,
+            "Obstacles",
+            (border_size + 375, y_pos + 5),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 0, 0),
+            1,
+        )
+
+        # Add min obstacle distance info
+        min_obstacle_distance = map_info.get("min_obstacle_distance", 0.25)
+        cv2.putText(
+            map_with_border,
+            f"Min obstacle distance: {min_obstacle_distance} m",
+            (border_size + 500, y_pos + 5),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 0, 0),
+            1,
+        )
+
+        return map_with_border
 
     async def execute_with_point_selection(
         self, target_description: str, map_payload: dict
