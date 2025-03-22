@@ -43,14 +43,28 @@ class NavigationHandler:
             vertical_fov=SIM_VERTICAL_FOV,
         )
 
+        # Extract input parameters
+        target_object = vision_output.next_task.inputs.get("target_object")
+        target_description = vision_output.next_task.inputs.get(
+            "target_description", target_object
+        )
+
+        # Use the new point selection approach if we have a map
+        use_point_selection = map_payload is not None
+
+        # Execute the primitive with the appropriate parameters
         msg, result, navigation_command = await nav_in_sight.execute(
-            **vision_output.next_task.inputs
+            target_object=target_object,
+            target_description=target_description,
+            map_payload=map_payload,
+            use_point_selection=use_point_selection,
         )
 
         # Only replace the output with a navigation task if the execution was successful
         if result:
             # Check if the target position is too close to obstacles using the map
-            if map_payload:
+            if map_payload and not use_point_selection:
+                # If we're using point selection, we already verified safety
                 is_safe, safety_msg = self.check_position_safety(
                     navigation_command["x"], navigation_command["y"], map_payload
                 )
