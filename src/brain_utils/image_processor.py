@@ -75,12 +75,13 @@ class ImageProcessor:
         ]
         if missing_fields:
             raise ValueError(
-                f"Robot coordinates missing required fields: {', '.join(missing_fields)}"
+                f"Robot coordinates missing required fields: "
+                f"{', '.join(missing_fields)}"
             )
 
         return base64_img, depth_payload, robot_coords, map_payload
 
-    def process_depth_map(self, depth_payload, map_payload=None, robot_coords=None):
+    def process_depth_and_map(self, depth_payload, map_payload=None, robot_coords=None):
         """
         Process depth map data and optionally map data with robot position.
 
@@ -105,7 +106,8 @@ class ImageProcessor:
         else:
             normalized_depth = np.zeros_like(depth_map, dtype=np.uint8)
 
-        # Create a PIL image (L mode for grayscale) and convert it to RGB so we can add colored text.
+        # Create a PIL image (L mode for grayscale) and convert it to RGB so we can add
+        # colored text
         img = Image.fromarray(normalized_depth, mode="L").convert("RGB")
 
         # Prepare debug text showing the min and max values.
@@ -115,7 +117,7 @@ class ImageProcessor:
             font = ImageFont.truetype("arial.ttf", 20)
         except IOError:
             font = ImageFont.load_default()
-        # Draw the text at position (10, 10) with a contrasting color (red in this case).
+        # Draw the text at position (10, 10) with a contrasting color (red)
         draw.text((10, 10), debug_text, font=font, fill=(255, 0, 0))
 
         # Save the annotated depth map as a PNG file.
@@ -158,9 +160,42 @@ class ImageProcessor:
             # Occupied space (black)
             rgb_map[map_array == 100] = [0, 0, 0]
 
+            # Flip the map vertically to correct the orientation
+            rgb_map = np.flipud(rgb_map)
+
             # Create PIL image from numpy array
             map_img = Image.fromarray(rgb_map)
             draw = ImageDraw.Draw(map_img)
+
+            # Add grid lines to the map (every 20 pixels)
+            grid_spacing = 20
+            grid_color = (200, 200, 200)  # Light gray
+
+            # Draw horizontal grid lines
+            for y in range(0, map_info["height"], grid_spacing):
+                draw.line([(0, y), (map_info["width"], y)], fill=grid_color, width=1)
+
+            # Draw vertical grid lines
+            for x in range(0, map_info["width"], grid_spacing):
+                draw.line([(x, 0), (x, map_info["height"])], fill=grid_color, width=1)
+
+            # Add coordinate labels at major grid points (every 100 pixels)
+            major_grid_spacing = 100
+            label_color = (100, 100, 100)  # Darker gray
+            try:
+                font = ImageFont.truetype("arial.ttf", 12)
+            except IOError:
+                font = ImageFont.load_default()
+
+            for x in range(0, map_info["width"], major_grid_spacing):
+                for y in range(0, map_info["height"], major_grid_spacing):
+                    # Calculate world coordinates
+                    world_x = x * map_info["resolution"] + map_info["origin_x"]
+                    # Adjust Y coordinate calculation for flipped map
+                    flipped_y = map_info["height"] - y
+                    world_y = flipped_y * map_info["resolution"] + map_info["origin_y"]
+                    label = f"({world_x:.1f}, {world_y:.1f})"
+                    draw.text((x + 2, y + 2), label, font=font, fill=label_color)
 
             # Calculate robot position on the map
             # Convert robot position from world coordinates to map coordinates
@@ -168,12 +203,19 @@ class ImageProcessor:
             origin_x = map_info["origin_x"]
             origin_y = map_info["origin_y"]
 
+            print(f"origin_x: {origin_x}, origin_y: {origin_y}")
+            print(f"resolution: {resolution}")
+            print(f"robot_coords: {robot_coords}")
+
             # Calculate pixel position
             robot_x = int((robot_coords["x"] - origin_x) / resolution)
             robot_y = int((robot_coords["y"] - origin_y) / resolution)
 
+            print(f"robot_x: {robot_x}, robot_y: {robot_y}")
+
             # In many 2D maps, Y is pointing down in image coordinates
             robot_y = map_info["height"] - robot_y
+            print(f"inverted robot_y: {robot_y}")
 
             # Draw robot as a red circle with a line indicating orientation
             robot_radius = 5
@@ -194,9 +236,36 @@ class ImageProcessor:
 
             # Draw a line indicating the robot's orientation
             end_x = robot_x + int(line_length * math.cos(robot_theta))
+            # Use negative sin because Y increases downward in image coordinates
             end_y = robot_y - int(line_length * math.sin(robot_theta))
+
+            # Convert theta to degrees for display
+            theta_degrees = math.degrees(robot_theta) % 360
+            print(
+                f"robot_theta: {robot_theta} rad, {theta_degrees:.1f}° "
+                f"end_x: {end_x}, end_y: {end_y}"
+            )
+
+            # Draw the orientation line
             draw.line(
                 [robot_x, robot_y, end_x, end_y], fill=(0, 0, 255), width=2  # Blue
+            )
+
+            # Add a small triangle at the end of the orientation line to show direction
+            arrow_size = 4
+            draw.polygon(
+                [
+                    (end_x, end_y),
+                    (
+                        end_x - int(arrow_size * math.cos(robot_theta - math.pi / 6)),
+                        end_y + int(arrow_size * math.sin(robot_theta - math.pi / 6)),
+                    ),
+                    (
+                        end_x - int(arrow_size * math.cos(robot_theta + math.pi / 6)),
+                        end_y + int(arrow_size * math.sin(robot_theta + math.pi / 6)),
+                    ),
+                ],
+                fill=(0, 0, 255),  # Blue
             )
 
             # Add map metadata as text
