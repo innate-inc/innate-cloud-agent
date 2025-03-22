@@ -172,7 +172,12 @@ async def test_chat_ask_to_navigate():
                 {
                     "name": "navigate_to_position",
                     "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS. Set is_delta=True to use delta mode for relative movement.",
-                    "inputs": {"x": "float", "y": "float", "theta": "float", "is_delta": "bool"},
+                    "inputs": {
+                        "x": "float",
+                        "y": "float",
+                        "theta": "float",
+                        "is_delta": "bool",
+                    },
                 }
             ],
             "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
@@ -205,17 +210,32 @@ async def test_chat_ask_to_navigate():
     ), "Expected vision_agent_output message"
 
     # Check that the next task is the 'navigate_to_position' primitive.
-    next_task_type = vision_output["payload"].get("next_task", {}).get("name", "")
+    next_task = vision_output["payload"].get("next_task", {})
+    next_task_type = next_task.get("name", "")
     assert (
         next_task_type == "navigate_to_position"
     ), "Expected the navigate_to_position primitive to be called"
 
-    # Next, the server should send a "ready_for_image" message.
+    # Get the primitive_id from the next_task
+    primitive_id = next_task.get("primitive_id", "")
+    assert primitive_id, "Expected a primitive_id in the next_task"
+
+    # Send primitive_activated message
+    activate_message = {
+        "type": "primitive_activated",
+        "payload": {
+            "primitive_id": primitive_id,
+            "primitive_name": "navigate_to_position",
+        },
+    }
+    await websocket.send(json.dumps(activate_message))
+
+    # Now, the server should send a "ready_for_image" message.
     raw_msg = await websocket.recv()
     msg = json.loads(raw_msg)
     assert (
         msg["type"] == "ready_for_image"
-    ), "Expected ready_for_image after vision output"
+    ), "Expected ready_for_image after primitive activation"
 
     # Clean up: close the server.
     server.close()
@@ -240,7 +260,12 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
                 {
                     "name": "navigate_to_position",
                     "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS. Set is_delta=True to use delta mode for relative movement.",
-                    "inputs": {"x": "float", "y": "float", "theta": "float", "is_delta": "bool"},
+                    "inputs": {
+                        "x": "float",
+                        "y": "float",
+                        "theta": "float",
+                        "is_delta": "bool",
+                    },
                 }
             ],
             "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
@@ -271,17 +296,33 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
     assert (
         vision_output_1["type"] == "vision_agent_output"
     ), "Expected vision_agent_output message for first navigation command"
-    next_task_type_1 = vision_output_1["payload"].get("next_task", {}).get("name", "")
+
+    next_task_1 = vision_output_1["payload"].get("next_task", {})
+    next_task_type_1 = next_task_1.get("name", "")
     assert (
         next_task_type_1 == "navigate_to_position"
     ), "Expected the navigate_to_position primitive to be called for first navigation"
 
-    # Expect the server to send a "ready_for_image" message.
+    # Get the primitive_id from the next_task
+    primitive_id_1 = next_task_1.get("primitive_id", "")
+    assert primitive_id_1, "Expected a primitive_id in the next_task"
+
+    # Send primitive_activated message for the first navigation
+    activate_message_1 = {
+        "type": "primitive_activated",
+        "payload": {
+            "primitive_id": primitive_id_1,
+            "primitive_name": "navigate_to_position",
+        },
+    }
+    await websocket.send(json.dumps(activate_message_1))
+
+    # Expect the server to send a "ready_for_image" message after activation.
     raw_msg = await websocket.recv()
     ready_msg_1 = json.loads(raw_msg)
     assert (
         ready_msg_1["type"] == "ready_for_image"
-    ), "Expected ready_for_image after vision output for first navigation"
+    ), "Expected ready_for_image after activating first navigation primitive"
 
     # Send the image for the second navigation attempt.
     await basic_image_handling(websocket, "tests/test_navigate.png", "PNG")
