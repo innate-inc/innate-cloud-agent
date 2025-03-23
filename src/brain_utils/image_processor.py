@@ -203,19 +203,12 @@ class ImageProcessor:
             origin_x = map_info["origin_x"]
             origin_y = map_info["origin_y"]
 
-            print(f"origin_x: {origin_x}, origin_y: {origin_y}")
-            print(f"resolution: {resolution}")
-            print(f"robot_coords: {robot_coords}")
-
             # Calculate pixel position
             robot_x = int((robot_coords["x"] - origin_x) / resolution)
             robot_y = int((robot_coords["y"] - origin_y) / resolution)
 
-            print(f"robot_x: {robot_x}, robot_y: {robot_y}")
-
             # In many 2D maps, Y is pointing down in image coordinates
             robot_y = map_info["height"] - robot_y
-            print(f"inverted robot_y: {robot_y}")
 
             # Draw robot as a red circle with a line indicating orientation
             robot_radius = 5
