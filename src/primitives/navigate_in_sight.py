@@ -8,13 +8,17 @@ import numpy as np
 from ultralytics import YOLO, SAM
 import google.generativeai as genai
 import os
-import math
 
-# Import visualization utilities
+# Import utility modules
 from src.primitives.visualization_utils import (
     annotate_camera_view,
     create_map_visualization,
     save_navigation_visualizations,
+)
+from src.primitives.projection_utils import (
+    angle_distance_to_image_coordinates,
+    sample_valid_navigation_points,
+    world_to_grid_coordinates,
 )
 
 # Utility to decode depth payload (assumed defined in src/utils.py)
@@ -118,22 +122,14 @@ class NavigateInSight(Primitive):
 
         # Refine the target object using a Groq classifier.
         # For now we don't do that.
-        # user_prompt = f"Extract from the following command the most appropriate name for the object to be segmented: '{target_object}'"
+        # user_prompt = (
+        #     f"Extract from the following command the most appropriate name "
+        #     f"for the object to be segmented: '{target_object}'"
+        # )
         # system_prompt = (
         #     "You are an AI assistant refining object names for image segmentation. Provide a short, clear, "
         #     "and specific name for the object desired. RETURN A JSON OBJECT with keys 'name_to_segment' and 'reasoning'."
         # )
-        # try:
-        #     refined_response = query_groq_classifier(
-        #         user_prompt, system_prompt, "in_sight_navigator"
-        #     )
-        #     refined_json = json.loads(refined_response)
-        #     refined_target = refined_json.get("name_to_segment", target_object)
-        # except Exception as e:
-        #     print(f"Error refining target object: {e}")
-        #     refined_target = target_object
-
-        # print(f"Refined target object: {refined_target}")
 
         refined_target = target_object
 
@@ -160,7 +156,8 @@ class NavigateInSight(Primitive):
         target_info = segmentation_masks.get("1")
         if not target_info:
             print(
-                f"No valid segmentation mask found for target object '{refined_target}'."
+                f"No valid segmentation mask found for target object "
+                f"'{refined_target}'."
             )
             # Save image with segmentation masks.
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -212,7 +209,8 @@ class NavigateInSight(Primitive):
         # Simulate delay for navigation initiation.
         await asyncio.sleep(1)
         return (
-            f"Navigation towards {refined_target} initiated with command: {navigation_command}",
+            f"Navigation towards {refined_target} initiated with command: "
+            f"{navigation_command}",
             True,
             navigation_command,
         )
@@ -279,6 +277,7 @@ class NavigateInSight(Primitive):
 
         if (cv_image.shape[0] != depth_height) or (cv_image.shape[1] != depth_width):
             cv_image_resized = cv2.resize(cv_image, (depth_width, depth_height))
+            cv_image = cv_image_resized
         else:
             cv_image_resized = cv_image.copy()
 
@@ -381,7 +380,7 @@ class NavigateInSight(Primitive):
         final_vis = cv2.addWeighted(vis_image, 0.7, all_masks, 0.3, 0)
 
         # Save the visualization
-        cv2.imwrite(f"segmentation_result.jpg", final_vis)
+        cv2.imwrite("segmentation_result.jpg", final_vis)
         print("Saved visualization to segmentation_result.jpg")
 
         return segmentation_masks
@@ -424,216 +423,6 @@ class NavigateInSight(Primitive):
         vertical_angle = y_norm * (vertical_fov / 2.0)
         return horizontal_angle, vertical_angle
 
-    def sample_valid_navigation_points(
-        self,
-        current_x,
-        current_y,
-        current_yaw,
-        map_array,
-        map_info,
-        min_distance=0.5,
-        max_distance=2.5,
-        min_obstacle_distance=0.25,
-        num_samples=8,
-        visualize=False,
-    ):
-        """
-        Sample valid navigation points in front of the robot.
-
-        Args:
-            current_x (float): Current robot X position in world coordinates
-            current_y (float): Current robot Y position in world coordinates
-            current_yaw (float): Current robot orientation in radians
-            map_array (np.ndarray): Map occupancy grid data
-            map_info (dict): Map metadata
-            min_distance (float): Minimum distance from robot to sample points (meters)
-            max_distance (float): Maximum distance from robot to sample points (meters)
-            min_obstacle_distance (float): Minimum allowable distance from obstacles (meters)
-            num_samples (int): Number of points to sample
-
-        Returns:
-            list: List of valid navigation points as (x, y, theta) tuples in world coordinates
-        """
-        # Get map metadata
-        resolution = map_info["resolution"]
-        origin_x = map_info["origin_x"]
-        origin_y = map_info["origin_y"]
-
-        # Sample points in a sector in front of the robot
-        valid_points_absolute = []
-        valid_points_angle_distance = []
-
-        # Calculate obstacle radius in grid cells
-        obstacle_radius = int(min_obstacle_distance / resolution)
-
-        # Sample angles in front of the robot (±60 degrees from current orientation)
-        angle_range = 120 * (np.pi / 180)  # 120 degrees in radians
-
-        # Distribute angles with more density in the middle of the view
-        half_samples = num_samples // 2
-
-        # Create two sets of angles: one focused in the center, one spread out
-        center_angles = np.linspace(
-            current_yaw - angle_range / 4, current_yaw + angle_range / 4, half_samples
-        )
-
-        wide_angles = np.linspace(
-            current_yaw - angle_range / 2, current_yaw + angle_range / 2, half_samples
-        )
-
-        # Combine both sets
-        angles = np.concatenate([center_angles, wide_angles])
-
-        # Sample distances
-        distances = np.linspace(min_distance, max_distance, 3)  # 3 distances per angle
-
-        # For each combination of angle and distance
-        for angle in angles:
-            for distance in distances:
-                # Calculate world coordinates
-                point_x = current_x + distance * np.cos(angle)
-                point_y = current_y + distance * np.sin(angle)
-
-                # Convert to grid coordinates
-                grid_x = int((point_x - origin_x) / resolution)
-                grid_y = int((point_y - origin_y) / resolution)
-
-                # Skip if outside map bounds
-                if (
-                    grid_x < 0
-                    or grid_x >= map_info["width"]
-                    or grid_y < 0
-                    or grid_y >= map_info["height"]
-                ):
-                    continue
-
-                # Check if point is a valid navigable location (away from obstacles)
-                is_valid = True
-
-                # Define a search window around the point
-                min_x = max(0, grid_x - obstacle_radius)
-                max_x = min(map_info["width"] - 1, grid_x + obstacle_radius)
-                min_y = max(0, grid_y - obstacle_radius)
-                max_y = min(map_info["height"] - 1, grid_y + obstacle_radius)
-
-                # Check if any cell within the radius is an obstacle (value = 100)
-                for y in range(min_y, max_y + 1):
-                    for x in range(min_x, max_x + 1):
-                        # Calculate distance from this cell to the target cell
-                        cell_distance = math.sqrt((x - grid_x) ** 2 + (y - grid_y) ** 2)
-
-                        # If this cell is within our search radius and is an obstacle
-                        if cell_distance <= obstacle_radius and map_array[y, x] == 100:
-                            is_valid = False
-                            break
-
-                    if not is_valid:
-                        break
-
-                # Add the point if it's valid
-                if is_valid:
-                    # The navigation target will face in the direction from robot to point
-                    target_theta = angle
-                    valid_points_absolute.append((point_x, point_y, target_theta))
-                    valid_points_angle_distance.append((angle, distance))
-
-                    # Limit the total number of points
-                    if len(valid_points_absolute) >= num_samples:
-                        return valid_points_absolute, valid_points_angle_distance
-
-        return valid_points_absolute, valid_points_angle_distance
-
-    def deg2rad(self, deg):
-        return deg * np.pi / 180
-
-    def compute_intrinsics(self, width, height, h_fov_deg, v_fov_deg):
-        h_fov = self.deg2rad(h_fov_deg)
-        v_fov = self.deg2rad(v_fov_deg)
-        f_x = (width / 2) / np.tan(h_fov / 2)
-        f_y = (height / 2) / np.tan(v_fov / 2)
-        c_x = width / 2
-        c_y = height / 2
-        K = np.array([[f_x, 0, c_x], [0, f_y, c_y], [0, 0, 1]])
-        return K
-
-    def compute_homography(self, K, h, pitch_deg):
-        # Convert pitch to radians. We define theta = -pitch so that if pitch>0 (camera looks downward)
-        # then theta is negative.
-        pitch = self.deg2rad(pitch_deg)
-        theta = -pitch
-
-        # Rotation matrix about the x-axis:
-        R = np.array(
-            [
-                [1, 0, 0],
-                [0, np.cos(theta), -np.sin(theta)],
-                [0, np.sin(theta), np.cos(theta)],
-            ]
-        )
-        # Extract columns of R:
-        r1 = R[:, 0]  # [1, 0, 0]
-        r2 = R[:, 1]  # [0, cos(theta), sin(theta)]
-        r3 = R[:, 2]  # [0, -sin(theta), cos(theta)]
-
-        # For ground points (world z=0), the projection is:
-        # p ~ K * [ r1  r2  -h*r3 ] * [x, y, 1]^T.
-        M = np.column_stack((r1, r2, -h * r3))
-        H = K @ M
-        return H
-
-    def project_ground_point(self, H, D, gamma_deg):
-        # Convert gamma from degrees to radians
-        gamma = self.deg2rad(gamma_deg)
-        # Ground point (with origin at camera's vertical projection on the ground)
-        x = D * np.sin(gamma)
-        y = D * np.cos(gamma)
-        ground_pt = np.array([x, y, 1])
-        p = H @ ground_pt
-        u = p[0] / p[2]
-        v = p[1] / p[2]
-        return u, v
-
-    def angle_distance_to_image_coordinates(
-        self,
-        angle,
-        distance,
-    ):
-        """
-        Convert angle and distance to image coordinates using proper camera projection.
-
-        Args:
-            angle (float): Angle in radians relative to robot's forward direction
-            distance (float): Distance in meters
-            horizontal_fov (float): Horizontal field of view in degrees
-
-        Returns:
-            tuple: (x, y) coordinates in the image
-        """
-        # Camera parameters (defined at top of file)
-        width = IMAGE_WIDTH
-        height = IMAGE_HEIGHT
-        h_fov_deg = HORIZONTAL_FOV
-        v_fov_deg = VERT_FOV
-        h_cam = 20  # camera height in centimeters
-        pitch_deg = 90  # camera from the ground (90 is looking straight forward)
-
-        # Compute camera intrinsics and homography
-        K = self.compute_intrinsics(width, height, h_fov_deg, v_fov_deg)
-        H = self.compute_homography(K, h_cam, pitch_deg)
-
-        # Convert angle to degrees and distance to centimeters
-        angle_deg = np.degrees(angle)
-        distance_cm = distance * 100  # convert meters to centimeters
-
-        # Project the point
-        u, v = self.project_ground_point(H, distance_cm, angle_deg)
-
-        # Ensure coordinates are within image bounds
-        u = max(0, min(width - 1, u))
-        v = max(0, min(height - 1, v))
-
-        return (int(u), int(v))
-
     async def execute_with_point_selection(
         self, target_description: str, map_payload: dict
     ):
@@ -671,8 +460,8 @@ class NavigateInSight(Primitive):
             print(f"Exception decoding image: {e}")
             return "Image decode error", False, None
 
-        # Sample valid navigation points
-        result = self.sample_valid_navigation_points(
+        # Sample valid navigation points using the utility function
+        result = sample_valid_navigation_points(
             self.current_x,
             self.current_y,
             self.current_yaw,
@@ -695,19 +484,15 @@ class NavigateInSight(Primitive):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         # Convert robot position from world coordinates to grid coordinates
-        robot_pixel_x = int(
-            (self.current_x - map_info["origin_x"]) / map_info["resolution"]
-        )
-        robot_pixel_y = int(
-            (self.current_y - map_info["origin_y"]) / map_info["resolution"]
+        robot_pixel_x, robot_pixel_y = world_to_grid_coordinates(
+            self.current_x, self.current_y, map_info
         )
         robot_pos = (robot_pixel_x, robot_pixel_y, self.current_yaw)
 
         # Convert navigation points from world to grid coordinates
         grid_navigation_points = []
         for point_x, point_y, point_theta in navigation_points_absolute:
-            pixel_x = int((point_x - map_info["origin_x"]) / map_info["resolution"])
-            pixel_y = int((point_y - map_info["origin_y"]) / map_info["resolution"])
+            pixel_x, pixel_y = world_to_grid_coordinates(point_x, point_y, map_info)
             grid_navigation_points.append((pixel_x, pixel_y, point_theta))
 
         # Create map visualization with grid coordinates
@@ -715,11 +500,15 @@ class NavigateInSight(Primitive):
             map_array, robot_pos, grid_navigation_points, map_info
         )
 
+        # Create a wrapper function for angle_distance_to_image_coordinates
+        def convert_to_image_coords(angle, distance):
+            return angle_distance_to_image_coordinates(angle, distance)
+
         # Create camera view visualization
         annotated_image = annotate_camera_view(
             cv_image,
             navigation_points_angle_distance,
-            self.angle_distance_to_image_coordinates,
+            convert_to_image_coords,
         )
 
         # Save visualizations
