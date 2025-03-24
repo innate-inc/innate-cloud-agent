@@ -9,26 +9,22 @@ from ultralytics import YOLO, SAM
 import google.generativeai as genai
 import os
 import math
-from typing import Dict, List, Tuple, Union
 
-# Import our Groq helpers (assumed to be defined elsewhere)
-# from orchestrator.agent.groq_instant_use import query_groq_classifier, query_groq_vlm
+# Import visualization utilities
+from src.primitives.visualization_utils import (
+    annotate_camera_view,
+    create_map_visualization,
+    save_navigation_visualizations,
+)
 
 # Utility to decode depth payload (assumed defined in src/utils.py)
 from src.utils import decode_depth_payload, decode_map_payload
 
-# Constants for the camera and visualization
+# Constants for the camera
 HORIZONTAL_FOV = 96.4  # Camera horizontal field of view in degrees
 VERT_FOV = 80.0  # Camera vertical field of view in degrees
 IMAGE_WIDTH = 640
 IMAGE_HEIGHT = 480
-COLORS = {
-    "in_fov": (0, 255, 0),  # Green
-    "out_fov": (0, 0, 255),  # Red
-    "selected": (255, 0, 0),  # Blue
-    "background": (255, 255, 255),  # White
-    "robot": (255, 0, 255),  # Magenta
-}
 
 
 class NavigateInSight(Primitive):
@@ -638,291 +634,6 @@ class NavigateInSight(Primitive):
 
         return (int(u), int(v))
 
-    def annotate_navigation_points(self, image, navigation_points):
-        """
-        Annotate an image with navigation points based on their angle and distance.
-
-        Args:
-            image (numpy.ndarray): The image to annotate
-            navigation_points (list): List of (angle, distance) tuples
-
-        Returns:
-            numpy.ndarray: The annotated image
-            dict: Mapping from point IDs to navigation parameters
-        """
-        # Create a copy of the image for annotation
-        annotated_img = image.copy()
-
-        # Process each navigation point
-        for i, (angle, distance) in enumerate(navigation_points):
-            # Convert to image coordinates
-            img_x, img_y = self.angle_distance_to_image_coordinates(angle, distance)
-
-            # Generate point ID (1-based)
-            point_id = i + 1
-
-            # Store point in mapping
-            circle_color = COLORS["in_fov"]  # Green fill
-            text_color = COLORS["background"]  # White text
-            circle_radius = 20
-
-            # Draw black outline circle
-            cv2.circle(
-                annotated_img,
-                (int(img_x), int(img_y)),
-                circle_radius + 2,
-                (0, 0, 0),
-                -1,
-            )
-
-            # Draw filled circle
-            cv2.circle(
-                annotated_img,
-                (int(img_x), int(img_y)),
-                circle_radius,
-                circle_color,
-                -1,
-            )
-
-            # Add number text
-            font_size = 1.0
-            font_thickness = 2
-            text = str(point_id)
-            text_size, _ = cv2.getTextSize(
-                text, cv2.FONT_HERSHEY_SIMPLEX, font_size, font_thickness
-            )
-            text_x = int(img_x - text_size[0] / 2)
-            text_y = int(img_y + text_size[1] / 2)
-
-            # Draw number with outline
-            cv2.putText(
-                annotated_img,
-                text,
-                (text_x, text_y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                font_size,
-                (0, 0, 0),
-                font_thickness + 2,
-            )
-
-            cv2.putText(
-                annotated_img,
-                text,
-                (text_x, text_y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                font_size,
-                text_color,
-                font_thickness,
-            )
-
-        return annotated_img
-
-    def visualize_map_with_navigation_points(
-        self, map_array, map_info, current_x, current_y, current_yaw, navigation_points
-    ):
-        """
-        Create a visualization of the map with navigation points.
-
-        Args:
-            map_array (np.ndarray): Map occupancy grid data
-            map_info (dict): Map metadata
-            current_x, current_y, current_yaw: Robot position and orientation
-            navigation_points (list): List of (x, y, theta) tuples in world coordinates
-
-        Returns:
-            np.ndarray: The map visualization image
-        """
-        import cv2
-        import numpy as np
-        import math
-
-        # Create a colored map visualization (grayscale to RGB)
-        # 0 = free space (white), 100 = obstacle (black), -1 = unknown (gray)
-        vis_map = np.zeros((map_array.shape[0], map_array.shape[1], 3), dtype=np.uint8)
-
-        # Fill with appropriate colors
-        vis_map[map_array == 0] = [255, 255, 255]  # Free space = white
-        vis_map[map_array == 100] = [0, 0, 0]  # Obstacles = black
-        vis_map[map_array == -1] = [128, 128, 128]  # Unknown = gray
-
-        # Get map metadata
-        resolution = map_info["resolution"]
-        origin_x = map_info["origin_x"]
-        origin_y = map_info["origin_y"]
-
-        # Convert robot position to pixel coordinates on the map
-        robot_pixel_x = int((current_x - origin_x) / resolution)
-        robot_pixel_y = int((current_y - origin_y) / resolution)
-
-        # Draw robot position (blue circle with bigger radius)
-        cv2.circle(vis_map, (robot_pixel_x, robot_pixel_y), 8, (255, 0, 0), -1)
-
-        # Draw robot orientation (blue line, thicker)
-        orientation_length = 20
-        endpoint_x = int(robot_pixel_x + orientation_length * math.cos(current_yaw))
-        endpoint_y = int(robot_pixel_y + orientation_length * math.sin(current_yaw))
-        cv2.line(
-            vis_map,
-            (robot_pixel_x, robot_pixel_y),
-            (endpoint_x, endpoint_y),
-            (255, 0, 0),
-            3,
-        )
-
-        # Add robot position text
-        cv2.putText(
-            vis_map,
-            f"Robot",
-            (robot_pixel_x + 10, robot_pixel_y - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (255, 0, 0),
-            1,
-        )
-
-        # Draw navigation points (green circles with numbers)
-        for i, (point_x, point_y, point_theta) in enumerate(navigation_points):
-            # Convert world coordinates to pixel coordinates
-            pixel_x = int((point_x - origin_x) / resolution)
-            pixel_y = int((point_y - origin_y) / resolution)
-
-            # Draw point (green circle, bigger)
-            cv2.circle(vis_map, (pixel_x, pixel_y), 6, (0, 255, 0), -1)
-
-            # Draw a thick black outline around the circle for better visibility
-            cv2.circle(vis_map, (pixel_x, pixel_y), 7, (0, 0, 0), 1)
-
-            # Draw ID number (larger, with background for better visibility)
-            # Draw text background
-            text = str(i + 1)
-            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
-            cv2.rectangle(
-                vis_map,
-                (pixel_x + 5, pixel_y - text_size[1] - 5),
-                (pixel_x + text_size[0] + 10, pixel_y + 5),
-                (255, 255, 255),
-                -1,
-            )
-
-            # Draw text
-            cv2.putText(
-                vis_map,
-                text,
-                (pixel_x + 7, pixel_y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 0, 0),
-                2,
-            )
-
-            # Draw orientation (green line, thicker)
-            orientation_length = 15
-            endpoint_x = int(pixel_x + orientation_length * math.cos(point_theta))
-            endpoint_y = int(pixel_y + orientation_length * math.sin(point_theta))
-            cv2.line(
-                vis_map, (pixel_x, pixel_y), (endpoint_x, endpoint_y), (0, 255, 0), 2
-            )
-
-        # Scale up the map for better visibility (2x larger)
-        scale_factor = 2
-        vis_map_large = cv2.resize(
-            vis_map,
-            (vis_map.shape[1] * scale_factor, vis_map.shape[0] * scale_factor),
-            interpolation=cv2.INTER_NEAREST,
-        )
-
-        # Add a border around the map
-        border_size = 50
-        map_with_border = (
-            np.ones(
-                (
-                    vis_map_large.shape[0] + 2 * border_size,
-                    vis_map_large.shape[1] + 2 * border_size,
-                    3,
-                ),
-                dtype=np.uint8,
-            )
-            * 200
-        )  # Light gray border
-
-        # Place the map in the center of the border
-        map_with_border[
-            border_size : border_size + vis_map_large.shape[0],
-            border_size : border_size + vis_map_large.shape[1],
-        ] = vis_map_large
-
-        # Add title with useful information
-        title = f"Navigation Map - Robot at ({current_x:.2f}, {current_y:.2f})"
-        cv2.putText(
-            map_with_border,
-            title,
-            (border_size, int(border_size / 2)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (0, 0, 0),
-            2,
-        )
-
-        # Add legend
-        y_pos = border_size + vis_map_large.shape[0] + 15
-
-        # Robot legend
-        cv2.circle(map_with_border, (border_size + 15, y_pos), 8, (255, 0, 0), -1)
-        cv2.putText(
-            map_with_border,
-            "Robot",
-            (border_size + 30, y_pos + 5),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 0, 0),
-            1,
-        )
-
-        # Navigation point legend
-        cv2.circle(map_with_border, (border_size + 150, y_pos), 6, (0, 255, 0), -1)
-        cv2.circle(map_with_border, (border_size + 150, y_pos), 7, (0, 0, 0), 1)
-        cv2.putText(
-            map_with_border,
-            "Navigation Points",
-            (border_size + 165, y_pos + 5),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 0, 0),
-            1,
-        )
-
-        # Obstacle legend
-        cv2.rectangle(
-            map_with_border,
-            (border_size + 350, y_pos - 8),
-            (border_size + 366, y_pos + 8),
-            (0, 0, 0),
-            -1,
-        )
-        cv2.putText(
-            map_with_border,
-            "Obstacles",
-            (border_size + 375, y_pos + 5),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 0, 0),
-            1,
-        )
-
-        # Add min obstacle distance info
-        min_obstacle_distance = map_info.get("min_obstacle_distance", 0.25)
-        cv2.putText(
-            map_with_border,
-            f"Min obstacle distance: {min_obstacle_distance} m",
-            (border_size + 500, y_pos + 5),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 0, 0),
-            1,
-        )
-
-        return map_with_border
-
     async def execute_with_point_selection(
         self, target_description: str, map_payload: dict
     ):
@@ -977,58 +688,64 @@ class NavigateInSight(Primitive):
         # Unpack the tuple of absolute points and angle-distance points
         navigation_points_absolute, navigation_points_angle_distance = result
 
-        # Create directory for navigation images if it doesn't exist
-        os.makedirs("navigation_points", exist_ok=True)
-
         if not navigation_points_angle_distance:
             return "Could not find any valid navigation points", False, None
 
-        # Create and save map visualization with navigation points
+        # Create visualizations
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        map_vis = self.visualize_map_with_navigation_points(
-            map_array,
-            map_info,
-            self.current_x,
-            self.current_y,
-            self.current_yaw,
-            navigation_points_absolute,
+
+        # Convert robot position from world coordinates to grid coordinates
+        robot_pixel_x = int(
+            (self.current_x - map_info["origin_x"]) / map_info["resolution"]
         )
-        map_vis_path = f"navigation_points/map_with_points_{timestamp}.jpg"
-        cv2.imwrite(map_vis_path, map_vis)
-        print(f"Saved map visualization to {map_vis_path}")
+        robot_pixel_y = int(
+            (self.current_y - map_info["origin_y"]) / map_info["resolution"]
+        )
+        robot_pos = (robot_pixel_x, robot_pixel_y, self.current_yaw)
 
-        # Annotate the image with navigation points
-        annotated_image = self.annotate_navigation_points(
-            cv_image, navigation_points_angle_distance
+        # Convert navigation points from world to grid coordinates
+        grid_navigation_points = []
+        for point_x, point_y, point_theta in navigation_points_absolute:
+            pixel_x = int((point_x - map_info["origin_x"]) / map_info["resolution"])
+            pixel_y = int((point_y - map_info["origin_y"]) / map_info["resolution"])
+            grid_navigation_points.append((pixel_x, pixel_y, point_theta))
+
+        # Create map visualization with grid coordinates
+        map_vis = create_map_visualization(
+            map_array, robot_pos, grid_navigation_points, map_info
         )
 
-        # Save the annotated image
-        annotated_image_path = f"navigation_points/camera_with_points_{timestamp}.jpg"
-        cv2.imwrite(annotated_image_path, annotated_image)
-        print(f"Saved annotated camera image to {annotated_image_path}")
+        # Create camera view visualization
+        annotated_image = annotate_camera_view(
+            cv_image,
+            navigation_points_angle_distance,
+            self.angle_distance_to_image_coordinates,
+        )
 
-        point_mapping = {}  # TBD later
+        # Save visualizations
+        save_navigation_visualizations(annotated_image, map_vis, timestamp)
+
+        # Create point mapping from navigation points
+        point_mapping = {}
+        for i, (angle, distance) in enumerate(navigation_points_angle_distance):
+            point_id = str(i + 1)
+            absolute_point = navigation_points_absolute[i]
+            point_mapping[point_id] = {
+                "angle_distance": (angle, distance),
+                "x": absolute_point[0],
+                "y": absolute_point[1],
+                "theta": absolute_point[2],
+            }
 
         # If there's only one valid point, just use that
         if len(point_mapping) == 1:
             selected_point_id = list(point_mapping.keys())[0]
-            selected_angle, selected_distance = point_mapping[selected_point_id][
-                "angle_distance"
-            ]
-
-            # Convert to world coordinates for the navigation command
-            selected_x = self.current_x + selected_distance * math.cos(
-                self.current_yaw + selected_angle
-            )
-            selected_y = self.current_y + selected_distance * math.sin(
-                self.current_yaw + selected_angle
-            )
-            selected_theta = self.current_yaw  # Maintain the same orientation
+            selected_point = point_mapping[selected_point_id]
 
             navigation_command = {
-                "x": selected_x,
-                "y": selected_y,
-                "theta": selected_theta,
+                "x": selected_point["x"],
+                "y": selected_point["y"],
+                "theta": selected_point["theta"],
             }
 
             print(
