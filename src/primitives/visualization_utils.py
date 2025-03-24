@@ -87,6 +87,9 @@ def annotate_camera_view(image, navigation_points, point_converter):
             angle, distance = point_data
             point_id = 0  # Default point ID
 
+        # IN THE SIM WE HAVE TO INVERT THE ANGLE AND I DONT KNOW IF THIS
+        # WILL BE THE SAME FOR THE REAL ROBOT
+        angle = -angle
         img_x, img_y = point_converter(angle, distance)
 
         if img_x is None or img_y is None:

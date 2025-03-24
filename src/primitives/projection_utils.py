@@ -247,13 +247,16 @@ def sample_valid_navigation_points(
     for angle in angles:
         for distance in distances:
             # Check if the point would be visible in the camera FOV
+            angle_rel = -(
+                angle - current_yaw
+            )  # Get angle relative to current orientation
             if not is_point_in_fov(angle, distance):
                 filtered_points += 1
                 continue
 
             # Calculate world coordinates
-            point_x = current_x + distance * np.cos(angle)
-            point_y = current_y + distance * np.sin(angle)
+            point_x = current_x + distance * np.cos(angle_rel)
+            point_y = current_y + distance * np.sin(angle_rel)
 
             # Convert to grid coordinates
             grid_x = int((point_x - origin_x) / resolution)
@@ -294,7 +297,7 @@ def sample_valid_navigation_points(
             # Add the point if it's valid
             if is_valid:
                 # The navigation target will face in the direction from robot to point
-                target_theta = angle
+                target_theta = angle_rel
                 valid_points_absolute.append((point_x, point_y, target_theta))
                 valid_points_angle_distance.append((angle, distance))
 
