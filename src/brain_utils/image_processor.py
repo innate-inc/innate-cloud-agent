@@ -234,10 +234,6 @@ class ImageProcessor:
 
             # Convert theta to degrees for display
             theta_degrees = math.degrees(robot_theta) % 360
-            print(
-                f"robot_theta: {robot_theta} rad, {theta_degrees:.1f}° "
-                f"end_x: {end_x}, end_y: {end_y}"
-            )
 
             # Draw the orientation line
             draw.line(
@@ -280,7 +276,6 @@ class ImageProcessor:
             os.makedirs("maps", exist_ok=True)
             map_img.save("maps/map_with_robot.png")
 
-            self.logger.info("Saved map with robot position to maps/map_with_robot.png")
             return map_array
 
         except Exception as e:

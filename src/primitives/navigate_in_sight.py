@@ -467,11 +467,9 @@ class NavigateInSight(Primitive):
             self.current_yaw,
             map_array,
             map_info,
-            min_distance=0.5,
-            max_distance=2.5,
-            min_obstacle_distance=0.25,
-            num_samples=8,
-            visualize=True,
+            min_obstacle_distance=0.50,
+            distances=[0.5, 1.0, 1.5],
+            angles_deg=[-30, 0, 30],
         )
 
         # Unpack the tuple of absolute points and angle-distance points
@@ -489,11 +487,30 @@ class NavigateInSight(Primitive):
         )
         robot_pos = (robot_pixel_x, robot_pixel_y, self.current_yaw)
 
-        # Convert navigation points from world to grid coordinates
+        # Create point mapping from navigation points
+        # This ensures the same point ID is used in both camera and map views
+        point_mapping = {}
         grid_navigation_points = []
-        for point_x, point_y, point_theta in navigation_points_absolute:
+
+        # Process and number the points consistently for both visualizations
+        for i, ((point_x, point_y, point_theta), (angle, distance)) in enumerate(
+            zip(navigation_points_absolute, navigation_points_angle_distance)
+        ):
+            point_id = i + 1
+
+            # Convert to grid coordinates for map visualization
             pixel_x, pixel_y = world_to_grid_coordinates(point_x, point_y, map_info)
-            grid_navigation_points.append((pixel_x, pixel_y, point_theta))
+            grid_navigation_points.append((pixel_x, pixel_y, point_theta, point_id))
+
+            # Store in point mapping for navigation command creation
+            point_mapping[str(point_id)] = {
+                "angle_distance": (angle, distance),
+                "x": point_x,
+                "y": point_y,
+                "theta": point_theta,
+            }
+
+        print(f"Generated {len(point_mapping)} navigation points")
 
         # Create map visualization with grid coordinates
         map_vis = create_map_visualization(
@@ -505,26 +522,20 @@ class NavigateInSight(Primitive):
             return angle_distance_to_image_coordinates(angle, distance)
 
         # Create camera view visualization
+        # Pass point IDs explicitly to ensure correspondence with map view
+        camera_navigation_points = []
+        for i, (angle, distance) in enumerate(navigation_points_angle_distance):
+            point_id = i + 1
+            camera_navigation_points.append((angle, distance, point_id))
+
         annotated_image = annotate_camera_view(
             cv_image,
-            navigation_points_angle_distance,
+            camera_navigation_points,
             convert_to_image_coords,
         )
 
         # Save visualizations
         save_navigation_visualizations(annotated_image, map_vis, timestamp)
-
-        # Create point mapping from navigation points
-        point_mapping = {}
-        for i, (angle, distance) in enumerate(navigation_points_angle_distance):
-            point_id = str(i + 1)
-            absolute_point = navigation_points_absolute[i]
-            point_mapping[point_id] = {
-                "angle_distance": (angle, distance),
-                "x": absolute_point[0],
-                "y": absolute_point[1],
-                "theta": absolute_point[2],
-            }
 
         # If there's only one valid point, just use that
         if len(point_mapping) == 1:

@@ -14,20 +14,20 @@ COLORS = {
 }
 
 
-def draw_navigation_point(image, x, y, point_id, circle_radius=12):
+def draw_navigation_point(image, x, y, point_id, circle_radius=15):
     """Draw a single navigation point with ID on the image."""
     # Ensure coordinates are integers
     x, y = int(x), int(y)
 
     # Draw black outline circle
-    cv2.circle(image, (x, y), circle_radius + 1, COLORS["text"], -1)
+    cv2.circle(image, (x, y), circle_radius + 2, COLORS["text"], -1)
 
     # Draw filled circle
     cv2.circle(image, (x, y), circle_radius, COLORS["in_fov"], -1)
 
     # Add number text
-    font_size = 0.6
-    font_thickness = 1
+    font_size = 0.8
+    font_thickness = 2
     text = str(point_id)
     text_size, _ = cv2.getTextSize(
         text, cv2.FONT_HERSHEY_SIMPLEX, font_size, font_thickness
@@ -62,14 +62,61 @@ def annotate_camera_view(image, navigation_points, point_converter):
 
     Args:
         image: Original camera image
-        navigation_points: List of (angle, distance) tuples
+        navigation_points: List of (angle, distance, point_id) tuples
         point_converter: Function that converts (angle, distance) to image coordinates
     """
     annotated_img = image.copy()
+    in_view_points = 0
+    out_of_view_points = 0
 
-    for i, (angle, distance) in enumerate(navigation_points):
+    # Get image dimensions for drawing the out-of-view indicator
+    height, width = annotated_img.shape[:2]
+
+    # Add a small overlay at the bottom with stats
+    info_bar_height = 40
+    overlay = annotated_img.copy()
+    cv2.rectangle(
+        overlay, (0, height - info_bar_height), (width, height), (0, 0, 0), -1
+    )
+    annotated_img = cv2.addWeighted(overlay, 0.3, annotated_img, 0.7, 0)
+
+    for point_data in navigation_points:
+        if len(point_data) == 3:  # Using (angle, distance, point_id) format
+            angle, distance, point_id = point_data
+        else:  # Backwards compatibility for (angle, distance) format
+            angle, distance = point_data
+            point_id = 0  # Default point ID
+
         img_x, img_y = point_converter(angle, distance)
-        draw_navigation_point(annotated_img, img_x, img_y, i + 1)
+
+        if img_x is None or img_y is None:
+            # Point is outside field of view
+            out_of_view_points += 1
+            continue
+
+        # Point is within field of view
+        in_view_points += 1
+        draw_navigation_point(annotated_img, img_x, img_y, point_id)
+
+    # Add text showing how many points are in view vs out of view
+    status_text = (
+        f"Points in view: {in_view_points}/{in_view_points + out_of_view_points}"
+    )
+    cv2.putText(
+        annotated_img,
+        status_text,
+        (10, height - 15),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (255, 255, 255),
+        1,
+    )
+
+    # Print warning if there are out-of-view points
+    if out_of_view_points > 0:
+        print(
+            f"WARNING: {out_of_view_points} navigation points are outside the camera field of view"
+        )
 
     return annotated_img
 
@@ -83,7 +130,7 @@ def draw_robot_on_map(vis_map, robot_x, robot_y, robot_yaw, scale=1):
     cv2.circle(vis_map, (robot_x, robot_y), 6 * scale, COLORS["robot"], -1)
 
     # Draw robot orientation
-    orientation_length = 12 * scale
+    orientation_length = 15 * scale
     endpoint_x = int(robot_x + orientation_length * np.cos(robot_yaw))
     endpoint_y = int(robot_y + orientation_length * np.sin(robot_yaw))
     cv2.line(
@@ -98,11 +145,11 @@ def draw_robot_on_map(vis_map, robot_x, robot_y, robot_yaw, scale=1):
     cv2.putText(
         vis_map,
         "Robot",
-        (robot_x + 8 * scale, robot_y - 8 * scale),
+        (robot_x + 10 * scale, robot_y - 10 * scale),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.4 * scale,
+        0.6 * scale,
         COLORS["robot"],
-        scale,
+        max(1, int(scale)),
     )
 
 
@@ -115,7 +162,7 @@ def create_map_visualization(
     Args:
         map_array: 2D numpy array of map data
         robot_pos: (x, y, yaw) tuple in grid coordinates
-        navigation_points: List of (x, y, theta) tuples in grid coordinates
+        navigation_points: List of (x, y, theta, point_id) tuples in grid coordinates
         map_info: Dictionary with map metadata
         scale_factor: Factor to scale up the final visualization
     """
@@ -125,42 +172,59 @@ def create_map_visualization(
     vis_map[map_array == 100] = [0, 0, 0]  # Obstacles = black
     vis_map[map_array == -1] = [128, 128, 128]  # Unknown = gray
 
-    # Draw robot
-    robot_x, robot_y, robot_yaw = robot_pos
-    draw_robot_on_map(vis_map, robot_x, robot_y, robot_yaw)
-
-    # Draw navigation points
-    for i, (point_x, point_y, point_theta) in enumerate(navigation_points):
-        # Ensure coordinates are integers
-        point_x, point_y = int(point_x), int(point_y)
-
-        # Draw point (smaller circles)
-        cv2.circle(vis_map, (point_x, point_y), 4, COLORS["in_fov"], -1)
-        cv2.circle(vis_map, (point_x, point_y), 5, COLORS["text"], 1)
-
-        # Draw orientation (shorter lines)
-        orientation_length = 10
-        endpoint_x = int(point_x + orientation_length * np.cos(point_theta))
-        endpoint_y = int(point_y + orientation_length * np.sin(point_theta))
-        cv2.line(
-            vis_map, (point_x, point_y), (endpoint_x, endpoint_y), COLORS["in_fov"], 1
-        )
-
-        # Add point ID (smaller text, better positioning)
-        cv2.putText(
-            vis_map,
-            str(i + 1),
-            (point_x + 6, point_y - 6),  # Offset label to prevent overlap with point
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.4,  # Smaller font size
-            COLORS["text"],
-            1,  # Thinner text
-        )
-
-    # Scale up the visualization
+    # Scale up the visualization FIRST
     vis_map_large = cv2.resize(
         vis_map, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_NEAREST
     )
+
+    # Scale robot and navigation point coordinates based on scale_factor
+    scaled_robot_x = int(robot_pos[0] * scale_factor)
+    scaled_robot_y = int(robot_pos[1] * scale_factor)
+    scaled_robot_yaw = robot_pos[2]  # Angle doesn't change
+
+    # Draw robot on scaled map
+    draw_robot_on_map(
+        vis_map_large, scaled_robot_x, scaled_robot_y, scaled_robot_yaw, scale=2
+    )
+
+    # Draw navigation points on scaled map
+    for point_data in navigation_points:
+        if len(point_data) == 4:  # Using (x, y, theta, point_id) format
+            point_x, point_y, point_theta, point_id = point_data
+        else:  # Backwards compatibility for (x, y, theta) format
+            point_x, point_y, point_theta = point_data
+            point_id = 0  # Default point ID
+
+        # Scale coordinates for the enlarged map
+        point_x = int(point_x * scale_factor)
+        point_y = int(point_y * scale_factor)
+
+        # Draw point (circles appropriate for the scaled map)
+        cv2.circle(vis_map_large, (point_x, point_y), 8, COLORS["in_fov"], -1)
+        cv2.circle(vis_map_large, (point_x, point_y), 10, COLORS["text"], 1)
+
+        # Draw orientation (lines appropriate for the scaled map)
+        orientation_length = 20
+        endpoint_x = int(point_x + orientation_length * np.cos(point_theta))
+        endpoint_y = int(point_y + orientation_length * np.sin(point_theta))
+        cv2.line(
+            vis_map_large,
+            (point_x, point_y),
+            (endpoint_x, endpoint_y),
+            COLORS["in_fov"],
+            2,
+        )
+
+        # Add point ID (text size appropriate for the scaled map)
+        cv2.putText(
+            vis_map_large,
+            str(point_id),
+            (point_x + 12, point_y - 12),  # Offset label to prevent overlap with point
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,  # Larger font size for better visibility
+            COLORS["text"],
+            2,  # Thicker text
+        )
 
     # Add border and title
     border_size = 50

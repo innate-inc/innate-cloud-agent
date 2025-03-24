@@ -106,6 +106,39 @@ def project_ground_point(H, D, gamma_deg):
     return u, v
 
 
+def is_point_in_fov(angle, distance, h_fov_deg=HORIZONTAL_FOV, v_fov_deg=VERT_FOV):
+    """
+    Check if a point at given angle and distance is within the camera's field of view.
+
+    Args:
+        angle (float): Angle in radians relative to robot's forward direction
+        distance (float): Distance in meters
+        h_fov_deg (float): Horizontal field of view in degrees
+        v_fov_deg (float): Vertical field of view in degrees
+
+    Returns:
+        bool: True if the point is within the field of view, False otherwise
+    """
+    # Convert angle to degrees for easier comparison
+    angle_deg = rad2deg(angle)
+
+    # Check if the angle is within the horizontal field of view
+    # We need to compare to half the FOV since the angle is relative to center
+    if abs(angle_deg) > (h_fov_deg / 2):
+        return False
+
+    # For a typical camera, we'd also check vertical FOV,
+    # but for navigation points on the ground plane, this is usually not needed
+    # as points that are at a reasonable distance will be in the vertical FOV
+
+    # Check if distance is reasonable (not too close or too far)
+    # These values can be adjusted based on your robot's camera setup
+    if distance < 0.2 or distance > 5.0:
+        return False
+
+    return True
+
+
 def angle_distance_to_image_coordinates(angle, distance, h_cam=20, pitch_deg=90):
     """
     Convert angle and distance to image coordinates using proper camera projection.
@@ -117,8 +150,12 @@ def angle_distance_to_image_coordinates(angle, distance, h_cam=20, pitch_deg=90)
         pitch_deg (float): Camera pitch angle in degrees (90° is looking forward)
 
     Returns:
-        tuple: (x, y) coordinates in the image
+        tuple: (x, y) coordinates in the image, or (None, None) if out of field of view
     """
+    # Check if the point is within the field of view first
+    if not is_point_in_fov(angle, distance):
+        return (None, None)
+
     # Camera parameters
     width = IMAGE_WIDTH
     height = IMAGE_HEIGHT
@@ -138,6 +175,10 @@ def angle_distance_to_image_coordinates(angle, distance, h_cam=20, pitch_deg=90)
     # Project the point
     u, v = project_ground_point(H, distance_cm, angle_deg)
 
+    # Check if coordinates are within image bounds
+    if u < 0 or u >= width or v < 0 or v >= height:
+        return (None, None)
+
     # Ensure coordinates are within image bounds
     u = max(0, min(width - 1, u))
     v = max(0, min(height - 1, v))
@@ -151,11 +192,9 @@ def sample_valid_navigation_points(
     current_yaw,
     map_array,
     map_info,
-    min_distance=0.5,
-    max_distance=2.5,
-    min_obstacle_distance=0.25,
-    num_samples=8,
-    visualize=False,
+    distances=[0.5, 1.5],
+    angles_deg=[-30, 0, 30],
+    min_obstacle_distance=0.50,
 ):
     """
     Sample valid navigation points in front of the robot.
@@ -187,34 +226,31 @@ def sample_valid_navigation_points(
     # Sample points in a sector in front of the robot
     valid_points_absolute = []
     valid_points_angle_distance = []
+    filtered_points = 0  # Count points filtered due to FOV constraints
 
     # Calculate obstacle radius in grid cells
     obstacle_radius = int(min_obstacle_distance / resolution)
 
-    # Sample angles in front of the robot (±60 degrees from current orientation)
-    angle_range = 120 * (np.pi / 180)  # 120 degrees in radians
+    angles = [deg2rad(angle) for angle in angles_deg]
 
-    # Distribute angles with more density in the middle of the view
-    half_samples = num_samples // 2
+    # Check if we're trying to sample at distances or angles that are incompatible with the FOV
+    h_fov_rad = deg2rad(HORIZONTAL_FOV)
 
-    # Create two sets of angles: one focused in the center, one spread out
-    center_angles = np.linspace(
-        current_yaw - angle_range / 4, current_yaw + angle_range / 4, half_samples
-    )
-
-    wide_angles = np.linspace(
-        current_yaw - angle_range / 2, current_yaw + angle_range / 2, half_samples
-    )
-
-    # Combine both sets
-    angles = np.concatenate([center_angles, wide_angles])
-
-    # Sample distances
-    distances = np.linspace(min_distance, max_distance, 3)  # 3 distances per angle
+    for angle in angles:
+        if abs(angle) > h_fov_rad:
+            print(
+                f"WARNING: Sampling angle ({angle:.2f} rad) exceeds camera FOV ({h_fov_rad:.2f} rad)"
+            )
+            print("Some points may be outside the camera view")
 
     # For each combination of angle and distance
     for angle in angles:
         for distance in distances:
+            # Check if the point would be visible in the camera FOV
+            if not is_point_in_fov(angle, distance):
+                filtered_points += 1
+                continue
+
             # Calculate world coordinates
             point_x = current_x + distance * np.cos(angle)
             point_y = current_y + distance * np.sin(angle)
@@ -261,10 +297,6 @@ def sample_valid_navigation_points(
                 target_theta = angle
                 valid_points_absolute.append((point_x, point_y, target_theta))
                 valid_points_angle_distance.append((angle, distance))
-
-                # Limit the total number of points
-                if len(valid_points_absolute) >= num_samples:
-                    return valid_points_absolute, valid_points_angle_distance
 
     return valid_points_absolute, valid_points_angle_distance
 
