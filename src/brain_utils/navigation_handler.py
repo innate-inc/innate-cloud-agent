@@ -320,7 +320,7 @@ class NavigationHandler:
                 )
 
                 if not is_safe:
-                    self.logger.warning(
+                    self.logger.warn(
                         f"Navigation target at ({navigation_command['x']}, {navigation_command['y']}) "
                         f"is too close to obstacles: {safety_msg}"
                     )
@@ -387,7 +387,7 @@ class NavigationHandler:
             is_safe, safety_msg = self.check_position_safety(new_x, new_y, map_payload)
 
             if not is_safe:
-                self.logger.warning(
+                self.logger.warn(
                     f"Navigation target at ({new_x}, {new_y}) is too close to obstacles: "
                     f"{safety_msg}"
                 )

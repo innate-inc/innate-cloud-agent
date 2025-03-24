@@ -14,20 +14,20 @@ COLORS = {
 }
 
 
-def draw_navigation_point(image, x, y, point_id, circle_radius=20):
+def draw_navigation_point(image, x, y, point_id, circle_radius=12):
     """Draw a single navigation point with ID on the image."""
     # Ensure coordinates are integers
     x, y = int(x), int(y)
 
     # Draw black outline circle
-    cv2.circle(image, (x, y), circle_radius + 2, COLORS["text"], -1)
+    cv2.circle(image, (x, y), circle_radius + 1, COLORS["text"], -1)
 
     # Draw filled circle
     cv2.circle(image, (x, y), circle_radius, COLORS["in_fov"], -1)
 
     # Add number text
-    font_size = 1.0
-    font_thickness = 2
+    font_size = 0.6
+    font_thickness = 1
     text = str(point_id)
     text_size, _ = cv2.getTextSize(
         text, cv2.FONT_HERSHEY_SIMPLEX, font_size, font_thickness
@@ -43,7 +43,7 @@ def draw_navigation_point(image, x, y, point_id, circle_radius=20):
         cv2.FONT_HERSHEY_SIMPLEX,
         font_size,
         COLORS["text"],
-        font_thickness + 2,
+        font_thickness + 1,
     )
     cv2.putText(
         image,
@@ -80,10 +80,10 @@ def draw_robot_on_map(vis_map, robot_x, robot_y, robot_yaw, scale=1):
     robot_x, robot_y = int(robot_x), int(robot_y)
 
     # Draw robot position
-    cv2.circle(vis_map, (robot_x, robot_y), 8 * scale, COLORS["robot"], -1)
+    cv2.circle(vis_map, (robot_x, robot_y), 6 * scale, COLORS["robot"], -1)
 
     # Draw robot orientation
-    orientation_length = 20 * scale
+    orientation_length = 12 * scale
     endpoint_x = int(robot_x + orientation_length * np.cos(robot_yaw))
     endpoint_y = int(robot_y + orientation_length * np.sin(robot_yaw))
     cv2.line(
@@ -91,23 +91,23 @@ def draw_robot_on_map(vis_map, robot_x, robot_y, robot_yaw, scale=1):
         (robot_x, robot_y),
         (endpoint_x, endpoint_y),
         COLORS["robot"],
-        3 * scale,
+        2 * scale,
     )
 
     # Add robot label
     cv2.putText(
         vis_map,
         "Robot",
-        (robot_x + 10 * scale, robot_y - 10 * scale),
+        (robot_x + 8 * scale, robot_y - 8 * scale),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.5 * scale,
+        0.4 * scale,
         COLORS["robot"],
         scale,
     )
 
 
 def create_map_visualization(
-    map_array, robot_pos, navigation_points, map_info, scale_factor=2
+    map_array, robot_pos, navigation_points, map_info, scale_factor=4
 ):
     """
     Create a visualization of the map with robot and navigation points.
@@ -134,27 +134,27 @@ def create_map_visualization(
         # Ensure coordinates are integers
         point_x, point_y = int(point_x), int(point_y)
 
-        # Draw point
-        cv2.circle(vis_map, (point_x, point_y), 6, COLORS["in_fov"], -1)
-        cv2.circle(vis_map, (point_x, point_y), 7, COLORS["text"], 1)
+        # Draw point (smaller circles)
+        cv2.circle(vis_map, (point_x, point_y), 4, COLORS["in_fov"], -1)
+        cv2.circle(vis_map, (point_x, point_y), 5, COLORS["text"], 1)
 
-        # Draw orientation
-        orientation_length = 15
+        # Draw orientation (shorter lines)
+        orientation_length = 10
         endpoint_x = int(point_x + orientation_length * np.cos(point_theta))
         endpoint_y = int(point_y + orientation_length * np.sin(point_theta))
         cv2.line(
-            vis_map, (point_x, point_y), (endpoint_x, endpoint_y), COLORS["in_fov"], 2
+            vis_map, (point_x, point_y), (endpoint_x, endpoint_y), COLORS["in_fov"], 1
         )
 
-        # Add point ID
+        # Add point ID (smaller text, better positioning)
         cv2.putText(
             vis_map,
             str(i + 1),
-            (point_x + 7, point_y),
+            (point_x + 6, point_y - 6),  # Offset label to prevent overlap with point
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
+            0.4,  # Smaller font size
             COLORS["text"],
-            2,
+            1,  # Thinner text
         )
 
     # Scale up the visualization
