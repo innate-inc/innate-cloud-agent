@@ -9,13 +9,26 @@ from ultralytics import YOLO, SAM
 import google.generativeai as genai
 import os
 import math
-
+from typing import Dict, List, Tuple, Union
 
 # Import our Groq helpers (assumed to be defined elsewhere)
 # from orchestrator.agent.groq_instant_use import query_groq_classifier, query_groq_vlm
 
 # Utility to decode depth payload (assumed defined in src/utils.py)
 from src.utils import decode_depth_payload, decode_map_payload
+
+# Constants for the camera and visualization
+HORIZONTAL_FOV = 96.4  # Camera horizontal field of view in degrees
+VERT_FOV = 80.0  # Camera vertical field of view in degrees
+IMAGE_WIDTH = 640
+IMAGE_HEIGHT = 480
+COLORS = {
+    "in_fov": (0, 255, 0),  # Green
+    "out_fov": (0, 0, 255),  # Red
+    "selected": (255, 0, 0),  # Blue
+    "background": (255, 255, 255),  # White
+    "robot": (255, 0, 255),  # Magenta
+}
 
 
 class NavigateInSight(Primitive):
@@ -426,6 +439,7 @@ class NavigateInSight(Primitive):
         max_distance=2.5,
         min_obstacle_distance=0.25,
         num_samples=8,
+        visualize=False,
     ):
         """
         Sample valid navigation points in front of the robot.
@@ -444,16 +458,14 @@ class NavigateInSight(Primitive):
         Returns:
             list: List of valid navigation points as (x, y, theta) tuples in world coordinates
         """
-        import numpy as np
-        import math
-
         # Get map metadata
         resolution = map_info["resolution"]
         origin_x = map_info["origin_x"]
         origin_y = map_info["origin_y"]
 
         # Sample points in a sector in front of the robot
-        valid_points = []
+        valid_points_absolute = []
+        valid_points_angle_distance = []
 
         # Calculate obstacle radius in grid cells
         obstacle_radius = int(min_obstacle_distance / resolution)
@@ -526,59 +538,135 @@ class NavigateInSight(Primitive):
                 if is_valid:
                     # The navigation target will face in the direction from robot to point
                     target_theta = angle
-                    valid_points.append((point_x, point_y, target_theta))
+                    valid_points_absolute.append((point_x, point_y, target_theta))
+                    valid_points_angle_distance.append((angle, distance))
 
                     # Limit the total number of points
-                    if len(valid_points) >= num_samples:
-                        return valid_points
+                    if len(valid_points_absolute) >= num_samples:
+                        return valid_points_absolute, valid_points_angle_distance
 
-        return valid_points
+        return valid_points_absolute, valid_points_angle_distance
 
-    def annotate_navigation_points(self, image, navigation_points, world_to_image_func):
+    def deg2rad(self, deg):
+        return deg * np.pi / 180
+
+    def compute_intrinsics(self, width, height, h_fov_deg, v_fov_deg):
+        h_fov = self.deg2rad(h_fov_deg)
+        v_fov = self.deg2rad(v_fov_deg)
+        f_x = (width / 2) / np.tan(h_fov / 2)
+        f_y = (height / 2) / np.tan(v_fov / 2)
+        c_x = width / 2
+        c_y = height / 2
+        K = np.array([[f_x, 0, c_x], [0, f_y, c_y], [0, 0, 1]])
+        return K
+
+    def compute_homography(self, K, h, pitch_deg):
+        # Convert pitch to radians. We define theta = -pitch so that if pitch>0 (camera looks downward)
+        # then theta is negative.
+        pitch = self.deg2rad(pitch_deg)
+        theta = -pitch
+
+        # Rotation matrix about the x-axis:
+        R = np.array(
+            [
+                [1, 0, 0],
+                [0, np.cos(theta), -np.sin(theta)],
+                [0, np.sin(theta), np.cos(theta)],
+            ]
+        )
+        # Extract columns of R:
+        r1 = R[:, 0]  # [1, 0, 0]
+        r2 = R[:, 1]  # [0, cos(theta), sin(theta)]
+        r3 = R[:, 2]  # [0, -sin(theta), cos(theta)]
+
+        # For ground points (world z=0), the projection is:
+        # p ~ K * [ r1  r2  -h*r3 ] * [x, y, 1]^T.
+        M = np.column_stack((r1, r2, -h * r3))
+        H = K @ M
+        return H
+
+    def project_ground_point(self, H, D, gamma_deg):
+        # Convert gamma from degrees to radians
+        gamma = self.deg2rad(gamma_deg)
+        # Ground point (with origin at camera's vertical projection on the ground)
+        x = D * np.sin(gamma)
+        y = D * np.cos(gamma)
+        ground_pt = np.array([x, y, 1])
+        p = H @ ground_pt
+        u = p[0] / p[2]
+        v = p[1] / p[2]
+        return u, v
+
+    def angle_distance_to_image_coordinates(
+        self,
+        angle,
+        distance,
+    ):
         """
-        Annotate an image with navigation points.
+        Convert angle and distance to image coordinates using proper camera projection.
+
+        Args:
+            angle (float): Angle in radians relative to robot's forward direction
+            distance (float): Distance in meters
+            horizontal_fov (float): Horizontal field of view in degrees
+
+        Returns:
+            tuple: (x, y) coordinates in the image
+        """
+        # Camera parameters (defined at top of file)
+        width = IMAGE_WIDTH
+        height = IMAGE_HEIGHT
+        h_fov_deg = HORIZONTAL_FOV
+        v_fov_deg = VERT_FOV
+        h_cam = 20  # camera height in centimeters
+        pitch_deg = 90  # camera from the ground (90 is looking straight forward)
+
+        # Compute camera intrinsics and homography
+        K = self.compute_intrinsics(width, height, h_fov_deg, v_fov_deg)
+        H = self.compute_homography(K, h_cam, pitch_deg)
+
+        # Convert angle to degrees and distance to centimeters
+        angle_deg = np.degrees(angle)
+        distance_cm = distance * 100  # convert meters to centimeters
+
+        # Project the point
+        u, v = self.project_ground_point(H, distance_cm, angle_deg)
+
+        # Ensure coordinates are within image bounds
+        u = max(0, min(width - 1, u))
+        v = max(0, min(height - 1, v))
+
+        return (int(u), int(v))
+
+    def annotate_navigation_points(self, image, navigation_points):
+        """
+        Annotate an image with navigation points based on their angle and distance.
 
         Args:
             image (numpy.ndarray): The image to annotate
-            navigation_points (list): List of (x, y, theta) tuples in world coordinates
-            world_to_image_func (callable): Function to convert world coordinates to image coordinates
+            navigation_points (list): List of (angle, distance) tuples
 
         Returns:
             numpy.ndarray: The annotated image
-            dict: Mapping from point IDs to world coordinates
+            dict: Mapping from point IDs to navigation parameters
         """
         # Create a copy of the image for annotation
         annotated_img = image.copy()
 
-        # Create a mapping from point IDs to world coordinates
-        point_mapping = {}
-
-        for i, (point_x, point_y, point_theta) in enumerate(navigation_points):
-            # Convert world coordinates to image coordinates
-            img_x, img_y = world_to_image_func(point_x, point_y)
-
-            # Skip points outside the image
-            if (
-                img_x < 0
-                or img_x >= image.shape[1]
-                or img_y < 0
-                or img_y >= image.shape[0]
-            ):
-                continue
+        # Process each navigation point
+        for i, (angle, distance) in enumerate(navigation_points):
+            # Convert to image coordinates
+            img_x, img_y = self.angle_distance_to_image_coordinates(angle, distance)
 
             # Generate point ID (1-based)
             point_id = i + 1
 
             # Store point in mapping
-            point_mapping[str(point_id)] = {
-                "x": point_x,
-                "y": point_y,
-                "theta": point_theta,
-            }
-
-            # Draw point with number - larger and more visible
-            # First draw a thick black circle for contrast
+            circle_color = COLORS["in_fov"]  # Green fill
+            text_color = COLORS["background"]  # White text
             circle_radius = 20
+
+            # Draw black outline circle
             cv2.circle(
                 annotated_img,
                 (int(img_x), int(img_y)),
@@ -587,12 +675,16 @@ class NavigateInSight(Primitive):
                 -1,
             )
 
-            # Then draw the green circle
+            # Draw filled circle
             cv2.circle(
-                annotated_img, (int(img_x), int(img_y)), circle_radius, (0, 255, 0), -1
+                annotated_img,
+                (int(img_x), int(img_y)),
+                circle_radius,
+                circle_color,
+                -1,
             )
 
-            # Add number text with better visibility
+            # Add number text
             font_size = 1.0
             font_thickness = 2
             text = str(point_id)
@@ -602,7 +694,7 @@ class NavigateInSight(Primitive):
             text_x = int(img_x - text_size[0] / 2)
             text_y = int(img_y + text_size[1] / 2)
 
-            # Draw text with black outline for better visibility
+            # Draw number with outline
             cv2.putText(
                 annotated_img,
                 text,
@@ -619,90 +711,11 @@ class NavigateInSight(Primitive):
                 (text_x, text_y),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 font_size,
-                (255, 255, 255),
+                text_color,
                 font_thickness,
             )
 
-        # Add a title with the target description
-        cv2.putText(
-            annotated_img,
-            "Navigation Points (Camera View)",
-            (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            (0, 0, 255),
-            2,
-        )
-
-        return annotated_img, point_mapping
-
-    def world_to_image_coordinates(
-        self,
-        world_x,
-        world_y,
-        depth_array,
-        current_x,
-        current_y,
-        current_yaw,
-        horizontal_fov,
-        vertical_fov,
-    ):
-        """
-        Convert world coordinates to image coordinates.
-
-        Args:
-            world_x, world_y: World coordinates to convert
-            depth_array: The depth array from the camera
-            current_x, current_y, current_yaw: Robot position and orientation
-            horizontal_fov, vertical_fov: Camera field of view in degrees
-
-        Returns:
-            tuple: (image_x, image_y) coordinates or (-1, -1) if not in view
-        """
-        # Get image dimensions
-        if depth_array is not None:
-            height, width = depth_array.shape[:2]
-        else:
-            # Default fallback dimensions
-            height, width = 480, 640
-
-        # Calculate relative position from robot
-        dx = world_x - current_x
-        dy = world_y - current_y
-
-        # Calculate distance and angle from robot to point
-        distance = math.sqrt(dx * dx + dy * dy)
-        point_angle = math.atan2(dy, dx)
-
-        # Calculate angle relative to robot's heading
-        relative_angle = point_angle - current_yaw
-
-        # Normalize to [-pi, pi]
-        while relative_angle > math.pi:
-            relative_angle -= 2 * math.pi
-        while relative_angle < -math.pi:
-            relative_angle += 2 * math.pi
-
-        # Check if point is in the field of view
-        if abs(relative_angle) > math.radians(horizontal_fov / 2):
-            return -1, -1  # Point not in view
-
-        # Calculate image coordinates
-        # X coordinate: map from [-hfov/2, hfov/2] to [0, width]
-        img_x = (
-            (relative_angle + math.radians(horizontal_fov / 2))
-            / math.radians(horizontal_fov)
-            * width
-        )
-
-        # Rough approximation for Y coordinate based on distance
-        # Further objects appear higher in image
-        vertical_angle_range = math.radians(vertical_fov)
-        # Adjust this factor as needed based on testing
-        distance_factor = 0.8
-        img_y = height * (1 - distance_factor * distance / 5.0)
-
-        return img_x, img_y
+        return annotated_img
 
     def visualize_map_with_navigation_points(
         self, map_array, map_info, current_x, current_y, current_yaw, navigation_points
@@ -947,15 +960,8 @@ class NavigateInSight(Primitive):
             print(f"Exception decoding image: {e}")
             return "Image decode error", False, None
 
-        # Process the depth payload.
-        depth_array = None
-        try:
-            depth_array = decode_depth_payload(self.depth_payload)
-        except Exception as e:
-            print(f"Failed to decode depth payload: {e}")
-
         # Sample valid navigation points
-        navigation_points = self.sample_valid_navigation_points(
+        result = self.sample_valid_navigation_points(
             self.current_x,
             self.current_y,
             self.current_yaw,
@@ -965,13 +971,17 @@ class NavigateInSight(Primitive):
             max_distance=2.5,
             min_obstacle_distance=0.25,
             num_samples=8,
+            visualize=True,
         )
 
-        if not navigation_points:
-            return "Could not find any valid navigation points", False, None
+        # Unpack the tuple of absolute points and angle-distance points
+        navigation_points_absolute, navigation_points_angle_distance = result
 
         # Create directory for navigation images if it doesn't exist
         os.makedirs("navigation_points", exist_ok=True)
+
+        if not navigation_points_angle_distance:
+            return "Could not find any valid navigation points", False, None
 
         # Create and save map visualization with navigation points
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -981,26 +991,15 @@ class NavigateInSight(Primitive):
             self.current_x,
             self.current_y,
             self.current_yaw,
-            navigation_points,
+            navigation_points_absolute,
         )
         map_vis_path = f"navigation_points/map_with_points_{timestamp}.jpg"
         cv2.imwrite(map_vis_path, map_vis)
         print(f"Saved map visualization to {map_vis_path}")
 
         # Annotate the image with navigation points
-        annotated_image, point_mapping = self.annotate_navigation_points(
-            cv_image,
-            navigation_points,
-            lambda x, y: self.world_to_image_coordinates(
-                x,
-                y,
-                depth_array,
-                self.current_x,
-                self.current_y,
-                self.current_yaw,
-                self.horizontal_fov,
-                self.vertical_fov,
-            ),
+        annotated_image = self.annotate_navigation_points(
+            cv_image, navigation_points_angle_distance
         )
 
         # Save the annotated image
@@ -1008,15 +1007,28 @@ class NavigateInSight(Primitive):
         cv2.imwrite(annotated_image_path, annotated_image)
         print(f"Saved annotated camera image to {annotated_image_path}")
 
+        point_mapping = {}  # TBD later
+
         # If there's only one valid point, just use that
         if len(point_mapping) == 1:
             selected_point_id = list(point_mapping.keys())[0]
-            selected_point = point_mapping[selected_point_id]
+            selected_angle, selected_distance = point_mapping[selected_point_id][
+                "angle_distance"
+            ]
+
+            # Convert to world coordinates for the navigation command
+            selected_x = self.current_x + selected_distance * math.cos(
+                self.current_yaw + selected_angle
+            )
+            selected_y = self.current_y + selected_distance * math.sin(
+                self.current_yaw + selected_angle
+            )
+            selected_theta = self.current_yaw  # Maintain the same orientation
 
             navigation_command = {
-                "x": selected_point["x"],
-                "y": selected_point["y"],
-                "theta": selected_point["theta"],
+                "x": selected_x,
+                "y": selected_y,
+                "theta": selected_theta,
             }
 
             print(
