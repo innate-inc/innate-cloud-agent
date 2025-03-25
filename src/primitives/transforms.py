@@ -122,4 +122,7 @@ def create_type_builder(primitives: list[PrimitiveDefinition]) -> TypeBuilder:
     tb.VisionAgentOutput.add_property("next_task", union_next_task).description(
         "List of the tasks the agent can perform."
     )
+    tb.NewVisionAgentOutput.add_property("next_task", union_next_task).description(
+        "List of the tasks the agent can perform."
+    )
     return tb

@@ -1,4 +1,4 @@
-from typing import Optional, Literal, Dict, Any
+from typing import Optional, Literal
 from baml_py import Image
 from baml_py.errors import BamlValidationError, BamlClientError
 from src.baml_client import b
@@ -7,7 +7,6 @@ from src.agents.types import VisionAgentInput
 from src.baml_client.types import VisionAgentOutput, NewVisionAgentOutput
 from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlClientError
 import asyncio
-from pydantic import BaseModel
 
 
 FLASH_EXECUTION_TIMEOUT = 3
@@ -304,7 +303,7 @@ async def decreasesmax_retries(
 
 
 def convert_new_output_to_vision_output(
-    new_output: Dict[str, Any],
+    new_output: NewVisionAgentOutput,
 ) -> VisionAgentOutput:
     """
     Converts a NewVisionAgentOutput to VisionAgentOutput.
@@ -316,19 +315,19 @@ def convert_new_output_to_vision_output(
         VisionAgentOutput: The converted output.
     """
     # Extract next_task from new_output if it exists
-    next_task = new_output.get("next_task")
+    next_task = new_output.next_task
 
     # Map action_decision to stop_current_task
-    action_decision = new_output.get("action_decision", "continue")
+    action_decision = new_output.action_decision
     stop_current_task = action_decision in ["stop_task", "change_task"]
 
     # Create VisionAgentOutput
     return VisionAgentOutput(
         stop_current_task=stop_current_task,
-        observation=new_output.get("current_observation", ""),
-        thoughts=new_output.get("current_thoughts", ""),
+        observation=new_output.current_observation,
+        thoughts=new_output.current_thoughts,
         new_goal=None,  # No direct mapping for new_goal
         next_task=next_task,
         anticipation=None,  # No direct mapping for anticipation
-        to_tell_user=new_output.get("to_tell_user"),
+        to_tell_user=new_output.to_tell_user,
     )
