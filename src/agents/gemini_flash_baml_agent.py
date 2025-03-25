@@ -227,10 +227,13 @@ async def decreasesmax_retries(
             attempt + 1,
         )
     except BamlClientError as e:
-        error_msg = f"BamlClientError on attempt {attempt}/{max_retries}: {e}"
-        print(f"\033[1;31m{error_msg}\033[0m")
+
+        def error_msg(e):
+            return f"\033[1;31mBamlClientError on attempt {attempt}/{max_retries}: {e}\033[0m"
+
         if "hyper_util::client::legacy::Error(Connect, TimedOut)" in str(e):
             # For timeout errors, retry
+            print(error_msg("Timeout"))
             if attempt < max_retries:
                 await asyncio.sleep(1)
                 return await decreasesmax_retries(
@@ -251,6 +254,28 @@ async def decreasesmax_retries(
                 )
         if "hyper_util::client::legacy::Error(Connect, Ssl(Error" in str(e):
             # For SSL errors, retry
+            print(error_msg("SSL Error"))
+            if attempt < max_retries:
+                await asyncio.sleep(1)
+                return await decreasesmax_retries(
+                    img,
+                    context_text,
+                    primitives_list_string,
+                    tb,
+                    max_retries,
+                    agent_variant,
+                    attempt + 1,
+                )
+            else:
+                # If we've reached max retries, raise the MaxRetriesExceededException
+                raise MaxRetriesExceededException(
+                    agent_type=f"gemini_flash_{agent_variant}",
+                    max_retries=max_retries,
+                    last_error=e,
+                )
+        if "503" in str(e):
+            # For 503 errors, retry
+            print(error_msg("503 Error"))
             if attempt < max_retries:
                 await asyncio.sleep(1)
                 return await decreasesmax_retries(
@@ -271,6 +296,7 @@ async def decreasesmax_retries(
                 )
         else:
             # For other client errors, raise a specific exception
+            print(error_msg(str(e)))
             raise UnforeseenBamlClientError(
                 f"Unforeseen BamlClientError on attempt {attempt}/{max_retries}: {e}",
                 original_error=e,
