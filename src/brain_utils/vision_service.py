@@ -106,16 +106,16 @@ class VisionService:
         except MaxRetriesExceededException as e:
             # Handle the max retries exceeded exception specifically
             self.logger.error(
-                f"Maximum retries exceeded for {e.agent_type} vision model: {e}"
+                f"Maximum retries exceeded for {e.agent_type} vision model."
             )
             return VisionAgentOutput(
-                stop_current_task=False,
+                stop_current_task=True,
                 observation=(
                     "The brain failed after multiple attempts, "
                     "so it stopped the current task."
                 ),
                 thoughts=(
-                    f"Maximum retries exceeded: {str(e)}\n"
+                    f"Maximum retries exceeded. "
                     f"The {e.agent_type} vision agent failed to produce a valid "
                     f"response after {e.max_retries} attempts."
                 ),
@@ -151,7 +151,9 @@ class VisionService:
             )
         except Exception as e:
             # Handle other exceptions
-            self.logger.error(f"Error calling {agent_type.value} vision model: {e}")
+            self.logger.error(
+                f"Error calling {agent_type.value} vision model: {e}, traceback: {traceback.format_exc()}"
+            )
             return VisionAgentOutput(
                 stop_current_task=True,
                 observation="The brain failed, so it stopped the current task.",

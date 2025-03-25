@@ -71,7 +71,7 @@ class NavigationHandler:
 
                 if not is_safe:
                     self.logger.warn(
-                        f"Navigation target at ({navigation_command['x']}, {navigation_command['y']}) "
+                        f"Navigation (in sight) target at ({navigation_command['x']}, {navigation_command['y']}) "
                         f"is too close to obstacles: {safety_msg}"
                     )
                     # If not safe, update the vision output to reflect the safety issue
@@ -321,7 +321,7 @@ class NavigationHandler:
 
                 if not is_safe:
                     self.logger.warn(
-                        f"Navigation target at ({navigation_command['x']}, {navigation_command['y']}) "
+                        f"Navigation (through memory) target at ({navigation_command['x']}, {navigation_command['y']}) "
                         f"is too close to obstacles: {safety_msg}"
                     )
                     # If not safe, update the vision output to reflect the safety issue
@@ -388,7 +388,7 @@ class NavigationHandler:
 
             if not is_safe:
                 self.logger.warn(
-                    f"Navigation target at ({new_x}, {new_y}) is too close to obstacles: "
+                    f"Navigation (turn and move) target at ({new_x}, {new_y}) is too close to obstacles: "
                     f"{safety_msg}"
                 )
                 # If not safe, update the vision output to reflect the safety issue
