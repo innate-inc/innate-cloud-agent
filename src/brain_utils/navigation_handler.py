@@ -271,9 +271,9 @@ class NavigationHandler:
             os.makedirs("safety_checks", exist_ok=True)
             vis_img.save("safety_checks/safety_check.png")
 
-            self.logger.info(
-                "Saved safety check visualization to safety_checks/safety_check.png"
-            )
+            # self.logger.info(
+            #     "Saved safety check visualization to safety_checks/safety_check.png"
+            # )
 
         except Exception as e:
             self.logger.error(f"Error creating safety visualization: {e}")

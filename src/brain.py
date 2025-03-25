@@ -112,8 +112,13 @@ class Brain:
 
             if message_type == MessageInType.IMAGE:
                 vision_output = await self.handle_image(message)
+                task_and_id = (
+                    f"{vision_output.next_task.name} (id: {vision_output.next_task.primitive_id})"
+                    if vision_output.next_task
+                    else "None"
+                )
                 self.logger.info(
-                    f"Processed image message in {time.time() - time_start} seconds, sent task: {vision_output.next_task.name if vision_output.next_task else 'None'}\n"
+                    f"Processed image message in {time.time() - time_start} seconds, sent task: {task_and_id}\n"
                 )
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)

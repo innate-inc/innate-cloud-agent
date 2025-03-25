@@ -4,7 +4,7 @@ from typing import Union
 
 from src.agents.baml_agent import vision_agent
 from src.agents.gemini_flash_baml_agent import gemini_vision_agent
-from src.agents.types import VisionAgentInput
+from src.agents.types import PrimitiveDefinition, VisionAgentInput
 from src.baml_client.types import VisionAgentOutput
 from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlClientError
 from src.primitives.transforms import primitive_to_object
@@ -23,7 +23,7 @@ class VisionService:
         self,
         base64_img,
         user_prompt_text,
-        primitive_in_execution,
+        primitive_in_execution: Union[PrimitiveDefinition, None],
         primitives_list,
         history_as_string,
         robot_coords,
@@ -57,7 +57,7 @@ class VisionService:
             self.logger.info(
                 f"Calling {agent_name} vision model while current primitive is "
                 + (
-                    f"\033[1;34m{current_primitive}\033[0m"
+                    f"\033[1;34m{current_primitive} (id: {primitive_in_execution.primitive_id})\033[0m"
                     if current_primitive != "None"
                     else current_primitive
                 )

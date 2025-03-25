@@ -220,9 +220,6 @@ class PoseGraphMemory:
             )
             message_parts.append(base_assistant_text)
 
-            print(f"MVLA: Base prompt: {base_assistant_text}")
-            print(f"MVLA: Number of nodes in graph: {len(graph.nodes)}")
-
             # Add images to the prompt
             for idx, (node_id, node_data) in enumerate(graph.nodes(data=True)):
                 frame_num = idx + 1
@@ -253,7 +250,7 @@ class PoseGraphMemory:
                     images_not_found.append(image_path)
 
             if images_not_found:
-                print(f"MVLA: Images not found: {images_not_found}")
+                pass  # print(f"MVLA: Images not found: {images_not_found}")
 
             # Final question - improved to be more explicit
             last_message = (
@@ -265,7 +262,6 @@ class PoseGraphMemory:
                 f'For example: {{"frame_number": 2}} if Frame 2 is the best match.'
             )
             message_parts.append(last_message)
-            print(f"MVLA: Final question: {last_message}")
 
             # Call Gemini model
             response = self.gemini_model.generate_content(message_parts)
