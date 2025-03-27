@@ -337,9 +337,9 @@ class Brain:
         self.history.add(
             HistoryEntryType.VISION_AGENT_OUTPUT,
             description=(
-                str(vision_output_to_write_in_history.model_dump())
+                json.dumps(vision_output_to_write_in_history.model_dump())
                 if vision_output_to_write_in_history
-                else str(vision_output.model_dump())
+                else json.dumps(vision_output.model_dump())
             ),
         )
 

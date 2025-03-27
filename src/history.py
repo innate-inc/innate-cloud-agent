@@ -128,7 +128,8 @@ class History:
                                     "timestamp": entry.timestamp,
                                 }
                             )
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e:
+                    print(f"Error decoding JSON: {e}")
                     display_entries.append(
                         {
                             "type": entry.type,
