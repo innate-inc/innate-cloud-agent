@@ -336,10 +336,10 @@ class Brain:
         # Record the vision agent output in the history.
         self.history.add(
             HistoryEntryType.VISION_AGENT_OUTPUT,
-            description=json.dumps(
-                vision_output_to_write_in_history.model_dump()
+            description=(
+                str(vision_output_to_write_in_history.model_dump())
                 if vision_output_to_write_in_history
-                else vision_output.model_dump()
+                else str(vision_output.model_dump())
             ),
         )
 
@@ -531,7 +531,7 @@ class Brain:
         self.latest_user_message = text
 
         # Record this chat message in the history.
-        self.history.add(HistoryEntryType.CHAT_MESSAGE, description=text)
+        self.history.add(HistoryEntryType.AUDIO_IN, description=text)
 
     async def handle_primitive_completed(self, message: MessageIn):
         """
