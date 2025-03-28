@@ -1,6 +1,6 @@
 from enum import Enum
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 from datetime import datetime, timezone
 import os
 import json
@@ -13,6 +13,9 @@ class HistoryEntryType(Enum):
     VISION_AGENT_OUTPUT = "vision_agent_output"
     HISTORY_SUMMARY = "history_summary"
     SYSTEM_MESSAGE = "system_message"
+    TASK_ACTIVATED = "task_activated"
+    TASK_INTERRUPTED = "task_interrupted"
+    TASK_CANCELLED = "task_cancelled"
 
 
 # Internal display types for formatting vision agent outputs
@@ -20,6 +23,14 @@ class DisplayEntryType(Enum):
     OBSERVATION = "observation"
     THOUGHTS = "thoughts"
     ANTICIPATION = "anticipation"
+    AUDIO_IN = "audio_in"
+    AUDIO_OUT = "audio_out"
+    SYSTEM_MESSAGE = "system_message"
+    NEXT_TASK_DECIDED = "next_task_decided"
+    TASK_ACTIVATED = "task_activated"
+    TASK_INTERRUPTED = "task_interrupted"
+    TASK_CANCELLED = "task_cancelled"
+    HISTORY_SUMMARY = "history_summary"
 
 
 class HistoryEntry(BaseModel):
@@ -95,9 +106,9 @@ class History:
         term_width = 80  # Standard terminal width
 
         # Get only the latest 50 entries
-        latest_entries = self.entries[-50:] if len(self.entries) > 50 else self.entries
+        latest_entries = self.entries
 
-        # First, process all entries into display entries
+        # First loop: Convert entries to display entries
         display_entries = []
         for entry in latest_entries:
             if entry.type == HistoryEntryType.VISION_AGENT_OUTPUT:
@@ -128,42 +139,68 @@ class History:
                                     "timestamp": entry.timestamp,
                                 }
                             )
-                except json.JSONDecodeError as e:
-                    print(f"Error decoding JSON: {e}")
+                        if "next_task" in data and data["next_task"]:
+                            task = data["next_task"]
+                            task_name = task["name"]
+                            task_inputs = task["inputs"]
+                            message = f"Next task decided: {task_name} with inputs: {task_inputs}"
+                            display_entries.append(
+                                {
+                                    "type": DisplayEntryType.NEXT_TASK_DECIDED,
+                                    "message": message,
+                                    "timestamp": entry.timestamp,
+                                }
+                            )
+                except json.JSONDecodeError:
                     display_entries.append(
                         {
-                            "type": entry.type,
+                            "type": DisplayEntryType.SYSTEM_MESSAGE,
                             "message": entry.description,
                             "timestamp": entry.timestamp,
                         }
                     )
             else:
+                # Map HistoryEntryType to DisplayEntryType
+                display_type = DisplayEntryType(entry.type.value)
                 display_entries.append(
                     {
-                        "type": entry.type,
+                        "type": display_type,
                         "message": entry.description,
                         "timestamp": entry.timestamp,
                     }
                 )
 
-        # Track last values for each type
+        # Function to preprocess messages for comparison
+        def preprocess_message(message: str) -> str:
+            """Normalize message by trimming whitespace and converting to lowercase."""
+            return message.strip().lower()
+
+        # Second loop: Deduplicate entries
+        deduplicated_entries = []
         last_values: Dict[Any, str] = {}
-
-        # Format and display entries, skipping duplicates
         for entry in display_entries:
-            # Skip if this type's message hasn't changed
-            if entry["message"] == last_values.get(entry["type"]):
-                continue
+            processed_message = preprocess_message(entry["message"])
+            processed_last_message = (
+                preprocess_message(last_values.get(entry["type"], ""))
+                if entry["type"] in last_values
+                else ""
+            )
 
-            # Update last value for this type
-            last_values[entry["type"]] = entry["message"]
+            if processed_message != processed_last_message:
+                # Add processed message to the entry for future reference
+                entry["processed_message"] = processed_message
+                deduplicated_entries.append(entry)
+                last_values[entry["type"]] = entry["message"]
 
+        # Third loop: Format and display entries
+        for entry in deduplicated_entries:
+            suffix = ""
             # Format the entry based on its type
-            if entry["type"] == HistoryEntryType.SYSTEM_MESSAGE:
+            if entry["type"] == DisplayEntryType.SYSTEM_MESSAGE:
                 prefix = "System:"
-            elif entry["type"] == HistoryEntryType.AUDIO_IN:
+            elif entry["type"] == DisplayEntryType.AUDIO_IN:
                 prefix = "Audio In:"
-            elif entry["type"] == HistoryEntryType.AUDIO_OUT:
+            elif entry["type"] == DisplayEntryType.AUDIO_OUT:
                 prefix = "Audio Out:"
             elif entry["type"] == DisplayEntryType.OBSERVATION:
                 prefix = "Observation:"
@@ -171,6 +208,17 @@ class History:
                 prefix = "Thoughts:"
             elif entry["type"] == DisplayEntryType.ANTICIPATION:
                 prefix = "Anticipation:"
+            elif entry["type"] == DisplayEntryType.TASK_ACTIVATED:
+                prefix = "Task Activated:"
+            elif entry["type"] == DisplayEntryType.TASK_INTERRUPTED:
+                prefix = "Task Interrupted:"
+            elif entry["type"] == DisplayEntryType.TASK_CANCELLED:
+                prefix = "Task Cancelled:"
+            elif entry["type"] == DisplayEntryType.HISTORY_SUMMARY:
+                prefix = "Summary:"
+            elif entry["type"] == DisplayEntryType.NEXT_TASK_DECIDED:
+                prefix = "Next Task Decided:"
+                suffix = f" I am waiting for confirmation this task gets activated, after which I should be aware that it is running until cancelled, interrupted, or completed."
             else:
                 prefix = f"{entry['type'].value}:"
 
@@ -192,7 +240,7 @@ class History:
 
             # Add the line
             lines.append(
-                f"{time_str:>{time_col}} | {prefix:<{prefix_col}} {entry['message']}"
+                f"{time_str:>{time_col}} | {prefix:<{prefix_col}} {entry['message']}{suffix}"
             )
 
         # Add a separator line before the current time

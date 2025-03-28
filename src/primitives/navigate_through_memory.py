@@ -252,6 +252,8 @@ class PoseGraphMemory:
             if images_not_found:
                 pass  # print(f"MVLA: Images not found: {images_not_found}")
 
+            print(f"Calling MVLA with {len(message_parts) // 2} images")
+
             # Final question - improved to be more explicit
             last_message = (
                 f'Based on these images, which frame best matches this description: "{description}"? '
@@ -272,7 +274,7 @@ class PoseGraphMemory:
                 response_json = json.loads(response_text)
                 frame_number = response_json.get("frame_number")
 
-                print(f": Frame number from response: {frame_number}")
+                print(f"Frame number from response: {frame_number}")
 
                 if frame_number and frame_number in frame_to_node_id:
                     node_id = frame_to_node_id[frame_number]
