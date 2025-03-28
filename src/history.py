@@ -9,7 +9,6 @@ import json
 # Define history entry types – here we include only entries that are relevant.
 class HistoryEntryType(Enum):
     AUDIO_IN = "audio_in"
-    AUDIO_OUT = "audio_out"
     VISION_AGENT_OUTPUT = "vision_agent_output"
     HISTORY_SUMMARY = "history_summary"
     SYSTEM_MESSAGE = "system_message"
@@ -39,6 +38,10 @@ class HistoryEntry(BaseModel):
     description: str
 
 
+def get_now():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 class History:
     MAX_HISTORY_LENGTH = 40
     NUM_HISTORY_TO_SUMMARIZE = 20
@@ -49,14 +52,14 @@ class History:
         self.non_summarized_entries: List[HistoryEntry] = []
         # Simple list for tracking discrepancies as timestamped strings
         self.discrepancies: List[Dict[str, Any]] = []
-        self.history_start_time = datetime.now(timezone.utc)
+        self.history_start_time = get_now()
         self.is_summarizing = False
 
     def reset(self):
         """Reset the history to an empty state."""
         self.entries = []
         self.discrepancies = []
-        self.history_start_time = datetime.now(timezone.utc)
+        self.history_start_time = get_now()
         self.is_summarizing = False
 
     def add(
@@ -65,7 +68,7 @@ class History:
         description: str,
     ):
         entry = HistoryEntry(
-            timestamp=datetime.now(),
+            timestamp=get_now(),
             type=entry_type,
             description=description,
         )
@@ -87,7 +90,7 @@ class History:
         print(f"\033[33mRecording discrepancy: {message}\033[0m")
 
         discrepancy = {
-            "timestamp": datetime.now(),
+            "timestamp": get_now(),
             "message": message,
         }
 
@@ -101,7 +104,7 @@ class History:
         return (words / 150) * 60  # Convert to seconds
 
     def get_as_string(self) -> str:
-        now = datetime.now()
+        now = get_now()
         lines = []
         term_width = 80  # Standard terminal width
 
@@ -147,6 +150,15 @@ class History:
                             display_entries.append(
                                 {
                                     "type": DisplayEntryType.NEXT_TASK_DECIDED,
+                                    "message": message,
+                                    "timestamp": entry.timestamp,
+                                }
+                            )
+                        if "to_tell_user" in data and data["to_tell_user"]:
+                            message = f"To tell user: {data['to_tell_user']}"
+                            display_entries.append(
+                                {
+                                    "type": DisplayEntryType.AUDIO_OUT,
                                     "message": message,
                                     "timestamp": entry.timestamp,
                                 }
@@ -202,6 +214,20 @@ class History:
                 prefix = "Audio In:"
             elif entry["type"] == DisplayEntryType.AUDIO_OUT:
                 prefix = "Audio Out:"
+
+                # Determine if we have spoken the message.
+                time_since_started_speaking = now - entry["timestamp"]
+
+                if (
+                    time_since_started_speaking.total_seconds()
+                    > self.estimate_speech_duration(entry["message"])
+                ):
+                    suffix = ""
+                else:
+                    suffix = (
+                        " || STILL SPEAKING, I SHOULD NOT REPEAT A SIMILAR MESSAGE. "
+                    )
+
             elif entry["type"] == DisplayEntryType.OBSERVATION:
                 prefix = "Observation:"
             elif entry["type"] == DisplayEntryType.THOUGHTS:
@@ -270,7 +296,7 @@ class History:
 
     #         # Replace the summarized block with a summary entry.
     #         summary_entry = HistoryEntry(
-    #             timestamp=datetime.now(),
+    #             timestamp=get_now(),
     #             type=HistoryEntryType.HISTORY_SUMMARY,
     #             description=summary,
     #         )
