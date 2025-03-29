@@ -551,7 +551,7 @@ class Brain:
             )
             # Use system message type for completion
             self.history.add(
-                HistoryEntryType.SYSTEM_MESSAGE,
+                HistoryEntryType.TASK_COMPLETED,
                 description=f"Task '{self.primitive_in_execution.name}' completed.",
             )
             self.primitive_in_execution = None

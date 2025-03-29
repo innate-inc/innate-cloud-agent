@@ -15,6 +15,7 @@ class HistoryEntryType(Enum):
     TASK_ACTIVATED = "task_activated"
     TASK_INTERRUPTED = "task_interrupted"
     TASK_CANCELLED = "task_cancelled"
+    TASK_COMPLETED = "task_completed"
 
 
 # Internal display types for formatting vision agent outputs
@@ -29,6 +30,7 @@ class DisplayEntryType(Enum):
     TASK_ACTIVATED = "task_activated"
     TASK_INTERRUPTED = "task_interrupted"
     TASK_CANCELLED = "task_cancelled"
+    TASK_COMPLETED = "task_completed"
     HISTORY_SUMMARY = "history_summary"
 
 
@@ -188,21 +190,35 @@ class History:
             return message.strip().lower()
 
         # Second loop: Deduplicate entries
+        # Don't deduplicate task status messages, system messages, or audio messages.
         deduplicated_entries = []
         last_values: Dict[Any, str] = {}
         for entry in display_entries:
-            processed_message = preprocess_message(entry["message"])
-            processed_last_message = (
-                preprocess_message(last_values.get(entry["type"], ""))
-                if entry["type"] in last_values
-                else ""
-            )
-
-            if processed_message != processed_last_message:
-                # Add processed message to the entry for future reference
-                entry["processed_message"] = processed_message
+            if entry["type"] in [
+                DisplayEntryType.TASK_ACTIVATED,
+                DisplayEntryType.TASK_INTERRUPTED,
+                DisplayEntryType.TASK_CANCELLED,
+                DisplayEntryType.TASK_COMPLETED,
+                DisplayEntryType.SYSTEM_MESSAGE,
+                DisplayEntryType.AUDIO_IN,
+                DisplayEntryType.AUDIO_OUT,
+                DisplayEntryType.HISTORY_SUMMARY,
+            ]:
+                entry["processed_message"] = entry["message"]
                 deduplicated_entries.append(entry)
-                last_values[entry["type"]] = entry["message"]
+            else:
+                processed_message = preprocess_message(entry["message"])
+                processed_last_message = (
+                    preprocess_message(last_values.get(entry["type"], ""))
+                    if entry["type"] in last_values
+                    else ""
+                )
+
+                if processed_message != processed_last_message:
+                    # Add processed message to the entry for future reference
+                    entry["processed_message"] = processed_message
+                    deduplicated_entries.append(entry)
+                    last_values[entry["type"]] = entry["message"]
 
         # Third loop: Format and display entries
         for entry in deduplicated_entries:
