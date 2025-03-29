@@ -14,15 +14,12 @@ def load_history_from_file(file_path):
         timestamp = datetime.fromisoformat(entry_data["timestamp"])
         # Convert the string type back to enum, handling both old and new type names
         type_str = entry_data["type"]
-        if type_str == "chat_message":
-            type_str = "audio_in"  # Convert old type to new type
         entry_type = HistoryEntryType(type_str)
 
         entry = HistoryEntry(
             timestamp=timestamp,
             type=entry_type,
             description=entry_data["description"],
-            users_implicated=entry_data.get("users_implicated", []),
         )
         history.entries.append(entry)
 
@@ -34,7 +31,7 @@ def main():
     import os
     import glob
 
-    history_files = glob.glob("histories/history_20250328_183528.json")
+    history_files = glob.glob("histories/history_20250329_000024.json")
     if not history_files:
         print("No history files found in the histories folder!")
         return
