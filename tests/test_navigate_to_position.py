@@ -13,9 +13,10 @@ from dotenv import load_dotenv
 # Add the src directory to the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Load the environment variables
+# Load the environment variables first if needed for subsequent imports
 load_dotenv()
 
+# Import connection_handler from run_server (local application import)
 from run_server import connection_handler
 
 
@@ -57,7 +58,7 @@ async def basic_image_handling(
     """
     Opens an image from a local file, reduces its dimensions by half,
     encodes it in base64, and sends it over the provided websocket.
-    Also includes mock depth payload and robot coordinates.
+    Also includes mock depth payload, mock map payload, and robot coordinates.
     """
     with open(image_path, "rb") as img_file:
         image_bytes = img_file.read()
@@ -86,6 +87,19 @@ async def basic_image_handling(
     depth_bytes = depth_data.tobytes()
     depth_b64 = base64.b64encode(depth_bytes).decode("utf-8")
 
+    # Create mock map data (e.g., a 50x50 grid, all free space '0')
+    map_width = 50
+    map_height = 50
+    map_resolution = 0.1  # 0.1 meters per pixel
+    map_origin_x = -2.5  # Map origin x, adjusted for larger map size
+    map_origin_y = -2.5  # Map origin y, adjusted for larger map size
+    map_origin_z = 0.0  # Map origin z in world coordinates (assuming flat)
+    map_origin_yaw = 0.0  # Map origin yaw in world coordinates (assuming no rotation)
+    map_frame_id = "map"  # Coordinate frame ID
+    map_data = np.zeros((map_height, map_width), dtype=np.int8)  # 0 for free space
+    map_bytes = map_data.tobytes()
+    map_b64 = base64.b64encode(map_bytes).decode("utf-8")
+
     # Create mock robot coordinates
     robot_coords = {
         "x": 0.0,
@@ -93,7 +107,7 @@ async def basic_image_handling(
         "theta": 0.0,  # Robot is facing east (0 radians)
     }
 
-    # Send the image message with required depth and robot_coords fields
+    # Send the image message with required depth, map, and robot_coords fields
     image_message = {
         "type": "image",
         "payload": {
@@ -103,6 +117,18 @@ async def basic_image_handling(
                 "width": width,
                 "encoding": "32FC1",  # Using 32-bit float encoding
                 "data": depth_b64,
+            },
+            "map": {
+                "height": map_height,
+                "width": map_width,
+                "resolution": map_resolution,
+                "origin_x": map_origin_x,
+                "origin_y": map_origin_y,
+                "origin_z": map_origin_z,
+                "origin_yaw": map_origin_yaw,
+                "frame_id": map_frame_id,
+                "encoding": "8UC1",  # Using 8-bit unsigned char for occupancy grid
+                "data": map_b64,
             },
             "robot_coords": robot_coords,
         },
@@ -119,13 +145,20 @@ async def test_absolute_navigation():
     server, websocket = await common_setup("test_absolute_navigation")
 
     # First, register the navigate_to_position primitive and a directive
+    navigate_guideline = (
+        "Use when you need to navigate the robot to the specified position "
+        "using provided x, y coordinates, and theta (yaw) angle IN RADIANS."
+    )
+    directive_text = (
+        "You are a helpful robot assistant that can navigate to locations when asked."
+    )
     register_message = {
         "type": "register_primitives_and_directive",
         "payload": {
             "primitives": [
                 {
                     "name": "navigate_to_position",
-                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
+                    "guideline": navigate_guideline,
                     "inputs": {
                         "x": "float",
                         "y": "float",
@@ -133,7 +166,7 @@ async def test_absolute_navigation():
                     },
                 }
             ],
-            "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
+            "directive": directive_text,
         },
     }
     await websocket.send(json.dumps(register_message))
@@ -208,13 +241,20 @@ async def test_relative_navigation_turn_around():
     server, websocket = await common_setup("test_relative_navigation_turn_around")
 
     # First, register the navigate_to_position primitive and a directive
+    navigate_guideline = (
+        "Use when you need to navigate the robot to the specified position "
+        "using provided x, y coordinates, and theta (yaw) angle IN RADIANS."
+    )
+    directive_text = (
+        "You are a helpful robot assistant that can navigate to locations when asked."
+    )
     register_message = {
         "type": "register_primitives_and_directive",
         "payload": {
             "primitives": [
                 {
                     "name": "navigate_to_position",
-                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
+                    "guideline": navigate_guideline,
                     "inputs": {
                         "x": "float",
                         "y": "float",
@@ -222,7 +262,7 @@ async def test_relative_navigation_turn_around():
                     },
                 }
             ],
-            "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
+            "directive": directive_text,
         },
     }
     await websocket.send(json.dumps(register_message))
@@ -303,13 +343,20 @@ async def test_relative_navigation_move_forward():
     server, websocket = await common_setup("test_relative_navigation_move_forward")
 
     # First, register the navigate_to_position primitive and a directive
+    navigate_guideline = (
+        "Use when you need to navigate the robot to the specified position "
+        "using provided x, y coordinates, and theta (yaw) angle IN RADIANS."
+    )
+    directive_text = (
+        "You are a helpful robot assistant that can navigate to locations when asked."
+    )
     register_message = {
         "type": "register_primitives_and_directive",
         "payload": {
             "primitives": [
                 {
                     "name": "navigate_to_position",
-                    "guideline": "Use when you need to navigate the robot to the specified position using provided x, y coordinates, and theta (yaw) angle IN RADIANS.",
+                    "guideline": navigate_guideline,
                     "inputs": {
                         "x": "float",
                         "y": "float",
@@ -317,7 +364,7 @@ async def test_relative_navigation_move_forward():
                     },
                 }
             ],
-            "directive": "You are a helpful robot assistant that can navigate to locations when asked.",
+            "directive": directive_text,
         },
     }
     await websocket.send(json.dumps(register_message))
