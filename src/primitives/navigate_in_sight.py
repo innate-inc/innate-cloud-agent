@@ -3,17 +3,32 @@ import traceback
 from src.primitives.types import Primitive
 import asyncio
 import base64
-import json
 import cv2
 import numpy as np
-import time
 from ultralytics import YOLO, SAM
+import google.generativeai as genai
+import os
 
-# Import our Groq helpers (assumed to be defined elsewhere)
-# from orchestrator.agent.groq_instant_use import query_groq_classifier, query_groq_vlm
+# Import utility modules
+from src.primitives.visualization_utils import (
+    annotate_camera_view,
+    create_map_visualization,
+    save_navigation_visualizations,
+)
+from src.primitives.projection_utils import (
+    angle_distance_to_image_coordinates,
+    sample_valid_navigation_points,
+    world_to_grid_coordinates,
+)
 
 # Utility to decode depth payload (assumed defined in src/utils.py)
-from src.utils import decode_depth_payload
+from src.utils import decode_depth_payload, decode_map_payload
+
+# Constants for the camera
+HORIZONTAL_FOV = 96.4  # Camera horizontal field of view in degrees
+VERT_FOV = 80.0  # Camera vertical field of view in degrees
+IMAGE_WIDTH = 640
+IMAGE_HEIGHT = 480
 
 
 class NavigateInSight(Primitive):
@@ -55,8 +70,30 @@ class NavigateInSight(Primitive):
 
     async def execute(
         self,
-        target_object: str,
+        target_object: str = None,
+        target_description: str = None,
+        map_payload: dict = None,
+        use_point_selection: bool = False,
     ):
+        """
+        Execute the navigate_in_sight primitive.
+
+        Args:
+            target_object (str, optional): The target object to navigate to
+            target_description (str, optional): Description of where to navigate
+            map_payload (dict, optional): Map payload from the robot
+            use_point_selection (bool): Whether to use the point selection approach
+
+        Returns:
+            tuple: (message, success, navigation_command)
+        """
+        # Use the point selection approach if requested and we have a map
+        if use_point_selection and map_payload:
+            return await self.execute_with_point_selection(
+                target_description or target_object, map_payload
+            )
+
+        # Otherwise, use the original object-based approach
         print(
             f"NavigateInSight: Starting navigation from ({self.current_x}, {self.current_y}) towards '{target_object}'"
         )
@@ -85,22 +122,14 @@ class NavigateInSight(Primitive):
 
         # Refine the target object using a Groq classifier.
         # For now we don't do that.
-        # user_prompt = f"Extract from the following command the most appropriate name for the object to be segmented: '{target_object}'"
+        # user_prompt = (
+        #     f"Extract from the following command the most appropriate name "
+        #     f"for the object to be segmented: '{target_object}'"
+        # )
         # system_prompt = (
         #     "You are an AI assistant refining object names for image segmentation. Provide a short, clear, "
         #     "and specific name for the object desired. RETURN A JSON OBJECT with keys 'name_to_segment' and 'reasoning'."
         # )
-        # try:
-        #     refined_response = query_groq_classifier(
-        #         user_prompt, system_prompt, "in_sight_navigator"
-        #     )
-        #     refined_json = json.loads(refined_response)
-        #     refined_target = refined_json.get("name_to_segment", target_object)
-        # except Exception as e:
-        #     print(f"Error refining target object: {e}")
-        #     refined_target = target_object
-
-        # print(f"Refined target object: {refined_target}")
 
         refined_target = target_object
 
@@ -127,7 +156,8 @@ class NavigateInSight(Primitive):
         target_info = segmentation_masks.get("1")
         if not target_info:
             print(
-                f"No valid segmentation mask found for target object '{refined_target}'."
+                f"No valid segmentation mask found for target object "
+                f"'{refined_target}'."
             )
             # Save image with segmentation masks.
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -179,7 +209,8 @@ class NavigateInSight(Primitive):
         # Simulate delay for navigation initiation.
         await asyncio.sleep(1)
         return (
-            f"Navigation towards {refined_target} initiated with command: {navigation_command}",
+            f"Navigation towards {refined_target} initiated with command: "
+            f"{navigation_command}",
             True,
             navigation_command,
         )
@@ -246,6 +277,7 @@ class NavigateInSight(Primitive):
 
         if (cv_image.shape[0] != depth_height) or (cv_image.shape[1] != depth_width):
             cv_image_resized = cv2.resize(cv_image, (depth_width, depth_height))
+            cv_image = cv_image_resized
         else:
             cv_image_resized = cv_image.copy()
 
@@ -348,7 +380,7 @@ class NavigateInSight(Primitive):
         final_vis = cv2.addWeighted(vis_image, 0.7, all_masks, 0.3, 0)
 
         # Save the visualization
-        cv2.imwrite(f"segmentation_result.jpg", final_vis)
+        cv2.imwrite("segmentation_result.jpg", final_vis)
         print("Saved visualization to segmentation_result.jpg")
 
         return segmentation_masks
@@ -390,3 +422,250 @@ class NavigateInSight(Primitive):
         horizontal_angle = x_norm * (horizontal_fov / 2.0)
         vertical_angle = y_norm * (vertical_fov / 2.0)
         return horizontal_angle, vertical_angle
+
+    async def execute_with_point_selection(
+        self, target_description: str, map_payload: dict
+    ):
+        """
+        Execute the navigate_in_sight primitive using point selection.
+
+        Args:
+            target_description: Description of where to navigate
+            map_payload: Map payload from the robot
+
+        Returns:
+            tuple: (message, success, navigation_command)
+        """
+        print(
+            f"NavigateInSight: Starting navigation from ({self.current_x}, {self.current_y})"
+        )
+
+        # Decode the map payload
+        try:
+            map_array, map_info = decode_map_payload(map_payload)
+        except Exception as e:
+            error_msg = f"Failed to decode map payload: {e}"
+            print(error_msg)
+            return error_msg, False, None
+
+        # Decode the provided image from base64 into a cv2 image.
+        try:
+            image_bytes = base64.b64decode(self.image_b64)
+            image_array = np.frombuffer(image_bytes, np.uint8)
+            cv_image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+            if cv_image is None:
+                print("Failed to decode image into cv_image.")
+                return "Failed to decode image", False, None
+        except Exception as e:
+            print(f"Exception decoding image: {e}")
+            return "Image decode error", False, None
+
+        # Sample valid navigation points using the utility function
+        result = sample_valid_navigation_points(
+            self.current_x,
+            self.current_y,
+            self.current_yaw,
+            map_array,
+            map_info,
+            min_obstacle_distance=0.50,
+            distances=[0.5, 1.0, 1.5],
+            angles_deg=[-30, 0, 30],
+        )
+
+        # Unpack the tuple of absolute points and angle-distance points
+        navigation_points_absolute, navigation_points_angle_distance = result
+
+        if not navigation_points_angle_distance:
+            return "Could not find any valid navigation points", False, None
+
+        # Create visualizations
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Convert robot position from world coordinates to grid coordinates
+        robot_pixel_x, robot_pixel_y = world_to_grid_coordinates(
+            self.current_x, self.current_y, map_info
+        )
+        robot_pos = (robot_pixel_x, robot_pixel_y, self.current_yaw)
+
+        # Create point mapping from navigation points
+        # This ensures the same point ID is used in both camera and map views
+        point_mapping = {}
+        grid_navigation_points = []
+
+        # Process and number the points consistently for both visualizations
+        for i, ((point_x, point_y, point_theta), (angle, distance)) in enumerate(
+            zip(navigation_points_absolute, navigation_points_angle_distance)
+        ):
+            point_id = i + 1
+
+            # Convert to grid coordinates for map visualization
+            pixel_x, pixel_y = world_to_grid_coordinates(point_x, point_y, map_info)
+            grid_navigation_points.append((pixel_x, pixel_y, point_theta, point_id))
+
+            # Store in point mapping for navigation command creation
+            point_mapping[str(point_id)] = {
+                "angle_distance": (angle, distance),
+                "x": point_x,
+                "y": point_y,
+                "theta": point_theta,
+            }
+
+        print(f"Generated {len(point_mapping)} navigation points")
+
+        # Create map visualization with grid coordinates
+        map_vis = create_map_visualization(
+            map_array, robot_pos, grid_navigation_points, map_info
+        )
+
+        # Create a wrapper function for angle_distance_to_image_coordinates
+        def convert_to_image_coords(angle, distance):
+            return angle_distance_to_image_coordinates(angle, distance)
+
+        # Create camera view visualization
+        # Pass point IDs explicitly to ensure correspondence with map view
+        camera_navigation_points = []
+        for i, (angle, distance) in enumerate(navigation_points_angle_distance):
+            point_id = i + 1
+            camera_navigation_points.append((angle, distance, point_id))
+
+        annotated_image = annotate_camera_view(
+            cv_image,
+            camera_navigation_points,
+            convert_to_image_coords,
+        )
+
+        # Save visualizations
+        save_navigation_visualizations(annotated_image, map_vis, timestamp)
+
+        # If there's only one valid point, just use that
+        if len(point_mapping) == 1:
+            selected_point_id = list(point_mapping.keys())[0]
+            selected_point = point_mapping[selected_point_id]
+
+            navigation_command = {
+                "x": selected_point["x"],
+                "y": selected_point["y"],
+                "theta": selected_point["theta"],
+            }
+
+            print(
+                f"Only one valid point found, automatically selecting point {selected_point_id}"
+            )
+            return (
+                f"Navigation to point {selected_point_id} initiated",
+                True,
+                navigation_command,
+            )
+
+        # Create prompt for Gemini to select a navigation point
+        user_prompt = f"""
+I need to navigate to: {target_description}
+
+The image shows several numbered green circles. Each circle represents a safe location I can navigate to.
+Which numbered point should I navigate to based on the description?
+
+Please respond with ONLY the number of the best point (1, 2, 3, etc).
+"""
+
+        # Use the GenerativeAI package directly, like in navigate_through_memory.py
+        try:
+            # Check if API key is available
+            api_key = os.getenv("GEMINI_API_KEY")
+            if not api_key:
+                print(
+                    "Warning: GEMINI_API_KEY not found in environment. Using default point 1."
+                )
+                selected_point_id = "1"
+            else:
+                print("Calling Gemini to select a navigation point...")
+
+                # Configure the genai library
+                genai.configure(api_key=api_key)
+
+                # Create model instance
+                model = genai.GenerativeModel(
+                    model_name="gemini-2.0-flash",
+                    generation_config={
+                        "temperature": 0,
+                        "top_p": 0.95,
+                        "top_k": 64,
+                        "max_output_tokens": 1024,
+                    },
+                )
+
+                # Prepare image for Gemini
+                # Convert the annotated image to bytes for the model
+                _, img_encoded = cv2.imencode(".jpg", annotated_image)
+                img_bytes = img_encoded.tobytes()
+
+                # Create content parts
+                message_parts = [
+                    {"text": user_prompt},
+                    {"mime_type": "image/jpeg", "data": img_bytes},
+                ]
+
+                # Call Gemini model
+                response = model.generate_content(message_parts)
+                response_text = response.text
+
+                print(f"Gemini response: {response_text}")
+
+                # Extract the number from the response
+                import re
+
+                numbers = re.findall(r"\d+", response_text)
+                if numbers:
+                    selected_point_id = numbers[0]
+                    print(f"Extracted selected point ID: {selected_point_id}")
+                else:
+                    # Default to the first point if no number found
+                    selected_point_id = "1"
+                    print(
+                        f"No point number found in response, defaulting to point {selected_point_id}"
+                    )
+        except Exception as e:
+            print(f"Error calling Gemini API: {e}")
+            # Default to the first point
+            selected_point_id = "1"
+            print(f"Error with Gemini API, defaulting to point {selected_point_id}")
+
+        # Get the selected point
+        if selected_point_id in point_mapping:
+            selected_point = point_mapping[selected_point_id]
+
+            navigation_command = {
+                "x": selected_point["x"],
+                "y": selected_point["y"],
+                "theta": selected_point["theta"],
+            }
+
+            print(
+                f"Selected navigation point {selected_point_id}: {navigation_command}"
+            )
+            return (
+                f"Navigation to point {selected_point_id} initiated",
+                True,
+                navigation_command,
+            )
+        else:
+            # If the selected point is not valid, use the first available one
+            if point_mapping:
+                fallback_id = list(point_mapping.keys())[0]
+                fallback_point = point_mapping[fallback_id]
+
+                navigation_command = {
+                    "x": fallback_point["x"],
+                    "y": fallback_point["y"],
+                    "theta": fallback_point["theta"],
+                }
+
+                print(
+                    f"Selected point {selected_point_id} not found, using fallback point {fallback_id}"
+                )
+                return (
+                    f"Navigation to point {fallback_id} initiated (fallback)",
+                    True,
+                    navigation_command,
+                )
+            else:
+                return "No valid navigation points found", False, None

@@ -40,3 +40,11 @@ client<llm> GeminiFlashClient {
     api_key env.GEMINI_API_KEY
   }
 }
+
+client<llm> Gemini25ProClient {
+  provider google-ai
+  options {
+    model "gemini-2.5-pro-exp-03-25"
+    api_key env.GEMINI_API_KEY
+  }
+}

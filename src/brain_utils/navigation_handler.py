@@ -3,6 +3,7 @@ from src.primitives.types import Primitive
 from typing import List
 from math import atan, radians, tan, degrees
 import math
+from src.utils import decode_map_payload
 
 SIM_VERTICAL_FOV = 80.0
 SIM_CAMERA_RESOLUTION = (640, 480)
@@ -15,6 +16,9 @@ SIM_HORIZONTAL_FOV = degrees(
     )
 )
 
+# Minimum distance (in meters) that the target position must be from obstacles
+MIN_OBSTACLE_DISTANCE = 0.25
+
 
 class NavigationHandler:
     def __init__(self, logger, primitives_list: List[Primitive]):
@@ -22,7 +26,7 @@ class NavigationHandler:
         self.primitives_list = primitives_list
 
     async def handle_navigate_in_sight(
-        self, vision_output, robot_coords, base64_img, depth_payload
+        self, vision_output, robot_coords, base64_img, depth_payload, map_payload=None
     ):
         nav_in_sight = next(
             (prim for prim in self.primitives_list if prim.name == "navigate_in_sight"),
@@ -39,12 +43,47 @@ class NavigationHandler:
             vertical_fov=SIM_VERTICAL_FOV,
         )
 
+        # Extract input parameters
+        target_object = vision_output.next_task.inputs.get("target_object")
+        target_description = vision_output.next_task.inputs.get(
+            "target_description", target_object
+        )
+
+        # Use the new point selection approach if we have a map
+        use_point_selection = map_payload is not None
+
+        # Execute the primitive with the appropriate parameters
         msg, result, navigation_command = await nav_in_sight.execute(
-            **vision_output.next_task.inputs
+            target_object=target_object,
+            target_description=target_description,
+            map_payload=map_payload,
+            use_point_selection=use_point_selection,
         )
 
         # Only replace the output with a navigation task if the execution was successful
         if result:
+            # Check if the target position is too close to obstacles using the map
+            if map_payload and not use_point_selection:
+                # If we're using point selection, we already verified safety
+                is_safe, safety_msg = self.check_position_safety(
+                    navigation_command["x"], navigation_command["y"], map_payload
+                )
+
+                if not is_safe:
+                    self.logger.warn(
+                        f"Navigation (in sight) target at ({navigation_command['x']}, {navigation_command['y']}) "
+                        f"is too close to obstacles: {safety_msg}"
+                    )
+                    # If not safe, update the vision output to reflect the safety issue
+                    vision_output.stop_current_task = True
+                    vision_output.observation = f"Navigation failed: {safety_msg}"
+                    vision_output.next_task = None
+                    vision_output.to_tell_user = (
+                        f"I can't navigate to that position because it's too close to obstacles. "
+                        f"{safety_msg}"
+                    )
+                    return vision_output
+
             # Get the primitive ID from the original task if it exists
             original_primitive_id = getattr(
                 vision_output.next_task, "primitive_id", None
@@ -63,18 +102,186 @@ class NavigationHandler:
             vision_output.next_task = navigation_to_position_task
 
             self.logger.info(
-                f"Converted navigate_in_sight to navigate_to_position with inputs: {navigation_to_position_task.inputs}. Initial coords were: {robot_coords}"
+                f"Converted navigate_in_sight to navigate_to_position with inputs: "
+                f"{navigation_to_position_task.inputs}. Initial coords were: {robot_coords}"
             )
         else:
             # If the execution failed, update the vision output to reflect the failure
             vision_output.stop_current_task = True
             vision_output.observation = f"Navigation in sight failed: {msg}"
             vision_output.next_task = None
-            vision_output.to_tell_user = f"I couldn't navigate to the shelf: {msg}"
+            vision_output.to_tell_user = f"I couldn't navigate to the target: {msg}"
 
         return vision_output
 
-    async def handle_navigate_through_memory(self, vision_output, connection_id):
+    def check_position_safety(self, target_x, target_y, map_payload):
+        """
+        Check if a target position is at a safe distance from obstacles.
+
+        Args:
+            target_x (float): Target X coordinate in world frame
+            target_y (float): Target Y coordinate in world frame
+            map_payload (dict): Map payload containing occupancy grid data
+
+        Returns:
+            tuple: (is_safe, message) where is_safe is a boolean and message is a string
+        """
+        try:
+            # Decode the map payload
+            map_array, map_info = decode_map_payload(map_payload)
+
+            # Get map metadata
+            resolution = map_info["resolution"]
+            origin_x = map_info["origin_x"]
+            origin_y = map_info["origin_y"]
+
+            # Convert target position from world coordinates to grid coordinates
+            grid_x = int((target_x - origin_x) / resolution)
+            grid_y = int((target_y - origin_y) / resolution)
+
+            # Check if the position is within map bounds
+            if (
+                grid_x < 0
+                or grid_x >= map_info["width"]
+                or grid_y < 0
+                or grid_y >= map_info["height"]
+            ):
+                return False, "Target position is outside the map boundaries."
+
+            # Calculate the radius in grid cells that corresponds to MIN_OBSTACLE_DISTANCE
+            obstacle_radius = int(MIN_OBSTACLE_DISTANCE / resolution)
+
+            # Create visualization
+            self._visualize_safety_check(
+                map_array, map_info, grid_x, grid_y, obstacle_radius
+            )
+
+            # Define a search window
+            min_x = max(0, grid_x - obstacle_radius)
+            max_x = min(map_info["width"] - 1, grid_x + obstacle_radius)
+            min_y = max(0, grid_y - obstacle_radius)
+            max_y = min(map_info["height"] - 1, grid_y + obstacle_radius)
+
+            # Check if any cell within the radius is an obstacle (value = 100)
+            for y in range(min_y, max_y + 1):
+                for x in range(min_x, max_x + 1):
+                    # Calculate distance from this cell to the target cell
+                    cell_distance = math.sqrt((x - grid_x) ** 2 + (y - grid_y) ** 2)
+
+                    # If this cell is within our search radius and is an obstacle
+                    if cell_distance <= obstacle_radius and map_array[y, x] == 100:
+                        # Calculate actual world distance
+                        world_distance = cell_distance * resolution
+                        return False, (
+                            f"Found obstacle at {world_distance:.2f}m from target, "
+                            f"which is less than the minimum safe distance of "
+                            f"{MIN_OBSTACLE_DISTANCE}m."
+                        )
+
+            return True, "Position is at a safe distance from obstacles."
+
+        except Exception as e:
+            self.logger.error(f"Error checking position safety: {e}")
+            # If there's an error, err on the side of caution
+            return False, f"Could not verify position safety: {e}"
+
+    def _visualize_safety_check(
+        self, map_array, map_info, grid_x, grid_y, obstacle_radius
+    ):
+        """
+        Create a visualization of the safety check for debugging.
+
+        Args:
+            map_array (numpy.ndarray): Map data
+            map_info (dict): Map metadata
+            grid_x (int): Target X position in grid coordinates
+            grid_y (int): Target Y position in grid coordinates
+            obstacle_radius (int): Search radius in grid cells
+        """
+        try:
+            import os
+            import numpy as np
+            from PIL import Image, ImageDraw, ImageFont
+
+            # Create a copy of the map for visualization
+            # Convert occupancy grid (-1, 0, 100) to an RGB image
+            # -1: Unknown (gray), 0: Free (white), 100: Occupied (black)
+            rgb_map = np.zeros(
+                (map_array.shape[0], map_array.shape[1], 3), dtype=np.uint8
+            )
+
+            # Unknown space (gray)
+            rgb_map[map_array == -1] = [128, 128, 128]
+
+            # Free space (white)
+            rgb_map[map_array == 0] = [255, 255, 255]
+
+            # Occupied space (black)
+            rgb_map[map_array == 100] = [0, 0, 0]
+
+            # Flip the map vertically to match the visualization in image_processor
+            rgb_map = np.flipud(rgb_map)
+
+            # Create PIL image
+            vis_img = Image.fromarray(rgb_map)
+            draw = ImageDraw.Draw(vis_img)
+
+            # Draw safety radius (green circle)
+            # Need to flip y coordinate for drawing since map is flipped
+            flipped_y = map_info["height"] - grid_y
+            draw.ellipse(
+                [
+                    grid_x - obstacle_radius,
+                    flipped_y - obstacle_radius,
+                    grid_x + obstacle_radius,
+                    flipped_y + obstacle_radius,
+                ],
+                outline=(0, 255, 0),  # Green
+                width=2,
+            )
+
+            # Draw target position (red dot)
+            target_radius = 5
+            draw.ellipse(
+                [
+                    grid_x - target_radius,
+                    flipped_y - target_radius,
+                    grid_x + target_radius,
+                    flipped_y + target_radius,
+                ],
+                fill=(255, 0, 0),  # Red
+                outline=(0, 0, 0),  # Black outline
+            )
+
+            # Add text
+            try:
+                font = ImageFont.truetype("arial.ttf", 20)
+            except IOError:
+                font = ImageFont.load_default()
+
+            safety_text = (
+                f"Target: ({grid_x}, {grid_y}), "
+                f"Safety radius: {obstacle_radius} cells "
+                f"({MIN_OBSTACLE_DISTANCE}m)"
+            )
+
+            draw.text((10, 10), safety_text, font=font, fill=(255, 0, 0))
+
+            # Save visualization
+            os.makedirs("safety_checks", exist_ok=True)
+            vis_img.save("safety_checks/safety_check.png")
+
+            # self.logger.info(
+            #     "Saved safety check visualization to safety_checks/safety_check.png"
+            # )
+
+        except Exception as e:
+            self.logger.error(f"Error creating safety visualization: {e}")
+            # Don't raise - this is just for debugging
+
+    async def handle_navigate_through_memory(
+        self, vision_output, connection_id, map_payload=None
+    ):
         # Find the NavigateThroughMemory primitive in the primitives_list
         navigate_through_memory = next(
             (
@@ -106,6 +313,27 @@ class NavigationHandler:
         original_primitive_id = getattr(vision_output.next_task, "primitive_id", None)
 
         if success and navigation_command:
+            # Check if target position is safe if map_payload is available
+            if map_payload:
+                is_safe, safety_msg = self.check_position_safety(
+                    navigation_command["x"], navigation_command["y"], map_payload
+                )
+
+                if not is_safe:
+                    self.logger.warn(
+                        f"Navigation (through memory) target at ({navigation_command['x']}, {navigation_command['y']}) "
+                        f"is too close to obstacles: {safety_msg}"
+                    )
+                    # If not safe, update the vision output to reflect the safety issue
+                    vision_output.stop_current_task = True
+                    vision_output.observation = f"Navigation failed: {safety_msg}"
+                    vision_output.next_task = None
+                    vision_output.to_tell_user = (
+                        f"I can't navigate to that position because it's too close to obstacles. "
+                        f"{safety_msg}"
+                    )
+                    return vision_output
+
             # Replace the output with a navigate_to_position primitive
             navigation_to_position_task = PrimitiveDefinition(
                 name="navigate_to_position",
@@ -115,7 +343,8 @@ class NavigationHandler:
             vision_output.next_task = navigation_to_position_task
 
             self.logger.info(
-                f"Converted navigate_through_memory to navigate_to_position with inputs: {navigation_command}"
+                f"Converted navigate_through_memory to navigate_to_position with inputs: "
+                f"{navigation_command}"
             )
         else:
             # If the execution failed, update the vision output to reflect the failure
@@ -128,7 +357,7 @@ class NavigationHandler:
 
         return vision_output
 
-    async def handle_turn_and_move(self, vision_output, robot_coords):
+    async def handle_turn_and_move(self, vision_output, robot_coords, map_payload=None):
         """
         Handle the turn_and_move primitive by converting it to a navigate_to_position task.
 
@@ -153,6 +382,25 @@ class NavigationHandler:
         new_x = current_x + distance * math.cos(new_theta)
         new_y = current_y + distance * math.sin(new_theta)
 
+        # Check if target position is safe if map_payload is available
+        if map_payload:
+            is_safe, safety_msg = self.check_position_safety(new_x, new_y, map_payload)
+
+            if not is_safe:
+                self.logger.warn(
+                    f"Navigation (turn and move) target at ({new_x}, {new_y}) is too close to obstacles: "
+                    f"{safety_msg}"
+                )
+                # If not safe, update the vision output to reflect the safety issue
+                vision_output.stop_current_task = True
+                vision_output.observation = f"Navigation failed: {safety_msg}"
+                vision_output.next_task = None
+                vision_output.to_tell_user = (
+                    f"I can't turn and move to that position because it's too close to obstacles. "
+                    f"{safety_msg}"
+                )
+                return vision_output
+
         original_primitive_id = getattr(vision_output.next_task, "primitive_id", None)
 
         # Create a navigate_to_position task with the calculated coordinates
@@ -170,8 +418,9 @@ class NavigationHandler:
         vision_output.next_task = navigation_to_position_task
 
         self.logger.info(
-            f"Converted turn_and_move (angle={angle}, distance={distance}) to navigate_to_position with inputs: "
-            f"x={new_x}, y={new_y}, theta={new_theta}. Initial coords were: {robot_coords}"
+            f"Converted turn_and_move (angle={angle}, distance={distance}) to "
+            f"navigate_to_position with inputs: x={new_x}, y={new_y}, theta={new_theta}. "
+            f"Initial coords were: {robot_coords}"
         )
 
         return vision_output

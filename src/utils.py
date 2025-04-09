@@ -36,3 +36,52 @@ def decode_depth_payload(depth_payload):
 
     depth_array = depth_array.reshape((height, width))
     return depth_array
+
+
+def decode_map_payload(map_payload):
+    """
+    Decode map payload from base64 to numpy array.
+
+    Args:
+        map_payload (dict): Dictionary containing map data and metadata
+
+    Returns:
+        tuple: (map_array, map_info) where map_array is a numpy array and map_info contains metadata
+    """
+    # Retrieve metadata from the map payload
+    width = map_payload["width"]
+    height = map_payload["height"]
+    resolution = map_payload["resolution"]
+    origin_x = map_payload["origin_x"]
+    origin_y = map_payload["origin_y"]
+    origin_z = map_payload["origin_z"]
+    origin_yaw = map_payload["origin_yaw"]
+    frame_id = map_payload["frame_id"]
+    data_b64 = map_payload["data"]
+
+    # Decode the base64 data to raw bytes
+    map_bytes = base64.b64decode(data_b64)
+
+    # Create the numpy array from the decoded bytes (maps are typically int8)
+    map_array = np.frombuffer(map_bytes, dtype=np.int8)
+
+    # Ensure the size is consistent with the provided dimensions
+    if map_array.size != height * width:
+        raise ValueError("Mismatch between map array size and provided dimensions.")
+
+    # Reshape the array to 2D
+    map_array = map_array.reshape((height, width))
+
+    # Create a metadata dictionary
+    map_info = {
+        "resolution": resolution,
+        "width": width,
+        "height": height,
+        "origin_x": origin_x,
+        "origin_y": origin_y,
+        "origin_z": origin_z,
+        "origin_yaw": origin_yaw,
+        "frame_id": frame_id,
+    }
+
+    return map_array, map_info
