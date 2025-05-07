@@ -170,9 +170,9 @@ class Brain:
 
         # Process depth map if available
         if depth_payload:
-            self.image_processor.process_depth_and_map(
-                depth_payload, map_payload, robot_coords
-            )
+            self.image_processor.process_depth(depth_payload, map_payload, robot_coords)
+        if map_payload:
+            self.image_processor.process_map_with_robot(map_payload, robot_coords)
 
         # Convert the local primitives list to a list of PrimitiveDefinition instances
         local_primitives_list = prim_list_to_prim_obj_list(self.local_primitives_list)

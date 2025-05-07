@@ -41,26 +41,25 @@ class ImageProcessor:
         if not base64_img:
             raise ValueError("Empty image data received")
 
-        # Validate required depth payload
-        if "depth" not in payload:
-            raise ValueError("Missing required 'depth' in payload")
-
+        # Validate required map payload
         if "map" not in payload:
             raise ValueError("Missing required 'map' in payload")
-
         map_payload = payload["map"]
 
-        depth_payload = payload["depth"]
+        # Depth payload is now optional
+        depth_payload = payload.get("depth")
 
-        # Verify depth payload contains required fields
-        required_depth_fields = ["height", "width", "encoding", "data"]
-        missing_fields = [
-            field for field in required_depth_fields if field not in depth_payload
-        ]
-        if missing_fields:
-            raise ValueError(
-                f"Depth payload missing required fields: {', '.join(missing_fields)}"
-            )
+        # Validate required depth payload if present
+        if depth_payload is not None:
+            required_depth_fields = ["height", "width", "encoding", "data"]
+            missing_fields = [
+                field for field in required_depth_fields if field not in depth_payload
+            ]
+            if missing_fields:
+                raise ValueError(
+                    f"Depth payload missing required fields: "
+                    f"{', '.join(missing_fields)}"
+                )
 
         # Validate required robot coordinates
         if "robot_coords" not in payload:
@@ -81,18 +80,21 @@ class ImageProcessor:
 
         return base64_img, depth_payload, robot_coords, map_payload
 
-    def process_depth_and_map(self, depth_payload, map_payload=None, robot_coords=None):
+    def process_depth(self, depth_payload):
         """
-        Process depth map data and optionally map data with robot position.
+        Process depth map data.
 
         Args:
             depth_payload (dict): Dictionary containing depth map data and metadata
-            map_payload (dict, optional): Dictionary containing map data and metadata
-            robot_coords (dict, optional): Dictionary containing robot coordinates
 
         Returns:
-            depth_map (np.ndarray): Processed depth map as a numpy array
+            depth_map (np.ndarray or None): Processed depth map as a numpy array,
+                                          or None if no depth_payload.
         """
+        if depth_payload is None:
+            self.logger.info("No depth payload provided, skipping depth processing.")
+            return None
+
         depth_map = decode_depth_payload(depth_payload)
         # Compute min and max values from the depth map.
         d_min = depth_map.min()
@@ -124,15 +126,13 @@ class ImageProcessor:
         os.makedirs("depth_maps", exist_ok=True)
         img.save("depth_maps/depth_map.png")
 
-        # Process map data if available
-        if map_payload and robot_coords:
-            self.process_map_with_robot(map_payload, robot_coords)
-
         return depth_map
 
     def process_map_with_robot(self, map_payload, robot_coords):
         """
         Process map data and draw the robot position on it.
+
+        HOLD ON IS THAT JUST A HELPER FUNCTION WHAT THE HELL
 
         Args:
             map_payload (dict): Dictionary containing map data and metadata
@@ -231,9 +231,6 @@ class ImageProcessor:
             end_x = robot_x + int(line_length * math.cos(robot_theta))
             # Use negative sin because Y increases downward in image coordinates
             end_y = robot_y - int(line_length * math.sin(robot_theta))
-
-            # Convert theta to degrees for display
-            theta_degrees = math.degrees(robot_theta) % 360
 
             # Draw the orientation line
             draw.line(
