@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from pydantic import BaseModel, Field, ConfigDict
 
 
@@ -27,5 +27,5 @@ class VisionAgentInput(BaseModel):
     primitive_in_execution: Optional[PrimitiveDefinition] = None
     primitives_list: List[PrimitiveDefinition]
     history_as_string: str
-    robot_coords: Optional[Dict[str, float]] = None
+    robot_coords: Optional[Dict[str, Union[float, str]]] = None
     directive: Optional[str] = None
