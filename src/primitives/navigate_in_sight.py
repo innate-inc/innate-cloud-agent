@@ -24,12 +24,6 @@ from src.primitives.projection_utils import (
 # Utility to decode depth payload (assumed defined in src/utils.py)
 from src.utils import decode_depth_payload, decode_map_payload
 
-# Constants for the camera
-HORIZONTAL_FOV = 96.4  # Camera horizontal field of view in degrees
-VERT_FOV = 80.0  # Camera vertical field of view in degrees
-IMAGE_WIDTH = 640
-IMAGE_HEIGHT = 480
-
 
 class NavigateInSight(Primitive):
     def __init__(self):
@@ -57,8 +51,8 @@ class NavigateInSight(Primitive):
         current_yaw: float,
         image_b64: str,
         depth_payload: dict,
-        horizontal_fov: float = 60.0,
-        vertical_fov: float = 40.0,
+        horizontal_fov: float,
+        vertical_fov: float,
     ):
         self.current_x = current_x
         self.current_y = current_y
@@ -220,8 +214,8 @@ class NavigateInSight(Primitive):
         cv_image,
         target_class,
         depth_array,
-        horizontal_fov: float = 60.0,
-        vertical_fov: float = 40.0,
+        horizontal_fov: float,
+        vertical_fov: float,
     ):
         """
         Use YOLO to detect the target object and SAM to segment the image.
@@ -390,8 +384,8 @@ class NavigateInSight(Primitive):
         center_x,
         center_y,
         image_shape,
-        horizontal_fov: float = 60.0,
-        vertical_fov: float = 40.0,
+        horizontal_fov: float,
+        vertical_fov: float,
     ):
         """
         Compute horizontal and vertical angles from the camera center to the given point.
@@ -453,6 +447,9 @@ class NavigateInSight(Primitive):
             image_bytes = base64.b64decode(self.image_b64)
             image_array = np.frombuffer(image_bytes, np.uint8)
             cv_image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+
+            image_height, image_width = cv_image.shape[:2]
+
             if cv_image is None:
                 print("Failed to decode image into cv_image.")
                 return "Failed to decode image", False, None
@@ -519,7 +516,16 @@ class NavigateInSight(Primitive):
 
         # Create a wrapper function for angle_distance_to_image_coordinates
         def convert_to_image_coords(angle, distance):
-            return angle_distance_to_image_coordinates(angle, distance)
+            return angle_distance_to_image_coordinates(
+                angle,
+                distance,
+                {
+                    "width": image_width,
+                    "height": image_height,
+                    "horizontal_fov": self.horizontal_fov,
+                    "vertical_fov": self.vertical_fov,
+                },
+            )
 
         # Create camera view visualization
         # Pass point IDs explicitly to ensure correspondence with map view

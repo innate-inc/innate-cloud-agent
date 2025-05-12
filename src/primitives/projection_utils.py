@@ -139,14 +139,17 @@ def is_point_in_fov(angle, distance, h_fov_deg=HORIZONTAL_FOV, v_fov_deg=VERT_FO
     return True
 
 
-def angle_distance_to_image_coordinates(angle, distance, h_cam=20, pitch_deg=90):
+def angle_distance_to_image_coordinates(
+    angle, distance, camera_info, height_cam=20, pitch_deg=90
+):
     """
     Convert angle and distance to image coordinates using proper camera projection.
 
     Args:
         angle (float): Angle in radians relative to robot's forward direction
         distance (float): Distance in meters
-        h_cam (float): Camera height in centimeters
+        camera_info (dict): Camera information with keys "width", "height", "horizontal_fov", "vertical_fov"
+        height_cam (float): Camera height in centimeters
         pitch_deg (float): Camera pitch angle in degrees (90° is looking forward)
 
     Returns:
@@ -157,10 +160,10 @@ def angle_distance_to_image_coordinates(angle, distance, h_cam=20, pitch_deg=90)
         return (None, None)
 
     # Camera parameters
-    width = IMAGE_WIDTH
-    height = IMAGE_HEIGHT
-    h_fov_deg = HORIZONTAL_FOV
-    v_fov_deg = VERT_FOV
+    width = camera_info["width"]
+    height = camera_info["height"]
+    h_fov_deg = camera_info["horizontal_fov"]
+    v_fov_deg = camera_info["vertical_fov"]
 
     # Convert distance to centimeters
     distance_cm = distance * 100
@@ -170,7 +173,7 @@ def angle_distance_to_image_coordinates(angle, distance, h_cam=20, pitch_deg=90)
 
     # Compute camera intrinsics and homography
     K = compute_intrinsics(width, height, h_fov_deg, v_fov_deg)
-    H = compute_homography(K, h_cam, pitch_deg)
+    H = compute_homography(K, height_cam, pitch_deg)
 
     # Project the point
     u, v = project_ground_point(H, distance_cm, angle_deg)
