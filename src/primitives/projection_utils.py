@@ -216,10 +216,16 @@ def sample_valid_navigation_points(
         visualize (bool): Whether to visualize the sampling process
 
     Returns:
-        tuple: (valid_points_absolute, valid_points_angle_distance)
-            - valid_points_absolute: List of (x, y, theta) tuples in world coordinates
-            - valid_points_angle_distance: List of (angle, distance) tuples relative
-              to robot
+        tuple: (
+            valid_points_absolute,
+            valid_points_angle_distance,
+            invalid_points_absolute,
+            invalid_points_angle_distance
+        )
+            - valid_points_absolute: List of (x,y,theta) world coords
+            - valid_points_angle_distance: List of (angle,distance) relative
+            - invalid_points_absolute: List of (x,y,theta) world coords (invalid)
+            - invalid_points_angle_distance: List of (angle,distance) relative (invalid)
     """
     # Get map metadata
     resolution = map_info["resolution"]
@@ -247,19 +253,26 @@ def sample_valid_navigation_points(
             print("Some points may be outside the camera view")
 
     # For each combination of angle and distance
+    invalid_points_absolute = []
+    invalid_points_angle_distance = []
+
     for angle in angles:
         for distance in distances:
-            # Check if the point would be visible in the camera FOV
+            # Calculate world coordinates
             angle_rel = -(
                 angle - current_yaw
             )  # Get angle relative to current orientation
-            if not is_point_in_fov(angle, distance):
-                filtered_points += 1
-                continue
-
-            # Calculate world coordinates
             point_x = current_x + distance * np.cos(angle_rel)
             point_y = current_y + distance * np.sin(angle_rel)
+            point_absolute = (point_x, point_y, angle_rel)
+            point_angle_distance = (angle, distance)
+
+            # Check if the point would be visible in the camera FOV
+            if not is_point_in_fov(angle, distance):
+                filtered_points += 1
+                invalid_points_absolute.append(point_absolute)
+                invalid_points_angle_distance.append(point_angle_distance)
+                continue
 
             # Convert to grid coordinates
             grid_x = int((point_x - origin_x) / resolution)
@@ -272,6 +285,8 @@ def sample_valid_navigation_points(
                 or grid_y < 0
                 or grid_y >= map_info["height"]
             ):
+                invalid_points_absolute.append(point_absolute)
+                invalid_points_angle_distance.append(point_angle_distance)
                 continue
 
             # Check if point is a valid navigable location (away from obstacles)
@@ -303,8 +318,16 @@ def sample_valid_navigation_points(
                 target_theta = angle_rel
                 valid_points_absolute.append((point_x, point_y, target_theta))
                 valid_points_angle_distance.append((angle, distance))
+            else:
+                invalid_points_absolute.append(point_absolute)
+                invalid_points_angle_distance.append(point_angle_distance)
 
-    return valid_points_absolute, valid_points_angle_distance
+    return (
+        valid_points_absolute,  # List of (x, y, theta) tuples
+        valid_points_angle_distance,  # List of (angle, distance) tuples
+        invalid_points_absolute,  # List of (x, y, theta) tuples
+        invalid_points_angle_distance,  # List of (angle, distance) tuples
+    )
 
 
 def world_to_grid_coordinates(x, y, map_info):
