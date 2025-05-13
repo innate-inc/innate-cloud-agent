@@ -84,7 +84,8 @@ def angle_distance_to_image_coordinates(angle, distance, camera_info):
     Args:
         angle (float): Angle in radians relative to robot's forward direction
         distance (float): Distance in meters
-        camera_info (dict): Camera information with keys "width", "height", "horizontal_fov", "vertical_fov"
+        camera_info (dict): Camera information with keys "width", "height",
+                            "horizontal_fov", "vertical_fov"
         height_cam (float): Camera height in centimeters
         pitch_deg (float): Camera pitch angle in degrees (90° is looking forward)
 
@@ -136,6 +137,63 @@ def angle_distance_to_image_coordinates(angle, distance, camera_info):
     return (int(u), int(v))
 
 
+def is_map_location_valid(
+    point_x, point_y, map_array, map_info, min_obstacle_distance_m
+):
+    """
+    Check if a given world coordinate is a valid navigation point on the map.
+
+    Args:
+        point_x (float): X world coordinate of the point.
+        point_y (float): Y world coordinate of the point.
+        map_array (np.ndarray): Map occupancy grid data.
+        map_info (dict): Map metadata (resolution, origin_x, origin_y, width, height).
+        min_obstacle_distance_m (float): Minimum allowable distance from obstacles
+                                     (meters).
+
+    Returns:
+        bool: True if the point is valid, False otherwise.
+    """
+    resolution = map_info["resolution"]
+    origin_x = map_info["origin_x"]
+    origin_y = map_info["origin_y"]
+    map_width = map_info["width"]
+    map_height = map_info["height"]
+
+    # Convert to grid coordinates
+    grid_x = int((point_x - origin_x) / resolution)
+    grid_y = int((point_y - origin_y) / resolution)
+
+    # Skip if outside map bounds
+    if grid_x < 0 or grid_x >= map_width or grid_y < 0 or grid_y >= map_height:
+        return False
+
+    # Calculate obstacle radius in grid cells
+    obstacle_radius_cells = int(min_obstacle_distance_m / resolution)
+
+    # Define a search window around the point
+    min_gx = max(0, grid_x - obstacle_radius_cells)
+    max_gx = min(map_width - 1, grid_x + obstacle_radius_cells)
+    min_gy = max(0, grid_y - obstacle_radius_cells)
+    max_gy = min(map_height - 1, grid_y + obstacle_radius_cells)
+
+    # Check if any cell within the radius is an obstacle (value = 100)
+    for y_cell in range(min_gy, max_gy + 1):
+        for x_cell in range(min_gx, max_gx + 1):
+            # Calculate distance from this cell to the target cell in grid units
+            cell_dist_grid = math.sqrt((x_cell - grid_x) ** 2 + (y_cell - grid_y) ** 2)
+
+            # If this cell is within our search radius and is an obstacle
+            # (Occupancy grid value 100 indicates obstacle)
+            if (
+                cell_dist_grid <= obstacle_radius_cells
+                and map_array[y_cell, x_cell] == 100
+            ):
+                return False  # Obstacle found
+
+    return True  # Point is valid
+
+
 def sample_valid_navigation_points(
     current_x,
     current_y,
@@ -156,37 +214,30 @@ def sample_valid_navigation_points(
         current_yaw (float): Current robot orientation in radians
         map_array (np.ndarray): Map occupancy grid data
         map_info (dict): Map metadata
-        min_distance (float): Minimum distance from robot to sample points (meters)
-        max_distance (float): Maximum distance from robot to sample points (meters)
+        h_fov_deg (float): Horizontal field of view in degrees for FOV check.
+        distances (list): List of distances to sample points at (meters).
+        angles_deg (list): List of angles to sample points at
+                           (degrees, relative to robot).
         min_obstacle_distance (float): Minimum allowable distance from obstacles
             (meters)
-        num_samples (int): Number of points to sample
-        visualize (bool): Whether to visualize the sampling process
 
     Returns:
         tuple: (
-            valid_points_absolute,
-            valid_points_angle_distance,
-            invalid_points_absolute,
-            invalid_points_angle_distance
+            valid_points_absolute, # List of (x,y,theta) world coords
+            valid_points_angle_distance, # List of (angle,distance) relative
+            invalid_points_absolute, # List of (x,y,theta) world coords (invalid)
+            invalid_points_angle_distance # List of (angle,distance) relative (invalid)
         )
-            - valid_points_absolute: List of (x,y,theta) world coords
-            - valid_points_angle_distance: List of (angle,distance) relative
-            - invalid_points_absolute: List of (x,y,theta) world coords (invalid)
-            - invalid_points_angle_distance: List of (angle,distance) relative (invalid)
     """
-    # Get map metadata
-    resolution = map_info["resolution"]
-    origin_x = map_info["origin_x"]
-    origin_y = map_info["origin_y"]
+    # Get map metadata (not strictly needed here anymore, but good for context)
+    # resolution = map_info["resolution"]
+    # origin_x = map_info["origin_x"]
+    # origin_y = map_info["origin_y"]
 
     # Sample points in a sector in front of the robot
     valid_points_absolute = []
     valid_points_angle_distance = []
     filtered_points = 0  # Count points filtered due to FOV constraints
-
-    # Calculate obstacle radius in grid cells
-    obstacle_radius = int(min_obstacle_distance / resolution)
 
     angles = [deg2rad(angle) for angle in angles_deg]
 
@@ -194,68 +245,33 @@ def sample_valid_navigation_points(
     invalid_points_absolute = []
     invalid_points_angle_distance = []
 
-    for angle in angles:
+    for angle_robot_rel in angles:
         for distance in distances:
             # Calculate world coordinates
-            angle_rel = -(
-                angle - current_yaw
-            )  # Get angle relative to current orientation
-            point_x = current_x + distance * np.cos(angle_rel)
-            point_y = current_y + distance * np.sin(angle_rel)
-            point_absolute = (point_x, point_y, angle_rel)
-            point_angle_distance = (angle, distance)
+            # angle_world_vector is the world angle of the vector from robot to point.
+            # Convention used: world_angle = robot_yaw - angle_relative_to_forward
+            angle_world_vector = current_yaw - angle_robot_rel
+            point_x = current_x + distance * np.cos(angle_world_vector)
+            point_y = current_y + distance * np.sin(angle_world_vector)
+            # point_absolute stores (x, y, orientation_of_robot_at_target)
+            # The orientation is aligned with the vector from current pos to target pos.
+            point_absolute = (point_x, point_y, angle_world_vector)
+            point_angle_distance = (angle_robot_rel, distance)
 
             # Check if the point would be visible in the camera FOV
-            if not is_point_in_fov(angle, distance, h_fov_deg):
+            if not is_point_in_fov(angle_robot_rel, distance, h_fov_deg):
                 filtered_points += 1
                 invalid_points_absolute.append(point_absolute)
                 invalid_points_angle_distance.append(point_angle_distance)
                 continue
 
-            # Convert to grid coordinates
-            grid_x = int((point_x - origin_x) / resolution)
-            grid_y = int((point_y - origin_y) / resolution)
-
-            # Skip if outside map bounds
-            if (
-                grid_x < 0
-                or grid_x >= map_info["width"]
-                or grid_y < 0
-                or grid_y >= map_info["height"]
+            # Check if point is a valid navigable location using the helper function
+            if is_map_location_valid(
+                point_x, point_y, map_array, map_info, min_obstacle_distance
             ):
-                invalid_points_absolute.append(point_absolute)
-                invalid_points_angle_distance.append(point_angle_distance)
-                continue
-
-            # Check if point is a valid navigable location (away from obstacles)
-            is_valid = True
-
-            # Define a search window around the point
-            min_x = max(0, grid_x - obstacle_radius)
-            max_x = min(map_info["width"] - 1, grid_x + obstacle_radius)
-            min_y = max(0, grid_y - obstacle_radius)
-            max_y = min(map_info["height"] - 1, grid_y + obstacle_radius)
-
-            # Check if any cell within the radius is an obstacle (value = 100)
-            for y in range(min_y, max_y + 1):
-                for x in range(min_x, max_x + 1):
-                    # Calculate distance from this cell to the target cell
-                    cell_distance = math.sqrt((x - grid_x) ** 2 + (y - grid_y) ** 2)
-
-                    # If this cell is within our search radius and is an obstacle
-                    if cell_distance <= obstacle_radius and map_array[y, x] == 100:
-                        is_valid = False
-                        break
-
-                if not is_valid:
-                    break
-
-            # Add the point if it's valid
-            if is_valid:
-                # The navigation target will face in the direction from robot to point
-                target_theta = angle_rel
-                valid_points_absolute.append((point_x, point_y, target_theta))
-                valid_points_angle_distance.append((angle, distance))
+                # The navigation target will face in direction from robot to point
+                valid_points_absolute.append(point_absolute)
+                valid_points_angle_distance.append(point_angle_distance)
             else:
                 invalid_points_absolute.append(point_absolute)
                 invalid_points_angle_distance.append(point_angle_distance)
