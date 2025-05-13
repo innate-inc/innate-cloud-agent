@@ -484,7 +484,8 @@ class NavigateInSight(Primitive):
             self.current_yaw,
             map_array,
             map_info,
-            min_obstacle_distance=0.50,
+            self.horizontal_fov,
+            min_obstacle_distance=0.20,
             distances=[0.5, 1.0, 2.0],
             angles_deg=[-40, -20, 0, 20, 40],
         )

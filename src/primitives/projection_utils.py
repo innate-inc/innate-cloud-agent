@@ -142,9 +142,10 @@ def sample_valid_navigation_points(
     current_yaw,
     map_array,
     map_info,
+    h_fov_deg,
     distances=[0.5, 1.5],
     angles_deg=[-30, 0, 30],
-    min_obstacle_distance=0.50,
+    min_obstacle_distance=0.20,
 ):
     """
     Sample valid navigation points in front of the robot.
@@ -189,16 +190,6 @@ def sample_valid_navigation_points(
 
     angles = [deg2rad(angle) for angle in angles_deg]
 
-    # Check if we're trying to sample at distances or angles that are incompatible with the FOV
-    h_fov_rad = deg2rad(HORIZONTAL_FOV)
-
-    for angle in angles:
-        if abs(angle) > h_fov_rad:
-            print(
-                f"WARNING: Sampling angle ({angle:.2f} rad) exceeds camera FOV ({h_fov_rad:.2f} rad)"
-            )
-            print("Some points may be outside the camera view")
-
     # For each combination of angle and distance
     invalid_points_absolute = []
     invalid_points_angle_distance = []
@@ -215,7 +206,7 @@ def sample_valid_navigation_points(
             point_angle_distance = (angle, distance)
 
             # Check if the point would be visible in the camera FOV
-            if not is_point_in_fov(angle, distance):
+            if not is_point_in_fov(angle, distance, h_fov_deg):
                 filtered_points += 1
                 invalid_points_absolute.append(point_absolute)
                 invalid_points_angle_distance.append(point_angle_distance)
