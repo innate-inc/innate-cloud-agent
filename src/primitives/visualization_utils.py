@@ -74,14 +74,6 @@ def annotate_camera_view(image, navigation_points, point_converter):
     # Get image dimensions for drawing the out-of-view indicator
     height, width = annotated_img.shape[:2]
 
-    # Add a small overlay at the bottom with stats
-    info_bar_height = 40
-    overlay = annotated_img.copy()
-    cv2.rectangle(
-        overlay, (0, height - info_bar_height), (width, height), (0, 0, 0), -1
-    )
-    annotated_img = cv2.addWeighted(overlay, 0.3, annotated_img, 0.7, 0)
-
     # Draw valid points (renamed from navigation_points to be clear)
     for point_data in navigation_points:
         if len(point_data) == 3:  # Using (angle, distance, point_id) format
