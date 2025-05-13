@@ -1,11 +1,6 @@
 import numpy as np
 import math
-
-# Constants for the camera
-HORIZONTAL_FOV = 96.4  # Camera horizontal field of view in degrees
-VERT_FOV = 80.0  # Camera vertical field of view in degrees
-IMAGE_WIDTH = 640
-IMAGE_HEIGHT = 480
+from math import atan
 
 
 def deg2rad(deg):
@@ -18,95 +13,38 @@ def rad2deg(rad):
     return rad * 180 / np.pi
 
 
-def compute_intrinsics(width, height, h_fov_deg, v_fov_deg):
-    """
-    Compute camera intrinsic matrix from field of view.
-
-    Args:
-        width: Image width in pixels
-        height: Image height in pixels
-        h_fov_deg: Horizontal field of view in degrees
-        v_fov_deg: Vertical field of view in degrees
-
-    Returns:
-        K: 3x3 camera intrinsic matrix
-    """
-    h_fov = deg2rad(h_fov_deg)
-    v_fov = deg2rad(v_fov_deg)
-    f_x = (width / 2) / np.tan(h_fov / 2)
-    f_y = (height / 2) / np.tan(v_fov / 2)
-    c_x = width / 2
-    c_y = height / 2
-    K = np.array([[f_x, 0, c_x], [0, f_y, c_y], [0, 0, 1]])
-    return K
-
-
-def compute_homography(K, h, pitch_deg):
+def compute_the_vignesh_transform(h=0.19663, x_cam=0.0197, pitch_deg=-10):
     """
     Compute homography matrix for ground plane projection.
-
-    Args:
-        K: Camera intrinsic matrix
-        h: Camera height in centimeters
-        pitch_deg: Camera pitch angle in degrees (90° is looking straight forward)
-
-    Returns:
-        H: 3x3 homography matrix
     """
     # Convert pitch to radians. We define theta = -pitch so that if pitch>0
     # (camera looks downward) then theta is negative.
-    pitch = deg2rad(pitch_deg)
-    theta = -pitch
+    # 1) Camera mount in base_link (meters)
+    t = np.array([x_cam, 0.0, h])
 
-    # Rotation matrix about the x-axis:
+    # 2) Camera pitch-down 10° about base_link Y
+    theta = np.deg2rad(-pitch_deg)
+    c, s = np.cos(theta), np.sin(theta)
+
+    # 3) Rotation from base_link → cam frame (about Y):
     R = np.array(
         [
-            [1, 0, 0],
-            [0, np.cos(theta), -np.sin(theta)],
-            [0, np.sin(theta), np.cos(theta)],
+            [c, 0, -s],
+            [0, 1, 0],
+            [s, 0, c],
         ]
     )
 
-    # Extract columns of R:
-    r1 = R[:, 0]  # [1, 0, 0]
-    r2 = R[:, 1]  # [0, cos(theta), sin(theta)]
-    r3 = R[:, 2]  # [0, -sin(theta), cos(theta)]
+    # 4) Build the 4×4 extrinsic T_cam←base so that
+    #    p_cam = T_cam←base @ p_base:
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = -R.dot(t)
 
-    # For ground points (world z=0), the projection is:
-    # p ~ K * [ r1  r2  -h*r3 ] * [x, y, 1]^T.
-    M = np.column_stack((r1, r2, -h * r3))
-    H = K @ M
-    return H
+    return T
 
 
-def project_ground_point(H, D, gamma_deg):
-    """
-    Project ground point to image coordinates.
-
-    Args:
-        H: Homography matrix
-        D: Distance from camera in centimeters
-        gamma_deg: Angle in degrees from camera forward direction
-
-    Returns:
-        (u, v): Image coordinates in pixels
-    """
-    # Convert gamma from degrees to radians
-    gamma = deg2rad(gamma_deg)
-
-    # Ground point (with origin at camera's vertical projection on the ground)
-    x = D * np.sin(gamma)
-    y = D * np.cos(gamma)
-    ground_pt = np.array([x, y, 1])
-
-    # Project point
-    p = H @ ground_pt
-    u = p[0] / p[2]
-    v = p[1] / p[2]
-    return u, v
-
-
-def is_point_in_fov(angle, distance, h_fov_deg=HORIZONTAL_FOV, v_fov_deg=VERT_FOV):
+def is_point_in_fov(angle, distance, h_fov_deg):
     """
     Check if a point at given angle and distance is within the camera's field of view.
 
@@ -139,9 +77,7 @@ def is_point_in_fov(angle, distance, h_fov_deg=HORIZONTAL_FOV, v_fov_deg=VERT_FO
     return True
 
 
-def angle_distance_to_image_coordinates(
-    angle, distance, camera_info, height_cam=20, pitch_deg=90
-):
+def angle_distance_to_image_coordinates(angle, distance, camera_info):
     """
     Convert angle and distance to image coordinates using proper camera projection.
 
@@ -155,28 +91,39 @@ def angle_distance_to_image_coordinates(
     Returns:
         tuple: (x, y) coordinates in the image, or (None, None) if out of field of view
     """
-    # Check if the point is within the field of view first
-    if not is_point_in_fov(angle, distance):
-        return (None, None)
-
     # Camera parameters
     width = camera_info["width"]
     height = camera_info["height"]
     h_fov_deg = camera_info["horizontal_fov"]
     v_fov_deg = camera_info["vertical_fov"]
+    pitch_deg = camera_info["pitch_deg"]
+    x_cam = camera_info["x_cam"]
+    height_cam = camera_info["height_cam"]
 
-    # Convert distance to centimeters
-    distance_cm = distance * 100
+    # Check if the point is within the field of view first
+    if not is_point_in_fov(angle, distance, h_fov_deg):
+        return (None, None)
 
-    # Convert angle to degrees
-    angle_deg = rad2deg(angle)
+    print(f"Camera info: {camera_info}")
 
     # Compute camera intrinsics and homography
-    K = compute_intrinsics(width, height, h_fov_deg, v_fov_deg)
-    H = compute_homography(K, height_cam, pitch_deg)
+    T_cam_base = compute_the_vignesh_transform(height_cam, x_cam, pitch_deg)
 
-    # Project the point
-    u, v = project_ground_point(H, distance_cm, angle_deg)
+    z = 0
+    x = distance * np.cos(angle)
+    y = distance * np.sin(angle)
+
+    p_base = np.array([x, y, z, 1.0])
+    p_cam = T_cam_base @ p_base
+
+    v_rad = atan(p_cam[2] / p_cam[0])
+    h_rad = atan(p_cam[1] / p_cam[0])
+
+    v_deg = rad2deg(v_rad)
+    h_deg = rad2deg(h_rad)
+
+    u = width / 2 - h_deg * width / h_fov_deg
+    v = height / 2 - v_deg * height / v_fov_deg
 
     # Check if coordinates are within image bounds
     if u < 0 or u >= width or v < 0 or v >= height:

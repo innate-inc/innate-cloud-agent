@@ -25,6 +25,13 @@ from src.primitives.projection_utils import (
 from src.utils import decode_depth_payload, decode_map_payload
 
 
+MAURICE_CAMERA_INFO = {
+    "pitch_deg": -10,
+    "x_cam": 0.0197,
+    "height_cam": 0.19663,
+}
+
+
 class NavigateInSight(Primitive):
     def __init__(self):
         """
@@ -66,6 +73,9 @@ class NavigateInSight(Primitive):
         self.depth_payload = depth_payload
         self.horizontal_fov = horizontal_fov
         self.vertical_fov = vertical_fov
+        self.pitch_deg = MAURICE_CAMERA_INFO["pitch_deg"]
+        self.x_cam = MAURICE_CAMERA_INFO["x_cam"]
+        self.height_cam = MAURICE_CAMERA_INFO["height_cam"]
 
     async def execute(
         self,
@@ -475,8 +485,8 @@ class NavigateInSight(Primitive):
             map_array,
             map_info,
             min_obstacle_distance=0.50,
-            distances=[0.5, 1.0, 1.5],
-            angles_deg=[-30, 0, 30],
+            distances=[0.5, 1.0, 2.0],
+            angles_deg=[-40, -20, 0, 20, 40],
         )
 
         # Unpack the tuple of absolute points and angle-distance points
@@ -569,6 +579,9 @@ class NavigateInSight(Primitive):
                     "height": image_height,
                     "horizontal_fov": self.horizontal_fov,
                     "vertical_fov": self.vertical_fov,
+                    "pitch_deg": self.pitch_deg,
+                    "x_cam": self.x_cam,
+                    "height_cam": self.height_cam,
                 },
             )
 
