@@ -1,6 +1,9 @@
 import numpy as np
 import math
 from math import atan
+from pathfinding.core.grid import Grid
+from pathfinding.finder.a_star import AStarFinder
+from pathfinding.core.diagonal_movement import DiagonalMovement
 
 
 def deg2rad(deg):
@@ -138,21 +141,33 @@ def angle_distance_to_image_coordinates(angle, distance, camera_info):
 
 
 def is_map_location_valid(
-    point_x, point_y, map_array, map_info, min_obstacle_distance_m
+    start_world_x,
+    start_world_y,
+    point_x,
+    point_y,
+    map_array,
+    map_info,
+    min_obstacle_distance_m,
+    path_to_direct_ratio_threshold=2.0,  # Max path/direct ratio
 ):
     """
-    Check if a given world coordinate is a valid navigation point on the map.
+    Check if a given world coordinate is a valid and reachable navigation point.
 
     Args:
-        point_x (float): X world coordinate of the point.
-        point_y (float): Y world coordinate of the point.
-        map_array (np.ndarray): Map occupancy grid data.
+        start_world_x (float): Robot's current X world coordinate.
+        start_world_y (float): Robot's current Y world coordinate.
+        point_x (float): X world coordinate of the target point.
+        point_y (float): Y world coordinate of the target point.
+        map_array (np.ndarray): Map occupancy grid data (0=free, 100=obstacle,
+                                -1=unknown).
         map_info (dict): Map metadata (resolution, origin_x, origin_y, width, height).
         min_obstacle_distance_m (float): Minimum allowable distance from obstacles
-                                     (meters).
+                                     for the target point's vicinity.
+        path_to_direct_ratio_threshold (float): Max allowed ratio of
+                                                path length to direct distance.
 
     Returns:
-        bool: True if the point is valid, False otherwise.
+        bool: True if the point is valid and reachable, False otherwise.
     """
     resolution = map_info["resolution"]
     origin_x = map_info["origin_x"]
@@ -160,38 +175,89 @@ def is_map_location_valid(
     map_width = map_info["width"]
     map_height = map_info["height"]
 
-    # Convert to grid coordinates
-    grid_x = int((point_x - origin_x) / resolution)
-    grid_y = int((point_y - origin_y) / resolution)
+    # 1. Initial check: Vicinity of the target point (existing logic)
+    # Convert target to grid coordinates
+    target_grid_x = int((point_x - origin_x) / resolution)
+    target_grid_y = int((point_y - origin_y) / resolution)
 
-    # Skip if outside map bounds
-    if grid_x < 0 or grid_x >= map_width or grid_y < 0 or grid_y >= map_height:
+    # Skip if target is outside map bounds
+    if not (0 <= target_grid_x < map_width and 0 <= target_grid_y < map_height):
         return False
 
-    # Calculate obstacle radius in grid cells
+    # Calculate obstacle radius in grid cells for local check
     obstacle_radius_cells = int(min_obstacle_distance_m / resolution)
+    min_gx = max(0, target_grid_x - obstacle_radius_cells)
+    max_gx = min(map_width - 1, target_grid_x + obstacle_radius_cells)
+    min_gy = max(0, target_grid_y - obstacle_radius_cells)
+    max_gy = min(map_height - 1, target_grid_y + obstacle_radius_cells)
 
-    # Define a search window around the point
-    min_gx = max(0, grid_x - obstacle_radius_cells)
-    max_gx = min(map_width - 1, grid_x + obstacle_radius_cells)
-    min_gy = max(0, grid_y - obstacle_radius_cells)
-    max_gy = min(map_height - 1, grid_y + obstacle_radius_cells)
-
-    # Check if any cell within the radius is an obstacle (value = 100)
     for y_cell in range(min_gy, max_gy + 1):
         for x_cell in range(min_gx, max_gx + 1):
-            # Calculate distance from this cell to the target cell in grid units
-            cell_dist_grid = math.sqrt((x_cell - grid_x) ** 2 + (y_cell - grid_y) ** 2)
-
-            # If this cell is within our search radius and is an obstacle
-            # (Occupancy grid value 100 indicates obstacle)
+            cell_dist_grid = math.sqrt(
+                (x_cell - target_grid_x) ** 2 + (y_cell - target_grid_y) ** 2
+            )
             if (
                 cell_dist_grid <= obstacle_radius_cells
-                and map_array[y_cell, x_cell] == 100
+                and map_array[y_cell, x_cell] == 100  # Obstacle
             ):
-                return False  # Obstacle found
+                return False  # Obstacle found in target vicinity
 
-    return True  # Point is valid
+    # 2. Prepare for Pathfinding
+    start_grid_x = int((start_world_x - origin_x) / resolution)
+    start_grid_y = int((start_world_y - origin_y) / resolution)
+
+    # Skip if start is outside map bounds
+    if not (0 <= start_grid_x < map_width and 0 <= start_grid_y < map_height):
+        return False
+
+    # 3. Create Pathfinding Grid
+    # python-pathfinding Grid: 0 is blocked, >0 is cost.
+    # map_array: 0=free, 100=obstacle, -1=unknown
+    walkable_matrix = np.ones_like(map_array, dtype=int)  # Cost 1 for walkable
+    walkable_matrix[map_array == 100] = 0  # Obstacles are blocked
+    walkable_matrix[map_array == -1] = 0  # Unknown areas are blocked
+
+    # Ensure the matrix is C-contiguous for pathfinding library if it's picky
+    # (usually numpy outputs are fine, but an explicit copy can ensure it)
+    pf_matrix = np.ascontiguousarray(walkable_matrix)
+
+    pathfinding_grid = Grid(matrix=pf_matrix)
+
+    start_node = pathfinding_grid.node(start_grid_x, start_grid_y)
+    end_node = pathfinding_grid.node(target_grid_x, target_grid_y)
+
+    # Check if start or end nodes themselves are on non-walkable cells
+    # (e.g. robot spawned inside an obstacle, or target cell is an obstacle)
+    # The previous vicinity check for target_grid already handles some of this,
+    # but this is an exact cell check.
+    if not start_node.walkable or not end_node.walkable:
+        return False
+
+    # 4. Run A* Finder
+    finder = AStarFinder(diagonal_movement=DiagonalMovement.always)
+    path, runs = finder.find_path(start_node, end_node, pathfinding_grid)
+
+    # 5. Evaluate Path
+    if not path or len(path) == 0:  # No path found
+        return False
+
+    # Heuristic: Check if path length is excessive compared to direct distance
+    if len(path) > 1:  # Path exists
+        path_length_m = (len(path) - 1) * resolution
+        direct_distance_m = math.sqrt(
+            (point_x - start_world_x) ** 2 + (point_y - start_world_y) ** 2
+        )
+
+        if direct_distance_m == 0:  # Start and end are the same point
+            # If direct dist is 0, path len should be 0 (or 1 node if start==end).
+            # A path of len 1 means start=end. Len 0 means no path.
+            # If path len > 1 here, it's odd, but ratio check might handle it.
+            pass  # Valid if path is trivial (len 1) or effectively 0 length.
+        elif path_length_m > (path_to_direct_ratio_threshold * direct_distance_m):
+            return False  # Path too indirect
+
+    # All checks passed
+    return True
 
 
 def sample_valid_navigation_points(
@@ -204,6 +270,7 @@ def sample_valid_navigation_points(
     distances=[0.5, 1.5],
     angles_deg=[-30, 0, 30],
     min_obstacle_distance=0.20,
+    path_ratio_threshold=2.0,  # Max path/direct ratio
 ):
     """
     Sample valid navigation points in front of the robot.
@@ -219,7 +286,9 @@ def sample_valid_navigation_points(
         angles_deg (list): List of angles to sample points at
                            (degrees, relative to robot).
         min_obstacle_distance (float): Minimum allowable distance from obstacles
-            (meters)
+            (meters) for the target point's vicinity.
+        path_ratio_threshold (float): Max allowed ratio of path len to direct dist
+                                     for reachability check.
 
     Returns:
         tuple: (
@@ -245,6 +314,14 @@ def sample_valid_navigation_points(
     invalid_points_absolute = []
     invalid_points_angle_distance = []
 
+    # We should leave a warning here if the minimum obstacle distance
+    #  is lower than the resolution of the map.
+    if min_obstacle_distance < map_info["resolution"]:
+        print(
+            f"Warning: Minimum obstacle distance ({min_obstacle_distance}m) is "
+            f"lower than the map resolution ({map_info['resolution']}m)."
+        )
+
     for angle_robot_rel in angles:
         for distance in distances:
             # Calculate world coordinates
@@ -267,7 +344,14 @@ def sample_valid_navigation_points(
 
             # Check if point is a valid navigable location using the helper function
             if is_map_location_valid(
-                point_x, point_y, map_array, map_info, min_obstacle_distance
+                current_x,
+                current_y,
+                point_x,
+                point_y,
+                map_array,
+                map_info,
+                min_obstacle_distance,
+                path_ratio_threshold,
             ):
                 # The navigation target will face in direction from robot to point
                 valid_points_absolute.append(point_absolute)
