@@ -20,7 +20,7 @@ MAURICE_OAK_D_VERTICAL_FOV = 80.0
 MAURICE_OAK_D_HORIZONTAL_FOV = 128.0
 
 # Minimum distance (in meters) that the target position must be from obstacles
-MIN_OBSTACLE_DISTANCE = 0.25
+MIN_OBSTACLE_DISTANCE = 0.10
 
 
 class NavigationHandler:
