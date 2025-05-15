@@ -13,7 +13,7 @@ from PIL import Image
 from io import BytesIO
 
 # Default values for PoseGraphMemory parameters
-DEFAULT_MIN_DISTANCE = 0.2  # meters
+DEFAULT_MIN_DISTANCE = 0.25  # meters
 DEFAULT_MIN_ANGLE_DEGREES = 45  # degrees
 DEFAULT_EDGE_DISTANCE_THRESHOLD = 0.8  # meters
 DEFAULT_EDGE_ANGLE_THRESHOLD_DEGREES = 90  # degrees
