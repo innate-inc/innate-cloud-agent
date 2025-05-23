@@ -82,6 +82,9 @@ function GeminiVisionAgent1(img: image, context_text: string, primitives_list_st
         Also, don't talk to the user if they haven't talked to you. Or at least evaluate carefully if you need to tell something to them, especially if the last time you talked with them was recently.
         If the last time you talked with them was seconds ago and you expect some answer from them, you should wait for example, an amount of time that seems appropriate.
 
+        ONCE A TASK IS COMPLETED, EVALUATE IF YOU NEED TO START IT AGAIN. IN THE CASE OF NAVIGATION, A TASK MIGHT NEED TO BE STARTED AGAIN TO GET CLOSER OR PURSUE THE OBJECTIVE.
+        WHEN NAVIGATION IN SIGHT IS COMPLETED, IT DOES NOT NECESSARILY MEAN YOU SHOULD STOP. YOU MIGHT NEED TO GET CLOSER OR PURSUE THE OBJECTIVE.
+
         You can only use one of the following tasks: {{ primitives_list_string }}.
 
         {{ ctx.output_format }}
@@ -115,6 +118,7 @@ function GeminiVisionAgent2(img: image, context_text: string, primitives_list_st
         If the last time you talked with them was seconds ago and you expect some answer from them, you should wait for example, an amount of time that seems appropriate.
 
         ONCE A TASK IS COMPLETED, EVALUATE IF YOU NEED TO START IT AGAIN. IN THE CASE OF NAVIGATION, A TASK MIGHT NEED TO BE STARTED AGAIN TO GET CLOSER OR PURSUE THE OBJECTIVE.
+        WHEN NAVIGATION IN SIGHT IS COMPLETED, IT DOES NOT NECESSARILY MEAN YOU SHOULD STOP. YOU MIGHT NEED TO GET CLOSER OR PURSUE THE OBJECTIVE.
 
         You can only use one of the following tasks: {{ primitives_list_string }}.
 
