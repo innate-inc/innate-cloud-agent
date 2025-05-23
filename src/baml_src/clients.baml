@@ -41,6 +41,19 @@ client<llm> GeminiFlashClient {
   }
 }
 
+client<llm> Gemini25FlashClient {
+  provider google-ai
+  options {
+    model "gemini-2.5-flash-preview-05-20"
+    api_key env.GEMINI_API_KEY
+    generationConfig {
+        thinkingConfig {
+          thinkingBudget 256
+      }
+    }
+  }
+}
+
 client<llm> Gemini25ProClient {
   provider google-ai
   options {

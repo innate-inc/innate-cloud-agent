@@ -9,7 +9,7 @@ from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlCli
 import asyncio
 
 
-FLASH_EXECUTION_TIMEOUT = 3
+FLASH_EXECUTION_TIMEOUT = 5
 
 # Available Gemini agent variants
 GeminiAgentVariant = Literal["gemini1", "gemini2", "gemini3", "gemini4"]
