@@ -23,13 +23,9 @@ from src.primitives.projection_utils import (
 
 # Utility to decode depth payload (assumed defined in src/utils.py)
 from src.utils import decode_depth_payload, decode_map_payload
+from src.constants_robots import ROBOT_PARAMS_TO_USE
 
-
-MAURICE_CAMERA_INFO = {
-    "pitch_deg": -10,
-    "x_cam": 0.0197,
-    "height_cam": 0.19663,
-}
+ROBOT_CAMERA_INFO = ROBOT_PARAMS_TO_USE["camera_info"]
 
 
 class NavigateInSight(Primitive):
@@ -53,7 +49,10 @@ class NavigateInSight(Primitive):
             "To use to navigate to an object or target in sight. Is a much better "
             "primitive than navigate_to_position to use when it's to navigate to a "
             "target in sight. Provide a target object name, such as 'shelf', 'table', "
-            "'chair', etc."
+            "'chair', etc.\n\n"
+            "After using it, you can use it again to get closer or pursue navigation "
+            "in sight if you deem it necessary. Can be very helpful to follow paths or "
+            "navigate to a target that is far."
         )
 
     def update_current_vars(
@@ -73,9 +72,9 @@ class NavigateInSight(Primitive):
         self.depth_payload = depth_payload
         self.horizontal_fov = horizontal_fov
         self.vertical_fov = vertical_fov
-        self.pitch_deg = MAURICE_CAMERA_INFO["pitch_deg"]
-        self.x_cam = MAURICE_CAMERA_INFO["x_cam"]
-        self.height_cam = MAURICE_CAMERA_INFO["height_cam"]
+        self.pitch_deg = ROBOT_CAMERA_INFO["pitch_deg"]
+        self.x_cam = ROBOT_CAMERA_INFO["x_cam"]
+        self.height_cam = ROBOT_CAMERA_INFO["height_cam"]
 
     async def execute(
         self,

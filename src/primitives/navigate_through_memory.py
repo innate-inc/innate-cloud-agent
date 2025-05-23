@@ -6,17 +6,22 @@ import networkx as nx
 import numpy as np
 from datetime import datetime
 import base64
-from typing import Optional, Tuple, Dict, List, Any
+from typing import Optional, Tuple
 import google.generativeai as genai
 import json
 from PIL import Image
 from io import BytesIO
+from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 # Default values for PoseGraphMemory parameters
-DEFAULT_MIN_DISTANCE = 0.25  # meters
-DEFAULT_MIN_ANGLE_DEGREES = 45  # degrees
+DEFAULT_MIN_DISTANCE = 0.5  # meters
+DEFAULT_MIN_ANGLE_DEGREES = ROBOT_PARAMS_TO_USE["horizontal_fov"] * (
+    100 / 120
+)  # degrees
 DEFAULT_EDGE_DISTANCE_THRESHOLD = 0.8  # meters
-DEFAULT_EDGE_ANGLE_THRESHOLD_DEGREES = 90  # degrees
+DEFAULT_EDGE_ANGLE_THRESHOLD_DEGREES = ROBOT_PARAMS_TO_USE["horizontal_fov"] * (
+    100 / 120
+)  # degrees
 
 # File system constants
 DATA_DIR_NAME = "data"

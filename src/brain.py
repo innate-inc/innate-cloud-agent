@@ -170,7 +170,7 @@ class Brain:
 
         # Process depth map if available
         if depth_payload:
-            self.image_processor.process_depth(depth_payload, map_payload, robot_coords)
+            self.image_processor.process_depth(depth_payload)
         if map_payload:
             self.image_processor.process_map_with_robot(map_payload, robot_coords)
 
