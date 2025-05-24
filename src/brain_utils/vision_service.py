@@ -4,7 +4,14 @@ from typing import Union
 
 from src.agents.baml_agent import vision_agent
 from src.agents.gemini_flash_baml_agent import gemini_vision_agent
-from src.agents.types import PrimitiveDefinition, VisionAgentInput
+from src.agents.gemini_flash_baml_multi_agent import (
+    gemini_vision_agent_multimodal_history,
+)
+from src.agents.types import (
+    MultimodalVisionAgentInput,
+    PrimitiveDefinition,
+    VisionAgentInput,
+)
 from src.baml_client.types import VisionAgentOutput
 from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlClientError
 from src.primitives.transforms import primitive_to_object
@@ -13,6 +20,7 @@ from src.primitives.transforms import primitive_to_object
 class VisionAgentType(str, Enum):
     ANTHROPIC = "anthropic"
     GEMINI_FLASH = "gemini_flash"
+    GEMINI_FLASH_MULTI = "gemini_flash_multi"
 
 
 class VisionService:
@@ -25,10 +33,10 @@ class VisionService:
         user_prompt_text,
         primitive_in_execution: Union[PrimitiveDefinition, None],
         primitives_list,
-        history_as_string,
+        history,
         robot_coords,
         directive=None,
-        agent_type: VisionAgentType = VisionAgentType.ANTHROPIC,
+        agent_type: VisionAgentType = VisionAgentType.GEMINI_FLASH,
         gemini_variant: str = "gemini1",
     ) -> Union[VisionAgentOutput]:
         """
@@ -39,7 +47,7 @@ class VisionService:
             user_prompt_text: The text provided by the user.
             primitive_in_execution: The current primitive in execution.
             primitives_list: A list of primitives.
-            history_as_string: A history of events.
+            history: A history of events.
             robot_coords: A dictionary with the robot's coordinates.
             directive: A directive to steer the vision language model.
             agent_type: The type of agent to use.
@@ -73,32 +81,52 @@ class VisionService:
             if primitive_in_execution:
                 primitive_object = primitive_to_object(primitive_in_execution)
 
-            # Create the input for the vision agent
-            vlm_inputs = VisionAgentInput(
-                base64_img=base64_img,
-                user_prompt_text=user_prompt_text,
-                primitive_in_execution=primitive_object,
-                primitives_list=primitives_list,
-                history_as_string=history_as_string,
-                robot_coords=robot_coords,
-                directive=directive,
-            )
-
             # Call the appropriate vision agent based on the agent_type
-            if agent_type == VisionAgentType.ANTHROPIC:
-                completion = await vision_agent(vlm_inputs)
-                return completion
-            elif agent_type == VisionAgentType.GEMINI_FLASH:
-                # Validate gemini_variant
-                if gemini_variant not in ("gemini1", "gemini2", "gemini3", "gemini4"):
-                    self.logger.warning(
-                        f"Invalid Gemini variant: {gemini_variant}. Using gemini1."
-                    )
-                    gemini_variant = "gemini1"
-
-                completion = await gemini_vision_agent(
-                    vlm_inputs, agent_variant=gemini_variant
+            if agent_type in [
+                VisionAgentType.ANTHROPIC,
+                VisionAgentType.GEMINI_FLASH,
+            ]:
+                # Create the input for the vision agent
+                vlm_inputs = VisionAgentInput(
+                    base64_img=base64_img,
+                    user_prompt_text=user_prompt_text,
+                    primitive_in_execution=primitive_object,
+                    primitives_list=primitives_list,
+                    history_as_string=history,
+                    robot_coords=robot_coords,
+                    directive=directive,
                 )
+
+                if agent_type == VisionAgentType.ANTHROPIC:
+                    completion = await vision_agent(vlm_inputs)
+                else:
+                    # Validate gemini_variant
+                    if gemini_variant not in (
+                        "gemini1",
+                        "gemini2",
+                        "gemini3",
+                        "gemini4",
+                    ):
+                        self.logger.warning(
+                            f"Invalid Gemini variant: {gemini_variant}. Using gemini1."
+                        )
+                        gemini_variant = "gemini1"
+
+                    completion = await gemini_vision_agent(
+                        vlm_inputs, agent_variant=gemini_variant
+                    )
+                    return completion
+            elif agent_type == VisionAgentType.GEMINI_FLASH_MULTI:
+                vlm_inputs = MultimodalVisionAgentInput(
+                    base64_img=base64_img,
+                    user_prompt_text=user_prompt_text,
+                    primitive_in_execution=primitive_object,
+                    primitives_list=primitives_list,
+                    multimodal_history=history,
+                    robot_coords=robot_coords,
+                    directive=directive,
+                )
+                completion = await gemini_vision_agent_multimodal_history(vlm_inputs)
                 return completion
             else:
                 raise ValueError(f"Unsupported agent type: {agent_type}")

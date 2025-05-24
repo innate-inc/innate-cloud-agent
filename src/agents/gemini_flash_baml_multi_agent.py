@@ -3,7 +3,7 @@ from baml_py import Image
 from baml_py.errors import BamlValidationError, BamlClientError
 from src.baml_client import b
 from src.primitives.transforms import create_type_builder
-from src.agents.types import MultimodalVisionAgentInput, MultimodalHistoryItem
+from src.agents.types import MultimodalVisionAgentInput
 from src.baml_client.types import NewVisionAgentOutput
 from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlClientError
 import asyncio
@@ -16,7 +16,7 @@ FLASH_EXECUTION_TIMEOUT = 5
 # GeminiAgentVariant = Literal["gemini1", "gemini2", "gemini3", "gemini4"]
 
 
-async def gemini_vision_agent_with_additional_context(
+async def gemini_vision_agent_multimodal_history(
     vlm_inputs: MultimodalVisionAgentInput,  # Updated type hint
     # agent_variant: GeminiAgentVariant = "gemini1", # Remove variant for now
 ) -> Optional[NewVisionAgentOutput]:  # Output type will be NewVisionAgentOutput
