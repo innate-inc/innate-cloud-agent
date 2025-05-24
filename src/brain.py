@@ -45,7 +45,8 @@ class Brain:
         self.running = True
         # Flag to override the next vision output (set via a chat_in command)
         self.forward_command_active = False
-        # Store the latest user message that should be consumed once by the visual language model.
+        # Store the latest user message that should be consumed once by the
+        # visual language model.
         self.latest_user_message = None
         self.primitives_list = []
         # Whether memory state commands are enabled
@@ -57,12 +58,15 @@ class Brain:
             NavigateInSight(),
             NavigateThroughMemory(),
             TurnAndMove(),
-        ]  # These are the ones defined in the brain here, not registered with the server by the user
+        ]  # These are the ones defined in the brain here, not registered with
+        # the server by the user
         self.primitive_in_execution = None
         self.primitive_ids_map: Dict[str, PrimitiveDefinition] = {}
         self.directive = None  # Store the directive that will steer the VLM
 
         # Initialize history to record chat messages and vision agent outputs.
+        # The History class defaults to MAX_MULTIMODAL_IMAGES = 3.
+        # To override, instantiate with: History(max_multimodal_images=N)
         self.history = History()
 
         # Initialize logger and helper modules
@@ -105,7 +109,8 @@ class Brain:
         try:
             message_type = message.type
 
-            # If the message is not a pose_image, log the time it takes to process the message
+            # If the message is not a pose_image, log the time it takes to process
+            # the message
             if message_type != MessageInType.POSE_IMAGE:
                 self.logger.info(f"Processing message: {message_type}")
                 time_start = time.time()
@@ -113,12 +118,16 @@ class Brain:
             if message_type == MessageInType.IMAGE:
                 vision_output = await self.handle_image(message)
                 task_and_id = (
-                    f"{vision_output.next_task.name} (id: {vision_output.next_task.primitive_id})"
+                    (
+                        f"{vision_output.next_task.name} "
+                        f"(id: {vision_output.next_task.primitive_id})"
+                    )
                     if vision_output.next_task
                     else "None"
                 )
                 self.logger.info(
-                    f"Processed image message in {time.time() - time_start} seconds, sent task: {task_and_id}\n"
+                    f"Processed image message in {time.time() - time_start} seconds, "
+                    f"sent task: {task_and_id}\n"
                 )
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)
@@ -174,6 +183,9 @@ class Brain:
         if map_payload:
             self.image_processor.process_map_with_robot(map_payload, robot_coords)
 
+        # Add the current image to history before calling the VLM
+        self.history.add_image(base64_img)
+
         # Convert the local primitives list to a list of PrimitiveDefinition instances
         local_primitives_list = prim_list_to_prim_obj_list(self.local_primitives_list)
 
@@ -183,10 +195,10 @@ class Brain:
             user_prompt_text=self.latest_user_message,
             primitive_in_execution=self.primitive_in_execution,
             primitives_list=local_primitives_list + self.primitives_list,
-            history_as_string=self.history.get_as_string(),
+            history=self.history.get_as_multimodal_list(),
             robot_coords=robot_coords,
             directive=self.directive,
-            agent_type=VisionAgentType.GEMINI_FLASH,
+            agent_type=VisionAgentType.GEMINI_FLASH_MULTI,
             gemini_variant=self.gemini_variant,
         )
 
@@ -201,7 +213,10 @@ class Brain:
                 new_goal=None,
                 next_task=None,
                 anticipation=None,
-                to_tell_user="BEEP BOOP BEEP BOOP, the brain failed. Stopping the current task.",
+                to_tell_user=(
+                    "BEEP BOOP BEEP BOOP, the brain failed. "
+                    "Stopping the current task."
+                ),
             )
 
             # Validate the next task
@@ -213,16 +228,23 @@ class Brain:
 
         # Look for discrepancies in the vision output
         # Could be a function later
-        # Potential discrepancy 1: There's a primitive running, the VLM does not say stop_current_task and yet it returns a next_task
+        # Potential discrepancy 1: There's a primitive running, the VLM does not say
+        # stop_current_task and yet it returns a next_task
         if (
             not vision_output.stop_current_task
             and vision_output.next_task is not None
             and self.primitive_in_execution is not None
         ):
             self.history.record_discrepancy(
-                message=f"The VLM returned a next_task ({vision_output.next_task.name}) even though there is a task running ({self.primitive_in_execution.name}) and it did not say to stop the current task.",
+                message=(
+                    f"The VLM returned a next_task ({vision_output.next_task.name}) "
+                    f"even though there is a task running "
+                    f"({self.primitive_in_execution.name}) and it did not say to "
+                    f"stop the current task."
+                )
             )
-            # For now, we force the next_task to be None if it's not strictly asked to be stopped.
+            # For now, we force the next_task to be None if it's not strictly asked
+            # to be stopped.
             vision_output.next_task = None
 
         # Clear the user message as it's been consumed
@@ -349,12 +371,12 @@ class Brain:
         )
         await self.send_callback(response)
 
-        # Save the entire history to a file
         self.history.save()
 
-        # Only notify the client that the server is ready for the next image if there's no next task.
-        # If there is a next task, we'll wait for the primitive_activated message before
-        # requesting next image.
+        # Only notify the client that the server is ready for the next image if
+        # there's no next task.
+        # If there is a next task, we'll wait for the primitive_activated message
+        # before requesting next image.
         if not vision_output.next_task:
             await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
@@ -547,7 +569,8 @@ class Brain:
             and primitive_id == self.primitive_in_execution.primitive_id
         ):
             self.logger.info(
-                f"Task '{self.primitive_in_execution.name}' (ID: {primitive_id}) completed."
+                f"Task '{self.primitive_in_execution.name}' "
+                f"(ID: {primitive_id}) completed."
             )
             # Use system message type for completion
             self.history.add(
@@ -558,7 +581,8 @@ class Brain:
         else:
             task_id_msg = f"Task '{primitive_name}' (ID: {primitive_id})"
             raise ValueError(
-                f"[Brain {self.connection_id}] {task_id_msg} is not the current task in execution."
+                f"[Brain {self.connection_id}] {task_id_msg} is not the current "
+                f"task in execution."
             )
 
     async def handle_primitive_failed(self, message: MessageIn):
@@ -584,7 +608,8 @@ class Brain:
         else:
             task_id_msg = f"Task '{primitive_name}' (ID: {primitive_id})"
             raise ValueError(
-                f"[Brain {self.connection_id}] {task_id_msg} is not the current task in execution."
+                f"[Brain {self.connection_id}] {task_id_msg} is not the current "
+                f"task in execution."
             )
 
     async def handle_primitive_interrupted(self, message: MessageIn):
@@ -609,7 +634,8 @@ class Brain:
         else:
             task_id_msg = f"Task '{primitive_name}' (ID: {primitive_id})"
             raise ValueError(
-                f"[Brain {self.connection_id}] {task_id_msg} is not the current task in execution."
+                f"[Brain {self.connection_id}] {task_id_msg} is not the current "
+                f"task in execution."
             )
 
     async def handle_primitive_activated(self, message: MessageIn):
@@ -674,7 +700,8 @@ class Brain:
         """
         Handle messages of type 'reset'.
         Resets brain state: history, pose graph memory, and state variables.
-        If a memory_state parameter is provided and memory commands are enabled, loads that state.
+        If a memory_state parameter is provided and memory commands are enabled,
+        loads that state.
         """
         self.logger.info(f"Resetting brain state for connection {self.connection_id}")
 
@@ -709,7 +736,8 @@ class Brain:
 
             if success:
                 self.logger.info(
-                    f"Loaded memory state '{memory_state}' for connection {self.connection_id}"
+                    f"Loaded memory state '{memory_state}' for "
+                    f"connection {self.connection_id}"
                 )
                 # Notify the client that the server is ready for the next image
                 await self.send_callback(
@@ -718,13 +746,15 @@ class Brain:
                 return
             else:
                 self.logger.error(
-                    f"Failed to load memory state '{memory_state}', performing standard reset"
+                    f"Failed to load memory state '{memory_state}', "
+                    f"performing standard reset"
                 )
         elif memory_state and (
             not self.enable_memory_commands or self.memory_state_manager is None
         ):
             self.logger.warning(
-                f"Memory state '{memory_state}' provided, but memory commands are disabled"
+                f"Memory state '{memory_state}' provided, "
+                f"but memory commands are disabled"
             )
 
         # Perform standard reset if no memory state was provided or loading failed
@@ -762,7 +792,8 @@ class Brain:
             )
         else:
             self.logger.error(
-                "NavigateThroughMemory primitive not found, couldn't reset pose graph memory"
+                "NavigateThroughMemory primitive not found, "
+                "couldn't reset pose graph memory"
             )
 
         # Notify the client that the server is ready for the next image
@@ -790,7 +821,8 @@ class Brain:
                 # Validate required fields
                 if not name:
                     self.logger.error(
-                        f"Primitive registration missing required 'name' field: {primitive_data}"
+                        f"Primitive registration missing required 'name' field: "
+                        f"{primitive_data}"
                     )
                     continue
 
@@ -841,18 +873,23 @@ class Brain:
                 "success": True,
                 "count": registered_count,
                 "directive_registered": directive_registered,
-                "message": f"Successfully registered {registered_count} primitives and {'a' if directive_registered else 'no'} directive.",
+                "message": (
+                    f"Successfully registered {registered_count} primitives and "
+                    f"{'a' if directive_registered else 'no'} directive."
+                ),
             },
         )
         await self.send_callback(response)
 
         self.logger.info(
-            f"Registered {registered_count} primitives and {'a' if directive_registered else 'no'} directive."
+            f"Registered {registered_count} primitives and "
+            f"{'a' if directive_registered else 'no'} directive."
         )
 
     async def stop(self):
         """
-        Stop the brain by flagging running=False and enqueueing a None message to exit the loop.
+        Stop the brain by flagging running=False and enqueueing a None message to
+        exit the loop.
         """
         self.running = False
         await self.message_queue.put(None)

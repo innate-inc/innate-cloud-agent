@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import os
 import json
 
+from src.agents.types import MultimodalHistoryItem
+
 
 # Define history entry types – here we include only entries that are relevant.
 class HistoryEntryType(Enum):
@@ -16,6 +18,7 @@ class HistoryEntryType(Enum):
     TASK_INTERRUPTED = "task_interrupted"
     TASK_CANCELLED = "task_cancelled"
     TASK_COMPLETED = "task_completed"
+    IMAGE = "image"
 
 
 # Internal display types for formatting vision agent outputs
@@ -47,8 +50,11 @@ def get_now():
 class History:
     MAX_HISTORY_LENGTH = 40
     NUM_HISTORY_TO_SUMMARIZE = 20
+    # Number of entries to consider for get_as_multimodal_list
+    MULTIMODAL_HISTORY_COUNT = 50
+    MAX_MULTIMODAL_IMAGES = 3  # Max number of recent images to include
 
-    def __init__(self):
+    def __init__(self, max_multimodal_images: int = 3):
         # Entries that have not yet been summarized.
         self.entries: List[HistoryEntry] = []
         self.non_summarized_entries: List[HistoryEntry] = []
@@ -56,6 +62,8 @@ class History:
         self.discrepancies: List[Dict[str, Any]] = []
         self.history_start_time = get_now()
         self.is_summarizing = False
+        # Allow overriding the default max images via constructor
+        self.MAX_MULTIMODAL_IMAGES = max_multimodal_images
 
     def reset(self):
         """Reset the history to an empty state."""
@@ -77,6 +85,16 @@ class History:
         self.entries.append(entry)
         self.non_summarized_entries.append(entry)
         self.check_and_summarize()
+
+    def add_image(self, image_base64: str):
+        """Add an image entry to the history."""
+        entry = HistoryEntry(
+            timestamp=get_now(),
+            type=HistoryEntryType.IMAGE,
+            description=image_base64,
+        )
+        self.entries.append(entry)
+        self.non_summarized_entries.append(entry)
 
     def record_discrepancy(
         self,
@@ -148,7 +166,12 @@ class History:
                             task = data["next_task"]
                             task_name = task["name"]
                             task_inputs = task["inputs"]
-                            message = f"Next task decided: {task_name} with inputs: {task_inputs}"
+                            # Adjusted to fit within line limits
+                            message_lines = [
+                                f"Next task decided: {task_name}",
+                                f"  Inputs: {task_inputs}",
+                            ]
+                            message = "\n".join(message_lines)
                             display_entries.append(
                                 {
                                     "type": DisplayEntryType.NEXT_TASK_DECIDED,
@@ -174,15 +197,39 @@ class History:
                         }
                     )
             else:
-                # Map HistoryEntryType to DisplayEntryType
-                display_type = DisplayEntryType(entry.type.value)
-                display_entries.append(
-                    {
-                        "type": display_type,
-                        "message": entry.description,
-                        "timestamp": entry.timestamp,
-                    }
-                )
+                # Map HistoryEntryType to DisplayEntryType, handling IMAGE type
+                if entry.type == HistoryEntryType.IMAGE:
+                    # Images are not typically displayed directly in get_as_string
+                    # but if they were, you'd handle it here.
+                    # For now, skip adding them to string display or add a placeholder.
+                    display_entries.append(
+                        {
+                            "type": DisplayEntryType.SYSTEM_MESSAGE,  # Or a new DisplayEntryType.IMAGE
+                            "message": "[Image data]",
+                            "timestamp": entry.timestamp,
+                        }
+                    )
+                else:
+                    display_type_value = entry.type.value
+                    # Ensure the value is a valid DisplayEntryType member name
+                    # This handles cases where HistoryEntryType might have values not in DisplayEntryType
+                    try:
+                        display_type = DisplayEntryType(display_type_value)
+                    except ValueError:
+                        # Fallback for types not directly in DisplayEntryType (e.g. custom tasks if any)
+                        # Or treat as a generic system message
+                        display_type = DisplayEntryType.SYSTEM_MESSAGE
+                        entry.description = (
+                            f"{display_type_value.capitalize()}: {entry.description}"
+                        )
+
+                    display_entries.append(
+                        {
+                            "type": display_type,
+                            "message": entry.description,
+                            "timestamp": entry.timestamp,
+                        }
+                    )
 
         # Function to preprocess messages for comparison
         def preprocess_message(message: str) -> str:
@@ -260,7 +307,14 @@ class History:
                 prefix = "Summary:"
             elif entry["type"] == DisplayEntryType.NEXT_TASK_DECIDED:
                 prefix = "Next Task Decided:"
-                suffix = f" I am waiting for confirmation this task gets activated, after which I should be aware that it is running until cancelled, interrupted, or completed."
+                # Adjusted to fit within line limits
+                # The suffix implies waiting, so it's context for the agent.
+                suffix_lines = [
+                    " I am waiting for confirmation this task gets activated,",
+                    " after which I should be aware that it is running until",
+                    " cancelled, interrupted, or completed.",
+                ]
+                suffix = "".join(suffix_lines)
             else:
                 prefix = f"{entry['type'].value}:"
 
@@ -281,14 +335,109 @@ class History:
             prefix_col = 11  # Width for the prefix column
 
             # Add the line
+            # Adjusted to fit within line limits
+            full_message = f"{entry['message']}{suffix}"
+            # Split message if too long for a single line, though usually handled by terminal wrapping
             lines.append(
-                f"{time_str:>{time_col}} | {prefix:<{prefix_col}} {entry['message']}{suffix}"
+                f"{time_str:>{time_col}} | {prefix:<{prefix_col}} {full_message}"
             )
 
         # Add a separator line before the current time
         lines.append("-" * term_width)
         lines.append(f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
         return "\n".join(lines)
+
+    def _get_text_lines_from_entry(self, entry: HistoryEntry) -> List[str]:
+        """Converts a history entry to a list of formatted text lines."""
+        lines = []
+        if entry.type == HistoryEntryType.AUDIO_IN:
+            lines.append(f"User: {entry.description}")
+        elif entry.type == HistoryEntryType.VISION_AGENT_OUTPUT:
+            try:
+                data = json.loads(entry.description)
+                if isinstance(data, dict):
+                    if data.get("observation"):
+                        lines.append(f"Observation: {data['observation']}")
+                    if data.get("thoughts"):
+                        lines.append(f"Thoughts: {data['thoughts']}")
+                    if data.get("to_tell_user"):
+                        lines.append(f"Assistant: {data['to_tell_user']}")
+                    # If no specific fields are found, we don't add generic text here
+                    # to keep the multimodal history clean for specific content types.
+            except json.JSONDecodeError:
+                # Log malformed JSON from vision agent output as a system log.
+                lines.append(
+                    f"System Log (Undecipherable Vision Output): {entry.description}"
+                )
+        elif entry.type == HistoryEntryType.SYSTEM_MESSAGE:
+            lines.append(f"System: {entry.description}")
+        elif entry.type == HistoryEntryType.HISTORY_SUMMARY:
+            lines.append(f"Summary: {entry.description}")
+        elif entry.type in [
+            HistoryEntryType.TASK_ACTIVATED,
+            HistoryEntryType.TASK_COMPLETED,
+            HistoryEntryType.TASK_CANCELLED,
+            HistoryEntryType.TASK_INTERRUPTED,
+        ]:
+            lines.append(f"Task Status ({entry.type.value}): {entry.description}")
+        # IMAGE type is handled by the caller, so no 'else' needed for it here.
+        # Fallback for any other unknown text-based types:
+        elif entry.type != HistoryEntryType.IMAGE:
+            lines.append(f"{entry.type.value.capitalize()}: {entry.description}")
+        return lines
+
+    def get_as_multimodal_list(self) -> List[MultimodalHistoryItem]:
+        """
+        Convert history entries to a list of MultimodalHistoryItem objects,
+        merging consecutive text entries.
+        """
+        multimodal_list: List[MultimodalHistoryItem] = []
+        current_text_lines_block: List[str] = []
+
+        # Use a slice of the most recent entries
+        start_index = max(0, len(self.entries) - self.MULTIMODAL_HISTORY_COUNT)
+        latest_entries = self.entries[start_index:]
+
+        # Identify indices of all images in the latest_entries slice
+        image_indices_in_latest = [
+            i
+            for i, entry in enumerate(latest_entries)
+            if entry.type == HistoryEntryType.IMAGE
+        ]
+
+        # Select the indices of the last MAX_MULTIMODAL_IMAGES
+        selected_image_indices = set(
+            image_indices_in_latest[-self.MAX_MULTIMODAL_IMAGES :]
+        )
+
+        for i, entry in enumerate(latest_entries):
+            if entry.type == HistoryEntryType.IMAGE:
+                # If there's an existing text block, finalize and add it first
+                if current_text_lines_block:
+                    merged_text = "\n".join(current_text_lines_block)
+                    multimodal_list.append(
+                        MultimodalHistoryItem(type="text", content=merged_text)
+                    )
+                    current_text_lines_block = []  # Reset for the next block
+
+                # Add the image item ONLY if its index is in the selected set
+                if i in selected_image_indices:
+                    multimodal_list.append(
+                        MultimodalHistoryItem(type="image", content=entry.description)
+                    )
+            else:
+                # It's a text-based entry, get its line representations
+                text_lines_for_entry = self._get_text_lines_from_entry(entry)
+                current_text_lines_block.extend(text_lines_for_entry)
+
+        # After the loop, if there's any remaining text block, add it
+        if current_text_lines_block:
+            merged_text = "\n".join(current_text_lines_block)
+            multimodal_list.append(
+                MultimodalHistoryItem(type="text", content=merged_text)
+            )
+
+        return multimodal_list
 
     def check_and_summarize(self):
         if len(self.entries) > self.MAX_HISTORY_LENGTH:
