@@ -1,12 +1,14 @@
 from src.agents.types import PrimitiveDefinition
+from src.constants_robots import ROBOT_PARAMS_TO_USE
 from src.primitives.types import Primitive
 from typing import List
 from math import atan, radians, tan, degrees
 import math
 from src.utils import decode_map_payload
 
-SIM_VERTICAL_FOV = 80.0
-SIM_CAMERA_RESOLUTION = (640, 480)
+
+SIM_VERTICAL_FOV = ROBOT_PARAMS_TO_USE["vertical_fov"]
+SIM_CAMERA_RESOLUTION = ROBOT_PARAMS_TO_USE["camera_resolution"]
 SIM_HORIZONTAL_FOV = degrees(
     2
     * atan(
@@ -16,8 +18,11 @@ SIM_HORIZONTAL_FOV = degrees(
     )
 )
 
+MAURICE_OAK_D_VERTICAL_FOV = ROBOT_PARAMS_TO_USE["vertical_fov"]
+MAURICE_OAK_D_HORIZONTAL_FOV = ROBOT_PARAMS_TO_USE["horizontal_fov"]
+
 # Minimum distance (in meters) that the target position must be from obstacles
-MIN_OBSTACLE_DISTANCE = 0.25
+MIN_OBSTACLE_DISTANCE = ROBOT_PARAMS_TO_USE["min_obstacle_distance"]
 
 
 class NavigationHandler:
@@ -39,8 +44,8 @@ class NavigationHandler:
             current_yaw=robot_coords["theta"],
             image_b64=base64_img,
             depth_payload=depth_payload,
-            horizontal_fov=SIM_HORIZONTAL_FOV,
-            vertical_fov=SIM_VERTICAL_FOV,
+            horizontal_fov=MAURICE_OAK_D_HORIZONTAL_FOV,
+            vertical_fov=MAURICE_OAK_D_VERTICAL_FOV,
         )
 
         # Extract input parameters

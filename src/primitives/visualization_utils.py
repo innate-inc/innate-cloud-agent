@@ -6,7 +6,7 @@ import os
 # Constants for visualization
 COLORS = {
     "in_fov": (0, 255, 0),  # Green
-    "out_fov": (0, 0, 255),  # Red
+    "invalid": (0, 0, 255),  # Red - Changed from out_fov
     "selected": (255, 0, 0),  # Blue
     "background": (255, 255, 255),  # White
     "robot": (255, 0, 255),  # Magenta
@@ -14,7 +14,9 @@ COLORS = {
 }
 
 
-def draw_navigation_point(image, x, y, point_id, circle_radius=15):
+def draw_navigation_point(
+    image, x, y, point_id, circle_radius=15, point_color_key="in_fov"
+):
     """Draw a single navigation point with ID on the image."""
     # Ensure coordinates are integers
     x, y = int(x), int(y)
@@ -23,7 +25,7 @@ def draw_navigation_point(image, x, y, point_id, circle_radius=15):
     cv2.circle(image, (x, y), circle_radius + 2, COLORS["text"], -1)
 
     # Draw filled circle
-    cv2.circle(image, (x, y), circle_radius, COLORS["in_fov"], -1)
+    cv2.circle(image, (x, y), circle_radius, COLORS[point_color_key], -1)
 
     # Add number text
     font_size = 0.8
@@ -62,24 +64,17 @@ def annotate_camera_view(image, navigation_points, point_converter):
 
     Args:
         image: Original camera image
-        navigation_points: List of (angle, distance, point_id) tuples
+        navigation_points: List of (angle, distance, point_id) tuples for valid points
         point_converter: Function that converts (angle, distance) to image coordinates
     """
     annotated_img = image.copy()
-    in_view_points = 0
+    in_view_points = 0  # Renamed from in_view_valid_points
     out_of_view_points = 0
 
     # Get image dimensions for drawing the out-of-view indicator
     height, width = annotated_img.shape[:2]
 
-    # Add a small overlay at the bottom with stats
-    info_bar_height = 40
-    overlay = annotated_img.copy()
-    cv2.rectangle(
-        overlay, (0, height - info_bar_height), (width, height), (0, 0, 0), -1
-    )
-    annotated_img = cv2.addWeighted(overlay, 0.3, annotated_img, 0.7, 0)
-
+    # Draw valid points (renamed from navigation_points to be clear)
     for point_data in navigation_points:
         if len(point_data) == 3:  # Using (angle, distance, point_id) format
             angle, distance, point_id = point_data
@@ -99,12 +94,13 @@ def annotate_camera_view(image, navigation_points, point_converter):
 
         # Point is within field of view
         in_view_points += 1
-        draw_navigation_point(annotated_img, img_x, img_y, point_id)
+        draw_navigation_point(
+            annotated_img, img_x, img_y, point_id, point_color_key="in_fov"
+        )
 
     # Add text showing how many points are in view vs out of view
-    status_text = (
-        f"Points in view: {in_view_points}/{in_view_points + out_of_view_points}"
-    )
+    total_viewable_points = in_view_points + out_of_view_points
+    status_text = f"Points in view: {in_view_points}/{total_viewable_points}"
     cv2.putText(
         annotated_img,
         status_text,
@@ -157,7 +153,12 @@ def draw_robot_on_map(vis_map, robot_x, robot_y, robot_yaw, scale=1):
 
 
 def create_map_visualization(
-    map_array, robot_pos, navigation_points, map_info, scale_factor=4
+    map_array,
+    robot_pos,
+    navigation_points,
+    map_info,
+    scale_factor=4,
+    invalid_points=None,
 ):
     """
     Create a visualization of the map with robot and navigation points.
@@ -165,9 +166,10 @@ def create_map_visualization(
     Args:
         map_array: 2D numpy array of map data
         robot_pos: (x, y, yaw) tuple in grid coordinates
-        navigation_points: List of (x, y, theta, point_id) tuples in grid coordinates
+        navigation_points: List of (x, y, theta, point_id) tuples for valid points in grid coordinates
         map_info: Dictionary with map metadata
         scale_factor: Factor to scale up the final visualization
+        invalid_points: Optional list of (x, y, theta, point_id) tuples for invalid points in grid coordinates
     """
     # Create RGB visualization
     vis_map = np.zeros((map_array.shape[0], map_array.shape[1], 3), dtype=np.uint8)
@@ -190,7 +192,7 @@ def create_map_visualization(
         vis_map_large, scaled_robot_x, scaled_robot_y, scaled_robot_yaw, scale=2
     )
 
-    # Draw navigation points on scaled map
+    # Draw valid navigation points on scaled map
     for point_data in navigation_points:
         if len(point_data) == 4:  # Using (x, y, theta, point_id) format
             point_x, point_y, point_theta, point_id = point_data
@@ -229,6 +231,50 @@ def create_map_visualization(
             2,  # Thicker text
         )
 
+    # Draw invalid navigation points on scaled map
+    if invalid_points:
+        for point_data in invalid_points:
+            if len(point_data) == 4:  # Using (x, y, theta, point_id) format
+                point_x, point_y, point_theta, point_id = point_data
+            else:  # Should not happen
+                point_x, point_y, point_theta = point_data
+                point_id = 0
+
+            # Scale coordinates for the enlarged map
+            point_x = int(point_x * scale_factor)
+            point_y = int(point_y * scale_factor)
+
+            # Draw point (circles appropriate for the scaled map) - use "invalid" color
+            cv2.circle(
+                vis_map_large, (point_x, point_y), 8, COLORS["invalid"], -1
+            )  # Red color
+            cv2.circle(
+                vis_map_large, (point_x, point_y), 10, COLORS["text"], 1
+            )  # Black outline
+
+            # Draw orientation (lines appropriate for the scaled map) - use "invalid" color
+            orientation_length = 20
+            endpoint_x = int(point_x + orientation_length * np.cos(point_theta))
+            endpoint_y = int(point_y + orientation_length * np.sin(point_theta))
+            cv2.line(
+                vis_map_large,
+                (point_x, point_y),
+                (endpoint_x, endpoint_y),
+                COLORS["invalid"],  # Red color
+                2,
+            )
+
+            # Add point ID (text size appropriate for the scaled map)
+            cv2.putText(
+                vis_map_large,
+                str(point_id),
+                (point_x + 12, point_y - 12),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                COLORS["text"],
+                2,
+            )
+
     # Add border and title
     border_size = 50
     map_with_border = (
@@ -265,6 +311,7 @@ def create_map_visualization(
     legend_items = [
         ("Robot", COLORS["robot"]),
         ("Navigation Points", COLORS["in_fov"]),
+        ("Invalid Points", COLORS["invalid"]),  # Added legend for invalid points
         ("Obstacles", COLORS["text"]),
     ]
 

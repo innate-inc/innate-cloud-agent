@@ -1,11 +1,9 @@
 import numpy as np
 import math
-
-# Constants for the camera
-HORIZONTAL_FOV = 96.4  # Camera horizontal field of view in degrees
-VERT_FOV = 80.0  # Camera vertical field of view in degrees
-IMAGE_WIDTH = 640
-IMAGE_HEIGHT = 480
+from math import atan
+from pathfinding.core.grid import Grid
+from pathfinding.finder.a_star import AStarFinder
+from pathfinding.core.diagonal_movement import DiagonalMovement
 
 
 def deg2rad(deg):
@@ -18,95 +16,38 @@ def rad2deg(rad):
     return rad * 180 / np.pi
 
 
-def compute_intrinsics(width, height, h_fov_deg, v_fov_deg):
-    """
-    Compute camera intrinsic matrix from field of view.
-
-    Args:
-        width: Image width in pixels
-        height: Image height in pixels
-        h_fov_deg: Horizontal field of view in degrees
-        v_fov_deg: Vertical field of view in degrees
-
-    Returns:
-        K: 3x3 camera intrinsic matrix
-    """
-    h_fov = deg2rad(h_fov_deg)
-    v_fov = deg2rad(v_fov_deg)
-    f_x = (width / 2) / np.tan(h_fov / 2)
-    f_y = (height / 2) / np.tan(v_fov / 2)
-    c_x = width / 2
-    c_y = height / 2
-    K = np.array([[f_x, 0, c_x], [0, f_y, c_y], [0, 0, 1]])
-    return K
-
-
-def compute_homography(K, h, pitch_deg):
+def compute_the_vignesh_transform(h=0.19663, x_cam=0.0197, pitch_deg=-10):
     """
     Compute homography matrix for ground plane projection.
-
-    Args:
-        K: Camera intrinsic matrix
-        h: Camera height in centimeters
-        pitch_deg: Camera pitch angle in degrees (90° is looking straight forward)
-
-    Returns:
-        H: 3x3 homography matrix
     """
     # Convert pitch to radians. We define theta = -pitch so that if pitch>0
     # (camera looks downward) then theta is negative.
-    pitch = deg2rad(pitch_deg)
-    theta = -pitch
+    # 1) Camera mount in base_link (meters)
+    t = np.array([x_cam, 0.0, h])
 
-    # Rotation matrix about the x-axis:
+    # 2) Camera pitch-down 10° about base_link Y
+    theta = np.deg2rad(-pitch_deg)
+    c, s = np.cos(theta), np.sin(theta)
+
+    # 3) Rotation from base_link → cam frame (about Y):
     R = np.array(
         [
-            [1, 0, 0],
-            [0, np.cos(theta), -np.sin(theta)],
-            [0, np.sin(theta), np.cos(theta)],
+            [c, 0, -s],
+            [0, 1, 0],
+            [s, 0, c],
         ]
     )
 
-    # Extract columns of R:
-    r1 = R[:, 0]  # [1, 0, 0]
-    r2 = R[:, 1]  # [0, cos(theta), sin(theta)]
-    r3 = R[:, 2]  # [0, -sin(theta), cos(theta)]
+    # 4) Build the 4×4 extrinsic T_cam←base so that
+    #    p_cam = T_cam←base @ p_base:
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = -R.dot(t)
 
-    # For ground points (world z=0), the projection is:
-    # p ~ K * [ r1  r2  -h*r3 ] * [x, y, 1]^T.
-    M = np.column_stack((r1, r2, -h * r3))
-    H = K @ M
-    return H
+    return T
 
 
-def project_ground_point(H, D, gamma_deg):
-    """
-    Project ground point to image coordinates.
-
-    Args:
-        H: Homography matrix
-        D: Distance from camera in centimeters
-        gamma_deg: Angle in degrees from camera forward direction
-
-    Returns:
-        (u, v): Image coordinates in pixels
-    """
-    # Convert gamma from degrees to radians
-    gamma = deg2rad(gamma_deg)
-
-    # Ground point (with origin at camera's vertical projection on the ground)
-    x = D * np.sin(gamma)
-    y = D * np.cos(gamma)
-    ground_pt = np.array([x, y, 1])
-
-    # Project point
-    p = H @ ground_pt
-    u = p[0] / p[2]
-    v = p[1] / p[2]
-    return u, v
-
-
-def is_point_in_fov(angle, distance, h_fov_deg=HORIZONTAL_FOV, v_fov_deg=VERT_FOV):
+def is_point_in_fov(angle, distance, h_fov_deg):
     """
     Check if a point at given angle and distance is within the camera's field of view.
 
@@ -139,41 +80,54 @@ def is_point_in_fov(angle, distance, h_fov_deg=HORIZONTAL_FOV, v_fov_deg=VERT_FO
     return True
 
 
-def angle_distance_to_image_coordinates(angle, distance, h_cam=20, pitch_deg=90):
+def angle_distance_to_image_coordinates(angle, distance, camera_info):
     """
     Convert angle and distance to image coordinates using proper camera projection.
 
     Args:
         angle (float): Angle in radians relative to robot's forward direction
         distance (float): Distance in meters
-        h_cam (float): Camera height in centimeters
+        camera_info (dict): Camera information with keys "width", "height",
+                            "horizontal_fov", "vertical_fov"
+        height_cam (float): Camera height in centimeters
         pitch_deg (float): Camera pitch angle in degrees (90° is looking forward)
 
     Returns:
         tuple: (x, y) coordinates in the image, or (None, None) if out of field of view
     """
+    # Camera parameters
+    width = camera_info["width"]
+    height = camera_info["height"]
+    h_fov_deg = camera_info["horizontal_fov"]
+    v_fov_deg = camera_info["vertical_fov"]
+    pitch_deg = camera_info["pitch_deg"]
+    x_cam = camera_info["x_cam"]
+    height_cam = camera_info["height_cam"]
+
     # Check if the point is within the field of view first
-    if not is_point_in_fov(angle, distance):
+    if not is_point_in_fov(angle, distance, h_fov_deg):
         return (None, None)
 
-    # Camera parameters
-    width = IMAGE_WIDTH
-    height = IMAGE_HEIGHT
-    h_fov_deg = HORIZONTAL_FOV
-    v_fov_deg = VERT_FOV
-
-    # Convert distance to centimeters
-    distance_cm = distance * 100
-
-    # Convert angle to degrees
-    angle_deg = rad2deg(angle)
+    print(f"Camera info: {camera_info}")
 
     # Compute camera intrinsics and homography
-    K = compute_intrinsics(width, height, h_fov_deg, v_fov_deg)
-    H = compute_homography(K, h_cam, pitch_deg)
+    T_cam_base = compute_the_vignesh_transform(height_cam, x_cam, pitch_deg)
 
-    # Project the point
-    u, v = project_ground_point(H, distance_cm, angle_deg)
+    z = 0
+    x = distance * np.cos(angle)
+    y = distance * np.sin(angle)
+
+    p_base = np.array([x, y, z, 1.0])
+    p_cam = T_cam_base @ p_base
+
+    v_rad = atan(p_cam[2] / p_cam[0])
+    h_rad = atan(p_cam[1] / p_cam[0])
+
+    v_deg = rad2deg(v_rad)
+    h_deg = rad2deg(h_rad)
+
+    u = width / 2 - h_deg * width / h_fov_deg
+    v = height / 2 - v_deg * height / v_fov_deg
 
     # Check if coordinates are within image bounds
     if u < 0 or u >= width or v < 0 or v >= height:
@@ -186,15 +140,137 @@ def angle_distance_to_image_coordinates(angle, distance, h_cam=20, pitch_deg=90)
     return (int(u), int(v))
 
 
+def is_map_location_valid(
+    start_world_x,
+    start_world_y,
+    point_x,
+    point_y,
+    map_array,
+    map_info,
+    min_obstacle_distance_m,
+    path_to_direct_ratio_threshold=2.0,  # Max path/direct ratio
+):
+    """
+    Check if a given world coordinate is a valid and reachable navigation point.
+
+    Args:
+        start_world_x (float): Robot's current X world coordinate.
+        start_world_y (float): Robot's current Y world coordinate.
+        point_x (float): X world coordinate of the target point.
+        point_y (float): Y world coordinate of the target point.
+        map_array (np.ndarray): Map occupancy grid data (0=free, 100=obstacle,
+                                -1=unknown).
+        map_info (dict): Map metadata (resolution, origin_x, origin_y, width, height).
+        min_obstacle_distance_m (float): Minimum allowable distance from obstacles
+                                     for the target point's vicinity.
+        path_to_direct_ratio_threshold (float): Max allowed ratio of
+                                                path length to direct distance.
+
+    Returns:
+        bool: True if the point is valid and reachable, False otherwise.
+    """
+    resolution = map_info["resolution"]
+    origin_x = map_info["origin_x"]
+    origin_y = map_info["origin_y"]
+    map_width = map_info["width"]
+    map_height = map_info["height"]
+
+    # 1. Initial check: Vicinity of the target point (existing logic)
+    # Convert target to grid coordinates
+    target_grid_x = int((point_x - origin_x) / resolution)
+    target_grid_y = int((point_y - origin_y) / resolution)
+
+    # Skip if target is outside map bounds
+    if not (0 <= target_grid_x < map_width and 0 <= target_grid_y < map_height):
+        return False
+
+    # Calculate obstacle radius in grid cells for local check
+    obstacle_radius_cells = int(min_obstacle_distance_m / resolution)
+    min_gx = max(0, target_grid_x - obstacle_radius_cells)
+    max_gx = min(map_width - 1, target_grid_x + obstacle_radius_cells)
+    min_gy = max(0, target_grid_y - obstacle_radius_cells)
+    max_gy = min(map_height - 1, target_grid_y + obstacle_radius_cells)
+
+    for y_cell in range(min_gy, max_gy + 1):
+        for x_cell in range(min_gx, max_gx + 1):
+            cell_dist_grid = math.sqrt(
+                (x_cell - target_grid_x) ** 2 + (y_cell - target_grid_y) ** 2
+            )
+            if (
+                cell_dist_grid <= obstacle_radius_cells
+                and map_array[y_cell, x_cell] == 100  # Obstacle
+            ):
+                return False  # Obstacle found in target vicinity
+
+    # 2. Prepare for Pathfinding
+    start_grid_x = int((start_world_x - origin_x) / resolution)
+    start_grid_y = int((start_world_y - origin_y) / resolution)
+
+    # Skip if start is outside map bounds
+    if not (0 <= start_grid_x < map_width and 0 <= start_grid_y < map_height):
+        return False
+
+    # 3. Create Pathfinding Grid
+    # python-pathfinding Grid: 0 is blocked, >0 is cost.
+    # map_array: 0=free, 100=obstacle, -1=unknown
+    walkable_matrix = np.ones_like(map_array, dtype=int)  # Cost 1 for walkable
+    walkable_matrix[map_array == 100] = 0  # Obstacles are blocked
+    walkable_matrix[map_array == -1] = 0  # Unknown areas are blocked
+
+    # Ensure the matrix is C-contiguous for pathfinding library if it's picky
+    # (usually numpy outputs are fine, but an explicit copy can ensure it)
+    pf_matrix = np.ascontiguousarray(walkable_matrix)
+
+    pathfinding_grid = Grid(matrix=pf_matrix)
+
+    start_node = pathfinding_grid.node(start_grid_x, start_grid_y)
+    end_node = pathfinding_grid.node(target_grid_x, target_grid_y)
+
+    # Check if start or end nodes themselves are on non-walkable cells
+    # (e.g. robot spawned inside an obstacle, or target cell is an obstacle)
+    # The previous vicinity check for target_grid already handles some of this,
+    # but this is an exact cell check.
+    if not start_node.walkable or not end_node.walkable:
+        return False
+
+    # 4. Run A* Finder
+    finder = AStarFinder(diagonal_movement=DiagonalMovement.always)
+    path, runs = finder.find_path(start_node, end_node, pathfinding_grid)
+
+    # 5. Evaluate Path
+    if not path or len(path) == 0:  # No path found
+        return False
+
+    # Heuristic: Check if path length is excessive compared to direct distance
+    if len(path) > 1:  # Path exists
+        path_length_m = (len(path) - 1) * resolution
+        direct_distance_m = math.sqrt(
+            (point_x - start_world_x) ** 2 + (point_y - start_world_y) ** 2
+        )
+
+        if direct_distance_m == 0:  # Start and end are the same point
+            # If direct dist is 0, path len should be 0 (or 1 node if start==end).
+            # A path of len 1 means start=end. Len 0 means no path.
+            # If path len > 1 here, it's odd, but ratio check might handle it.
+            pass  # Valid if path is trivial (len 1) or effectively 0 length.
+        elif path_length_m > (path_to_direct_ratio_threshold * direct_distance_m):
+            return False  # Path too indirect
+
+    # All checks passed
+    return True
+
+
 def sample_valid_navigation_points(
     current_x,
     current_y,
     current_yaw,
     map_array,
     map_info,
+    h_fov_deg,
     distances=[0.5, 1.5],
     angles_deg=[-30, 0, 30],
-    min_obstacle_distance=0.50,
+    min_obstacle_distance=0.20,
+    path_ratio_threshold=2.0,  # Max path/direct ratio
 ):
     """
     Sample valid navigation points in front of the robot.
@@ -205,103 +281,91 @@ def sample_valid_navigation_points(
         current_yaw (float): Current robot orientation in radians
         map_array (np.ndarray): Map occupancy grid data
         map_info (dict): Map metadata
-        min_distance (float): Minimum distance from robot to sample points (meters)
-        max_distance (float): Maximum distance from robot to sample points (meters)
+        h_fov_deg (float): Horizontal field of view in degrees for FOV check.
+        distances (list): List of distances to sample points at (meters).
+        angles_deg (list): List of angles to sample points at
+                           (degrees, relative to robot).
         min_obstacle_distance (float): Minimum allowable distance from obstacles
-            (meters)
-        num_samples (int): Number of points to sample
-        visualize (bool): Whether to visualize the sampling process
+            (meters) for the target point's vicinity.
+        path_ratio_threshold (float): Max allowed ratio of path len to direct dist
+                                     for reachability check.
 
     Returns:
-        tuple: (valid_points_absolute, valid_points_angle_distance)
-            - valid_points_absolute: List of (x, y, theta) tuples in world coordinates
-            - valid_points_angle_distance: List of (angle, distance) tuples relative
-              to robot
+        tuple: (
+            valid_points_absolute, # List of (x,y,theta) world coords
+            valid_points_angle_distance, # List of (angle,distance) relative
+            invalid_points_absolute, # List of (x,y,theta) world coords (invalid)
+            invalid_points_angle_distance # List of (angle,distance) relative (invalid)
+        )
     """
-    # Get map metadata
-    resolution = map_info["resolution"]
-    origin_x = map_info["origin_x"]
-    origin_y = map_info["origin_y"]
+    # Get map metadata (not strictly needed here anymore, but good for context)
+    # resolution = map_info["resolution"]
+    # origin_x = map_info["origin_x"]
+    # origin_y = map_info["origin_y"]
 
     # Sample points in a sector in front of the robot
     valid_points_absolute = []
     valid_points_angle_distance = []
     filtered_points = 0  # Count points filtered due to FOV constraints
 
-    # Calculate obstacle radius in grid cells
-    obstacle_radius = int(min_obstacle_distance / resolution)
-
     angles = [deg2rad(angle) for angle in angles_deg]
 
-    # Check if we're trying to sample at distances or angles that are incompatible with the FOV
-    h_fov_rad = deg2rad(HORIZONTAL_FOV)
-
-    for angle in angles:
-        if abs(angle) > h_fov_rad:
-            print(
-                f"WARNING: Sampling angle ({angle:.2f} rad) exceeds camera FOV ({h_fov_rad:.2f} rad)"
-            )
-            print("Some points may be outside the camera view")
-
     # For each combination of angle and distance
-    for angle in angles:
+    invalid_points_absolute = []
+    invalid_points_angle_distance = []
+
+    # We should leave a warning here if the minimum obstacle distance
+    #  is lower than the resolution of the map.
+    if min_obstacle_distance < map_info["resolution"]:
+        print(
+            f"Warning: Minimum obstacle distance ({min_obstacle_distance}m) is "
+            f"lower than the map resolution ({map_info['resolution']}m)."
+        )
+
+    for angle_robot_rel in angles:
         for distance in distances:
-            # Check if the point would be visible in the camera FOV
-            angle_rel = -(
-                angle - current_yaw
-            )  # Get angle relative to current orientation
-            if not is_point_in_fov(angle, distance):
-                filtered_points += 1
-                continue
-
             # Calculate world coordinates
-            point_x = current_x + distance * np.cos(angle_rel)
-            point_y = current_y + distance * np.sin(angle_rel)
+            # angle_world_vector is the world angle of the vector from robot to point.
+            # Convention used: world_angle = robot_yaw - angle_relative_to_forward
+            angle_world_vector = current_yaw - angle_robot_rel
+            point_x = current_x + distance * np.cos(angle_world_vector)
+            point_y = current_y + distance * np.sin(angle_world_vector)
+            # point_absolute stores (x, y, orientation_of_robot_at_target)
+            # The orientation is aligned with the vector from current pos to target pos.
+            point_absolute = (point_x, point_y, angle_world_vector)
+            point_angle_distance = (angle_robot_rel, distance)
 
-            # Convert to grid coordinates
-            grid_x = int((point_x - origin_x) / resolution)
-            grid_y = int((point_y - origin_y) / resolution)
-
-            # Skip if outside map bounds
-            if (
-                grid_x < 0
-                or grid_x >= map_info["width"]
-                or grid_y < 0
-                or grid_y >= map_info["height"]
-            ):
+            # Check if the point would be visible in the camera FOV
+            if not is_point_in_fov(angle_robot_rel, distance, h_fov_deg):
+                filtered_points += 1
+                invalid_points_absolute.append(point_absolute)
+                invalid_points_angle_distance.append(point_angle_distance)
                 continue
 
-            # Check if point is a valid navigable location (away from obstacles)
-            is_valid = True
+            # Check if point is a valid navigable location using the helper function
+            if is_map_location_valid(
+                current_x,
+                current_y,
+                point_x,
+                point_y,
+                map_array,
+                map_info,
+                min_obstacle_distance,
+                path_ratio_threshold,
+            ):
+                # The navigation target will face in direction from robot to point
+                valid_points_absolute.append(point_absolute)
+                valid_points_angle_distance.append(point_angle_distance)
+            else:
+                invalid_points_absolute.append(point_absolute)
+                invalid_points_angle_distance.append(point_angle_distance)
 
-            # Define a search window around the point
-            min_x = max(0, grid_x - obstacle_radius)
-            max_x = min(map_info["width"] - 1, grid_x + obstacle_radius)
-            min_y = max(0, grid_y - obstacle_radius)
-            max_y = min(map_info["height"] - 1, grid_y + obstacle_radius)
-
-            # Check if any cell within the radius is an obstacle (value = 100)
-            for y in range(min_y, max_y + 1):
-                for x in range(min_x, max_x + 1):
-                    # Calculate distance from this cell to the target cell
-                    cell_distance = math.sqrt((x - grid_x) ** 2 + (y - grid_y) ** 2)
-
-                    # If this cell is within our search radius and is an obstacle
-                    if cell_distance <= obstacle_radius and map_array[y, x] == 100:
-                        is_valid = False
-                        break
-
-                if not is_valid:
-                    break
-
-            # Add the point if it's valid
-            if is_valid:
-                # The navigation target will face in the direction from robot to point
-                target_theta = angle_rel
-                valid_points_absolute.append((point_x, point_y, target_theta))
-                valid_points_angle_distance.append((angle, distance))
-
-    return valid_points_absolute, valid_points_angle_distance
+    return (
+        valid_points_absolute,  # List of (x, y, theta) tuples
+        valid_points_angle_distance,  # List of (angle, distance) tuples
+        invalid_points_absolute,  # List of (x, y, theta) tuples
+        invalid_points_angle_distance,  # List of (angle, distance) tuples
+    )
 
 
 def world_to_grid_coordinates(x, y, map_info):

@@ -6,11 +6,43 @@ import networkx as nx
 import numpy as np
 from datetime import datetime
 import base64
-from typing import Optional, Tuple, Dict, List, Any
+from typing import Optional, Tuple
 import google.generativeai as genai
 import json
 from PIL import Image
 from io import BytesIO
+from src.constants_robots import ROBOT_PARAMS_TO_USE
+
+# Default values for PoseGraphMemory parameters
+DEFAULT_MIN_DISTANCE = 0.5  # meters
+DEFAULT_MIN_ANGLE_DEGREES = ROBOT_PARAMS_TO_USE["horizontal_fov"] * (
+    100 / 120
+)  # degrees
+DEFAULT_EDGE_DISTANCE_THRESHOLD = 0.8  # meters
+DEFAULT_EDGE_ANGLE_THRESHOLD_DEGREES = ROBOT_PARAMS_TO_USE["horizontal_fov"] * (
+    100 / 120
+)  # degrees
+
+# File system constants
+DATA_DIR_NAME = "data"
+IMAGES_DIR_NAME = "images"
+GRAPHS_DIR_NAME = "pose_graphs"
+GRAPH_FILE_EXTENSION = ".pkl"
+IMAGE_FILE_EXTENSION = ".jpg"
+TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
+
+# Gemini API constants
+GEMINI_MODEL_NAME = "gemini-2.0-flash"
+GEMINI_TEMPERATURE = 0
+GEMINI_TOP_P = 0.95
+GEMINI_TOP_K = 64
+GEMINI_MAX_OUTPUT_TOKENS = 8192
+GEMINI_RESPONSE_MIME_TYPE = "application/json"
+
+# Image processing constants
+MAX_IMAGE_DIMENSION = 800
+IMAGE_MODE_RGB = "RGB"
+IMAGE_FORMAT_JPEG = "JPEG"
 
 
 class PoseGraphMemory:
@@ -31,41 +63,48 @@ class PoseGraphMemory:
     def _initialize(self):
         """Initialize the pose graph memory system."""
         self.data_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data"
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), DATA_DIR_NAME
         )
-        self.images_dir = os.path.join(self.data_dir, "images")
-        self.graphs_dir = os.path.join(self.data_dir, "pose_graphs")
+        self.images_dir = os.path.join(self.data_dir, IMAGES_DIR_NAME)
+        self.graphs_dir = os.path.join(self.data_dir, GRAPHS_DIR_NAME)
 
         # Create directories if they don't exist
         os.makedirs(self.images_dir, exist_ok=True)
         os.makedirs(self.graphs_dir, exist_ok=True)
 
         # Parameters for node addition
-        self.min_distance = 0.2  # Minimum distance between nodes (meters)
-        self.min_angle_diff = np.radians(45)  # Minimum angle difference (radians)
+        self.min_distance = (
+            DEFAULT_MIN_DISTANCE  # Minimum distance between nodes (meters)
+        )
+        self.min_angle_diff = np.radians(
+            DEFAULT_MIN_ANGLE_DEGREES
+        )  # Minimum angle difference (radians)
 
         # Parameters for edge creation
-        self.edge_distance_threshold = 0.8  # Maximum distance for edge creation
-        self.edge_angle_threshold = np.radians(90)  # Maximum angle for edge creation
+        self.edge_distance_threshold = DEFAULT_EDGE_DISTANCE_THRESHOLD
+        self.edge_angle_threshold = np.radians(
+            DEFAULT_EDGE_ANGLE_THRESHOLD_DEGREES
+        )  # Maximum angle for edge creation
 
         # Initialize Gemini API if API key is available
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
             genai.configure(api_key=api_key)
             self.gemini_model = genai.GenerativeModel(
-                model_name="gemini-2.0-flash",
+                model_name=GEMINI_MODEL_NAME,
                 generation_config={
-                    "temperature": 0,
-                    "top_p": 0.95,
-                    "top_k": 64,
-                    "max_output_tokens": 8192,
-                    "response_mime_type": "application/json",
+                    "temperature": GEMINI_TEMPERATURE,
+                    "top_p": GEMINI_TOP_P,
+                    "top_k": GEMINI_TOP_K,
+                    "max_output_tokens": GEMINI_MAX_OUTPUT_TOKENS,
+                    "response_mime_type": GEMINI_RESPONSE_MIME_TYPE,
                 },
             )
         else:
             self.gemini_model = None
             print(
-                "Warning: GEMINI_API_KEY not found in environment variables. VLM-based navigation will not be available."
+                "Warning: GEMINI_API_KEY not found in environment variables. "
+                "VLM-based navigation will not be available."
             )
 
     def get_user_graph(self, user_token: str) -> nx.DiGraph:
@@ -209,14 +248,14 @@ class PoseGraphMemory:
             # Base prompt - improved to be more explicit
             base_assistant_text = (
                 f"You are an AI assistant for a robot navigating through a space. "
-                f"Your goal is to help the robot find specific locations based on visual appearance. "
-                f"I will show you a series of images labeled as Frame 1, Frame 2, etc. "
-                f"Each image shows a different colored square. "
-                f"Then I will ask you to identify which frame best matches a color description. "
-                f"You must respond with a JSON object containing a 'frame_number' key with the "
-                f"number of the best matching frame as an integer value. "
-                f'For example: {{"frame_number": 2}} if Frame 2 is the best match. '
-                f"This is critical for the robot's navigation."
+                f"Your goal is to help the robot find specific locations based on "
+                f"visual appearance. I will show you a series of images labeled as "
+                f"Frame 1, Frame 2, etc. Each image shows a different colored square. "
+                f"Then I will ask you to identify which frame best matches a color "
+                f"description. You must respond with a JSON object containing a "
+                f"'frame_number' key with the number of the best matching frame as an "
+                f'integer value. For example: {{"frame_number": 2}} if Frame 2 is the '
+                f"best match. This is critical for the robot's navigation."
             )
             message_parts.append(base_assistant_text)
 
@@ -232,16 +271,19 @@ class PoseGraphMemory:
                 if os.path.exists(image_path):
                     with Image.open(image_path) as img:
                         # Convert to RGB if needed
-                        if img.mode != "RGB":
-                            img = img.convert("RGB")
+                        if img.mode != IMAGE_MODE_RGB:
+                            img = img.convert(IMAGE_MODE_RGB)
 
                         # Resize if too large
-                        if img.width > 800 or img.height > 800:
-                            img.thumbnail((800, 800))
+                        if (
+                            img.width > MAX_IMAGE_DIMENSION
+                            or img.height > MAX_IMAGE_DIMENSION
+                        ):
+                            img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION))
 
                         # Create a Gemini image part
                         buff = BytesIO()
-                        img.save(buff, format="JPEG")
+                        img.save(buff, format=IMAGE_FORMAT_JPEG)
                         img_bytes = buff.getvalue()
                         img_part = {"mime_type": "image/jpeg", "data": img_bytes}
                         message_parts.append(img_part)
@@ -256,11 +298,11 @@ class PoseGraphMemory:
 
             # Final question - improved to be more explicit
             last_message = (
-                f'Based on these images, which frame best matches this description: "{description}"? '
-                f"Look carefully at the colors and visual elements in each frame. "
-                f"Pay special attention to the color of each square. "
-                f"Respond ONLY with a JSON object containing a 'frame_number' key with the "
-                f"number of the best matching frame as an integer value. "
+                f"Based on these images, which frame best matches this description: "
+                f'"{description}"? Look carefully at the colors and visual elements in '
+                f"each frame. Pay special attention to the color of each square. "
+                f"Respond ONLY with a JSON object containing a 'frame_number' key "
+                f"with the number of the best matching frame as an integer value. "
                 f'For example: {{"frame_number": 2}} if Frame 2 is the best match.'
             )
             message_parts.append(last_message)
@@ -312,8 +354,8 @@ class PoseGraphMemory:
         user_dir = os.path.join(self.images_dir, user_token)
         os.makedirs(user_dir, exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{timestamp}.jpg"
+        timestamp = datetime.now().strftime(TIMESTAMP_FORMAT)
+        filename = f"{timestamp}{IMAGE_FILE_EXTENSION}"
         filepath = os.path.join(user_dir, filename)
 
         # Decode base64 image and save to file
@@ -395,7 +437,7 @@ class PoseGraphMemory:
 
     def _save_graph(self, user_token: str, graph: nx.DiGraph):
         """Save the graph to persistent storage."""
-        filepath = os.path.join(self.graphs_dir, f"{user_token}.pkl")
+        filepath = os.path.join(self.graphs_dir, f"{user_token}{GRAPH_FILE_EXTENSION}")
 
         try:
             with open(filepath, "wb") as f:
@@ -405,7 +447,7 @@ class PoseGraphMemory:
 
     def _load_graph(self, user_token: str) -> nx.DiGraph:
         """Load the graph from persistent storage."""
-        filepath = os.path.join(self.graphs_dir, f"{user_token}.pkl")
+        filepath = os.path.join(self.graphs_dir, f"{user_token}{GRAPH_FILE_EXTENSION}")
 
         if not os.path.exists(filepath):
             return nx.DiGraph()  # Return empty graph if no saved graph exists
@@ -494,7 +536,8 @@ class NavigateThroughMemory(Primitive):
         }
 
         return (
-            f"Found location matching '{description}' at coordinates ({x}, {y}, {theta})",
+            f"Found location matching '{description}' at "
+            f"coordinates ({x}, {y}, {theta})",
             True,
             navigation_command,
         )
