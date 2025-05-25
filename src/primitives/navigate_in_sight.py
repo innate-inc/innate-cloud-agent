@@ -53,6 +53,9 @@ class NavigateInSight(Primitive):
             "After using it, you can use it again to get closer or pursue navigation "
             "in sight if you deem it necessary. Can be very helpful to follow paths or "
             "navigate to a target that is far."
+            "It is also naturally used in conjunction with the 'turn_and_move' "
+            "primitive to turn and potentially look around if the target is not "
+            "immediately visible but you know it might be around."
         )
 
     def update_current_vars(
