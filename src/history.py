@@ -376,8 +376,6 @@ class History:
         )
 
         for d_entry in deduplicated_intermediate_entries:
-            formatted_line = self._format_intermediate_entry_to_string(d_entry, now)
-
             source_idx = d_entry["source_index"]  # Index in entries_to_process
             original_raw_type = d_entry["original_raw_type"]
             original_raw_description = d_entry["original_raw_description"]
@@ -386,6 +384,31 @@ class History:
                 original_raw_type == HistoryEntryType.GENERIC_IMAGE
                 or original_raw_type == HistoryEntryType.IMAGE_PRE_ACTION
             ) and source_idx in selected_image_source_indices
+
+            if is_selected_for_multimodal_image_role:
+                # Create and add the "This is what I was seeing." text item first
+                prefix_text_intermediate_entry = {
+                    "timestamp": d_entry["timestamp"],  # Use image's timestamp
+                    "type": DisplayEntryType.SYSTEM_MESSAGE,
+                    "message": "This is what I was seeing.",
+                    # Pass through other fields; safer for formatter.
+                    "source_index": d_entry["source_index"],
+                    "original_raw_type": DisplayEntryType.SYSTEM_MESSAGE,  # Arbitrary
+                    "original_raw_description": "This is what you were seeing.",
+                }
+                prefix_formatted_line = self._format_intermediate_entry_to_string(
+                    prefix_text_intermediate_entry, now
+                )
+                unified_items.append(
+                    {
+                        "formatted_line": prefix_formatted_line,
+                        "is_multimodal_image": False,
+                        "multimodal_image_content": None,
+                    }
+                )
+
+            # Format and add the original item (image placeholder or other text)
+            formatted_line = self._format_intermediate_entry_to_string(d_entry, now)
 
             unified_items.append(
                 {
