@@ -205,7 +205,9 @@ function GeminiVisionAgentMultiImages(img: image, context_multimodal: ImageOrStr
 
         THIS IS VERY IMPORTANT. I REPEAT, DO NOT STOP THE CURRENT TASK UNLESS IT'S REQUESTED BY THE USER OR IT'S CLEARLY STATED IN YOUR DIRECTIVE.
 
-        {{ context_multimodal }}.
+        {% for item in context_multimodal %}
+        {{ item }}
+        {% endfor %}
 
         This is what you see: {{ img }}.
 
