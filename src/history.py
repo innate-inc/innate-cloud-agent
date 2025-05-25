@@ -474,14 +474,19 @@ class History:
             os.makedirs(folder, exist_ok=True)
 
             # Save current history
-            serializable_history = [
-                {
-                    **entry.model_dump(),
-                    "timestamp": entry.timestamp.isoformat(),
-                    "type": entry.type.value,
-                }
-                for entry in self.entries
-            ]
+            serializable_history = []
+            for entry in self.entries:
+                entry_data = entry.model_dump()
+                entry_data["timestamp"] = entry.timestamp.isoformat()
+                entry_data["type"] = entry.type.value
+
+                if entry.type == HistoryEntryType.GENERIC_IMAGE:
+                    entry_data["description"] = "[Image data]"
+                elif entry.type == HistoryEntryType.IMAGE_PRE_ACTION:
+                    entry_data["description"] = "[Image Before Action]"
+
+                serializable_history.append(entry_data)
+
             filename = os.path.join(
                 folder,
                 f"history_{self.history_start_time.strftime('%Y%m%d_%H%M%S')}.json",
