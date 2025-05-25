@@ -1,7 +1,7 @@
 import asyncio
 import json
 import time
-from typing import Dict
+from typing import Dict, Optional
 import uuid
 
 
@@ -32,12 +32,19 @@ def prim_list_to_prim_obj_list(prim_list):
 
 class Brain:
     def __init__(
-        self, connection_id: str, send_callback, enable_memory_commands: bool = False
+        self,
+        connection_id: str,
+        send_callback,
+        enable_memory_commands: bool = False,
+        max_recent_generic_images: int = 3,
+        max_recent_pre_action_images: int = 3,
     ):
         """
         connection_id: an identifier for this brain instance (for logging/debugging)
         send_callback: an async function to send a response back to the client.
         enable_memory_commands: whether to enable memory state save/load/list commands
+        max_recent_generic_images: max generic images in multimodal history
+        max_recent_pre_action_images: max pre-action images in multimodal history
         """
         self.connection_id = connection_id
         self.send_callback = send_callback
@@ -67,7 +74,10 @@ class Brain:
         # Initialize history to record chat messages and vision agent outputs.
         # The History class defaults to MAX_MULTIMODAL_IMAGES = 3.
         # To override, instantiate with: History(max_multimodal_images=N)
-        self.history = History()
+        self.history = History(
+            max_recent_generic_images=max_recent_generic_images,
+            max_recent_pre_action_images=max_recent_pre_action_images,
+        )
 
         # Initialize logger and helper modules
         self.logger = BrainLogger(connection_id)
@@ -160,13 +170,15 @@ class Brain:
         # Extract data from payload
 
         self.logger.debug(f"Received image message: {message.payload.keys()}")
-        base64_img, depth_payload, robot_coords, map_payload = (
+        base64_img_extracted, depth_payload, robot_coords, map_payload = (
             self.image_processor.extract_image_data(message.payload)
         )
 
-        # Ensure image is in JPEG format
+        current_image_for_vlm: str
         try:
-            base64_img = self.image_processor.ensure_jpeg_format(base64_img)
+            current_image_for_vlm = self.image_processor.ensure_jpeg_format(
+                base64_img_extracted
+            )
         except ValueError as e:
             self.logger.error(f"Image format error: {e}")
             # Send error response to client
@@ -183,15 +195,13 @@ class Brain:
         if map_payload:
             self.image_processor.process_map_with_robot(map_payload, robot_coords)
 
-        # Add the current image to history before calling the VLM
-        self.history.add_image(base64_img)
+        # The image is now stored in current_image_for_vlm
+        # It will be added to history after the VLM call with the correct type.
 
-        # Convert the local primitives list to a list of PrimitiveDefinition instances
         local_primitives_list = prim_list_to_prim_obj_list(self.local_primitives_list)
 
-        # Call VLM and get output
         vision_output = await self.vision_service.call_visual_language_model(
-            base64_img=base64_img,
+            base64_img=current_image_for_vlm,  # Use local variable
             user_prompt_text=self.latest_user_message,
             primitive_in_execution=self.primitive_in_execution,
             primitives_list=local_primitives_list + self.primitives_list,
@@ -201,6 +211,19 @@ class Brain:
             agent_type=VisionAgentType.GEMINI_FLASH_MULTI,
             gemini_variant=self.gemini_variant,
         )
+
+        # Log the image with appropriate type AFTER VLM call
+        if current_image_for_vlm:
+            if vision_output and vision_output.next_task:
+                self.history.add(
+                    HistoryEntryType.IMAGE_PRE_ACTION,
+                    description=current_image_for_vlm,
+                )
+            else:
+                self.history.add(
+                    HistoryEntryType.GENERIC_IMAGE,
+                    description=current_image_for_vlm,
+                )
 
         if not vision_output:
             self.logger.error(
@@ -219,7 +242,7 @@ class Brain:
                 ),
             )
 
-            # Validate the next task
+        # Validate the next task
         vision_output.next_task = (
             PrimitiveDefinition.model_validate(vision_output.next_task)
             if vision_output.next_task
@@ -269,7 +292,11 @@ class Brain:
         ):
             vision_output_to_write_in_history = vision_output.model_copy()
             vision_output = await self.navigation_handler.handle_navigate_in_sight(
-                vision_output, robot_coords, base64_img, depth_payload, map_payload
+                vision_output,
+                robot_coords,
+                base64_img_extracted,
+                depth_payload,
+                map_payload,
             )
 
         # Handle special case for navigate_through_memory
