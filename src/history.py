@@ -117,321 +117,334 @@ class History:
         words = len(text.split())
         return (words / 150) * 60  # Convert to seconds
 
-    def get_as_string(self) -> str:
-        now = get_now()
-        lines = []
-        term_width = 80  # Standard terminal width
+    def _get_intermediate_display_entries(
+        self, entries_to_process: List[HistoryEntry]
+    ) -> List[Dict[str, Any]]:
+        """
+        Converts raw HistoryEntry objects to a list of intermediate display dicts.
+        Each dict contains enough info for deduplication and final formatting.
+        """
+        intermediate_display_entries: List[Dict[str, Any]] = []
+        for i, entry in enumerate(entries_to_process):
+            entry_data_common = {
+                "timestamp": entry.timestamp,
+                "source_index": i,
+                "original_raw_type": entry.type,
+                "original_raw_description": entry.description,
+            }
 
-        # Get only the latest 50 entries
-        latest_entries = self.entries
-
-        # First loop: Convert entries to display entries
-        display_entries = []
-        for entry in latest_entries:
             if entry.type == HistoryEntryType.VISION_AGENT_OUTPUT:
                 try:
                     data = json.loads(entry.description)
                     if isinstance(data, dict):
                         if "observation" in data and data["observation"]:
-                            display_entries.append(
+                            intermediate_display_entries.append(
                                 {
+                                    **entry_data_common,
                                     "type": DisplayEntryType.OBSERVATION,
                                     "message": data["observation"],
-                                    "timestamp": entry.timestamp,
                                 }
                             )
                         if "thoughts" in data and data["thoughts"]:
-                            display_entries.append(
+                            intermediate_display_entries.append(
                                 {
+                                    **entry_data_common,
                                     "type": DisplayEntryType.THOUGHTS,
                                     "message": data["thoughts"],
-                                    "timestamp": entry.timestamp,
                                 }
                             )
                         if "anticipation" in data and data["anticipation"]:
-                            display_entries.append(
+                            intermediate_display_entries.append(
                                 {
+                                    **entry_data_common,
                                     "type": DisplayEntryType.ANTICIPATION,
                                     "message": data["anticipation"],
-                                    "timestamp": entry.timestamp,
                                 }
                             )
                         if "next_task" in data and data["next_task"]:
                             task = data["next_task"]
                             task_name = task["name"]
                             task_inputs = task["inputs"]
-                            # Adjusted to fit within line limits
                             message_lines = [
                                 f"Next task decided: {task_name}",
                                 f"  Inputs: {task_inputs}",
                             ]
                             message = "\n".join(message_lines)
-                            display_entries.append(
+                            intermediate_display_entries.append(
                                 {
+                                    **entry_data_common,
                                     "type": DisplayEntryType.NEXT_TASK_DECIDED,
                                     "message": message,
-                                    "timestamp": entry.timestamp,
                                 }
                             )
                         if "to_tell_user" in data and data["to_tell_user"]:
                             message = f"To tell user: {data['to_tell_user']}"
-                            display_entries.append(
+                            intermediate_display_entries.append(
                                 {
+                                    **entry_data_common,
                                     "type": DisplayEntryType.AUDIO_OUT,
                                     "message": message,
-                                    "timestamp": entry.timestamp,
                                 }
                             )
                 except json.JSONDecodeError:
-                    display_entries.append(
+                    intermediate_display_entries.append(
                         {
+                            **entry_data_common,
                             "type": DisplayEntryType.SYSTEM_MESSAGE,
+                            # Show raw description if JSON fails
                             "message": entry.description,
-                            "timestamp": entry.timestamp,
                         }
                     )
             else:
-                # Map HistoryEntryType to DisplayEntryType, handling IMAGE type
+                message_content = entry.description
+                display_type_value = entry.type.value
+                display_type = DisplayEntryType.SYSTEM_MESSAGE  # Default
+
                 if entry.type == HistoryEntryType.GENERIC_IMAGE:
-                    display_entries.append(
-                        {
-                            "type": DisplayEntryType.SYSTEM_MESSAGE,
-                            "message": "[Image data]",
-                            "timestamp": entry.timestamp,
-                        }
-                    )
+                    message_content = "[Image data]"
+                    display_type = DisplayEntryType.SYSTEM_MESSAGE
                 elif entry.type == HistoryEntryType.IMAGE_PRE_ACTION:
-                    display_entries.append(
-                        {
-                            "type": DisplayEntryType.SYSTEM_MESSAGE,
-                            "message": "[Image Before Action]",
-                            "timestamp": entry.timestamp,
-                        }
-                    )
+                    message_content = "[Image Before Action]"
+                    display_type = DisplayEntryType.SYSTEM_MESSAGE
                 else:
-                    display_type_value = entry.type.value
-                    # Ensure the value is a valid DisplayEntryType member name
-                    # This handles cases where HistoryEntryType might have values
-                    # not in DisplayEntryType
                     try:
                         display_type = DisplayEntryType(display_type_value)
                     except ValueError:
-                        # Fallback for types not directly in DisplayEntryType (e.g.
-                        # custom tasks if any) or treat as a generic system message
+                        # Fallback for types not directly in DisplayEntryType
                         display_type = DisplayEntryType.SYSTEM_MESSAGE
-                        entry.description = (
+                        message_content = (
                             f"{display_type_value.capitalize()}: {entry.description}"
                         )
 
-                    display_entries.append(
-                        {
-                            "type": display_type,
-                            "message": entry.description,
-                            "timestamp": entry.timestamp,
-                        }
-                    )
+                intermediate_display_entries.append(
+                    {
+                        **entry_data_common,
+                        "type": display_type,
+                        "message": message_content,
+                    }
+                )
+        return intermediate_display_entries
 
-        # Function to preprocess messages for comparison
+    def _deduplicate_intermediate_entries(
+        self, intermediate_entries: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Deduplicates a list of intermediate display entries."""
+        deduplicated_entries: List[Dict[str, Any]] = []
+        last_values: Dict[Any, str] = {}
+
         def preprocess_message(message: str) -> str:
-            """Normalize message by trimming whitespace and converting to lowercase."""
             return message.strip().lower()
 
-        # Second loop: Deduplicate entries
-        # Don't deduplicate task status messages, system messages, or audio messages.
-        deduplicated_entries = []
-        last_values: Dict[Any, str] = {}
-        for entry in display_entries:
-            if entry["type"] in [
+        for entry_dict in intermediate_entries:
+            # Pass through types that should not be deduplicated
+            if entry_dict["type"] in [
                 DisplayEntryType.TASK_ACTIVATED,
                 DisplayEntryType.TASK_INTERRUPTED,
                 DisplayEntryType.TASK_CANCELLED,
                 DisplayEntryType.TASK_COMPLETED,
+                # System messages (incl. image placeholders) are not deduped
                 DisplayEntryType.SYSTEM_MESSAGE,
                 DisplayEntryType.AUDIO_IN,
+                # Audio out has "still speaking" logic, not simple deduplication
                 DisplayEntryType.AUDIO_OUT,
                 DisplayEntryType.HISTORY_SUMMARY,
             ]:
-                entry["processed_message"] = entry["message"]
-                deduplicated_entries.append(entry)
+                deduplicated_entries.append(entry_dict)
             else:
-                processed_message = preprocess_message(entry["message"])
+                # Apply deduplication for other types
+                processed_message = preprocess_message(entry_dict["message"])
                 processed_last_message = (
-                    preprocess_message(last_values.get(entry["type"], ""))
-                    if entry["type"] in last_values
+                    preprocess_message(last_values.get(entry_dict["type"], ""))
+                    if entry_dict["type"] in last_values
                     else ""
                 )
 
                 if processed_message != processed_last_message:
-                    # Add processed message to the entry for future reference
-                    entry["processed_message"] = processed_message
-                    deduplicated_entries.append(entry)
-                    last_values[entry["type"]] = entry["message"]
+                    deduplicated_entries.append(entry_dict)
+                    last_values[entry_dict["type"]] = entry_dict["message"]
+        return deduplicated_entries
 
-        # Third loop: Format and display entries
-        for entry in deduplicated_entries:
-            suffix = ""
-            # Format the entry based on its type
-            if entry["type"] == DisplayEntryType.SYSTEM_MESSAGE:
-                prefix = "System:"
-            elif entry["type"] == DisplayEntryType.AUDIO_IN:
-                prefix = "Audio In:"
-            elif entry["type"] == DisplayEntryType.AUDIO_OUT:
-                prefix = "Audio Out:"
+    def _format_intermediate_entry_to_string(
+        self, intermediate_entry_dict: Dict[str, Any], now: datetime
+    ) -> str:
+        """Formats a single deduplicated intermediate entry into a display string."""
+        entry_display_type = intermediate_entry_dict["type"]
+        message = intermediate_entry_dict["message"]
+        timestamp = intermediate_entry_dict["timestamp"]
 
-                # Determine if we have spoken the message.
-                time_since_started_speaking = now - entry["timestamp"]
+        prefix = ""
+        suffix = ""
+        time_col = 16
+        prefix_col = 11
 
-                if (
-                    time_since_started_speaking.total_seconds()
-                    > self.estimate_speech_duration(entry["message"])
-                ):
-                    suffix = ""
-                else:
-                    suffix = (
-                        " || STILL SPEAKING, I SHOULD NOT REPEAT A SIMILAR MESSAGE. "
-                    )
-
-            elif entry["type"] == DisplayEntryType.OBSERVATION:
-                prefix = "Observation:"
-            elif entry["type"] == DisplayEntryType.THOUGHTS:
-                prefix = "Thoughts:"
-            elif entry["type"] == DisplayEntryType.ANTICIPATION:
-                prefix = "Anticipation:"
-            elif entry["type"] == DisplayEntryType.TASK_ACTIVATED:
-                prefix = "Task Activated:"
-            elif entry["type"] == DisplayEntryType.TASK_INTERRUPTED:
-                prefix = "Task Interrupted:"
-            elif entry["type"] == DisplayEntryType.TASK_CANCELLED:
-                prefix = "Task Cancelled:"
-            elif entry["type"] == DisplayEntryType.HISTORY_SUMMARY:
-                prefix = "Summary:"
-            elif entry["type"] == DisplayEntryType.NEXT_TASK_DECIDED:
-                prefix = "Next Task Decided:"
-                # Adjusted to fit within line limits
-                # The suffix implies waiting, so it's context for the agent.
-                suffix_lines = [
-                    " I am waiting for confirmation this task gets activated,",
-                    " after which I should be aware that it is running until",
-                    " cancelled, interrupted, or completed.",
-                ]
-                suffix = "".join(suffix_lines)
+        # Determine prefix based on DisplayEntryType
+        if entry_display_type == DisplayEntryType.SYSTEM_MESSAGE:
+            prefix = "System:"
+        elif entry_display_type == DisplayEntryType.AUDIO_IN:
+            prefix = "Audio In:"
+        elif entry_display_type == DisplayEntryType.AUDIO_OUT:
+            prefix = "Audio Out:"
+            time_since_started_speaking = now - timestamp
+            if (
+                time_since_started_speaking.total_seconds()
+                > self.estimate_speech_duration(message)
+            ):
+                suffix = ""
             else:
-                prefix = f"{entry['type'].value}:"
+                suffix = " || STILL SPEAKING, I SHOULD NOT REPEAT A SIMILAR MESSAGE. "
+        elif entry_display_type == DisplayEntryType.OBSERVATION:
+            prefix = "Observation:"
+        elif entry_display_type == DisplayEntryType.THOUGHTS:
+            prefix = "Thoughts:"
+        elif entry_display_type == DisplayEntryType.ANTICIPATION:
+            prefix = "Anticipation:"
+        elif entry_display_type == DisplayEntryType.TASK_ACTIVATED:
+            prefix = "Task Activated:"
+        elif entry_display_type == DisplayEntryType.TASK_INTERRUPTED:
+            prefix = "Task Interrupted:"
+        elif entry_display_type == DisplayEntryType.TASK_CANCELLED:
+            prefix = "Task Cancelled:"
+        elif (
+            entry_display_type == DisplayEntryType.TASK_COMPLETED
+        ):  # Added for completeness
+            prefix = "Task Completed:"
+        elif entry_display_type == DisplayEntryType.HISTORY_SUMMARY:
+            prefix = "Summary:"
+        elif entry_display_type == DisplayEntryType.NEXT_TASK_DECIDED:
+            prefix = "Next Task Decided:"
+            suffix_lines = [
+                " I am waiting for confirmation this task gets activated,",
+                " after which I should be aware that it is running until",
+                " cancelled, interrupted, or completed.",
+            ]
+            suffix = "".join(suffix_lines)
+        else:
+            prefix = f"{entry_display_type.value}:"
 
-            # Calculate time difference
-            time_diff = now - entry["timestamp"]
-            secs = abs(int(time_diff.total_seconds()))
-            if secs < 60:
-                time_str = f"{secs}s ago"
-            elif secs < 3600:
-                minutes = secs // 60
-                time_str = f"{minutes}m ago"
-            else:
-                hours = secs // 3600
-                time_str = f"{hours}h ago"
+        # Calculate time difference string
+        time_diff = now - timestamp
+        secs = abs(int(time_diff.total_seconds()))
+        if secs < 60:
+            time_str = f"{secs}s ago"
+        elif secs < 3600:
+            minutes = secs // 60
+            time_str = f"{minutes}m ago"
+        else:
+            hours = secs // 3600
+            time_str = f"{hours}h ago"
 
-            # Format the line with proper alignment
-            time_col = 16  # Width for the timestamp column
-            prefix_col = 11  # Width for the prefix column
+        full_message = f"{message}{suffix}"
+        return f"{time_str:>{time_col}} | {prefix:<{prefix_col}} {full_message}"
 
-            # Add the line
-            # Adjusted to fit within line limits
-            full_message = f"{entry['message']}{suffix}"
-            # Split message if too long for a single line, though usually
-            # handled by terminal wrapping
-            lines.append(
-                f"{time_str:>{time_col}} | {prefix:<{prefix_col}} {full_message}"
+    def _prepare_unified_display_items(
+        self, entries_to_process: List[HistoryEntry], now: datetime
+    ) -> List[Dict[str, Any]]:
+        """
+        Prepares a list of unified display items, each containing formatted text
+        and multimodal image information if applicable.
+        """
+        intermediate_entries = self._get_intermediate_display_entries(
+            entries_to_process
+        )
+        deduplicated_intermediate_entries = self._deduplicate_intermediate_entries(
+            intermediate_entries
+        )
+
+        unified_items: List[Dict[str, Any]] = []
+
+        # Determine selected images based on entries_to_process
+        generic_image_indices = [
+            i
+            for i, entry in enumerate(entries_to_process)
+            if entry.type == HistoryEntryType.GENERIC_IMAGE
+        ]
+        selected_generic_indices = set(
+            generic_image_indices[-self.max_recent_generic_images :]
+        )
+
+        pre_action_image_indices = [
+            i
+            for i, entry in enumerate(entries_to_process)
+            if entry.type == HistoryEntryType.IMAGE_PRE_ACTION
+        ]
+        selected_pre_action_indices = set(
+            pre_action_image_indices[-self.max_recent_pre_action_images :]
+        )
+
+        selected_image_source_indices = selected_generic_indices.union(
+            selected_pre_action_indices
+        )
+
+        for d_entry in deduplicated_intermediate_entries:
+            formatted_line = self._format_intermediate_entry_to_string(d_entry, now)
+
+            source_idx = d_entry["source_index"]  # Index in entries_to_process
+            original_raw_type = d_entry["original_raw_type"]
+            original_raw_description = d_entry["original_raw_description"]
+
+            is_selected_for_multimodal_image_role = (
+                original_raw_type == HistoryEntryType.GENERIC_IMAGE
+                or original_raw_type == HistoryEntryType.IMAGE_PRE_ACTION
+            ) and source_idx in selected_image_source_indices
+
+            unified_items.append(
+                {
+                    "formatted_line": formatted_line,
+                    "is_multimodal_image": is_selected_for_multimodal_image_role,
+                    "multimodal_image_content": (
+                        original_raw_description
+                        if is_selected_for_multimodal_image_role
+                        else None
+                    ),
+                }
+            )
+        return unified_items
+
+    def get_as_string(self) -> str:
+        now = get_now()
+        term_width = 80  # Standard terminal width
+
+        # Consistent with MULTIMODAL_HISTORY_COUNT for display window
+        start_index = max(0, len(self.entries) - self.MULTIMODAL_HISTORY_COUNT)
+        entries_for_display = self.entries[start_index:]
+
+        if not entries_for_display:  # Handle empty history case
+            unified_display_items = []
+        else:
+            unified_display_items = self._prepare_unified_display_items(
+                entries_for_display, now
             )
 
-        # Add a separator line before the current time
-        lines.append("-" * term_width)
-        lines.append(f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-        return "\n".join(lines)
+        output_lines = [item["formatted_line"] for item in unified_display_items]
 
-    def _get_text_lines_from_entry(self, entry: HistoryEntry) -> List[str]:
-        """Converts a history entry to a list of formatted text lines."""
-        lines = []
-        if entry.type == HistoryEntryType.AUDIO_IN:
-            lines.append(f"User: {entry.description}")
-        elif entry.type == HistoryEntryType.VISION_AGENT_OUTPUT:
-            try:
-                data = json.loads(entry.description)
-                if isinstance(data, dict):
-                    if data.get("observation"):
-                        lines.append(f"Observation: {data['observation']}")
-                    if data.get("thoughts"):
-                        lines.append(f"Thoughts: {data['thoughts']}")
-                    if data.get("to_tell_user"):
-                        lines.append(f"Assistant: {data['to_tell_user']}")
-                    # If no specific fields are found, we don't add generic text here
-                    # to keep the multimodal history clean for specific content types.
-            except json.JSONDecodeError:
-                # Log malformed JSON from vision agent output as a system log.
-                lines.append(
-                    f"System Log (Undecipherable Vision Output): {entry.description}"
-                )
-        elif entry.type == HistoryEntryType.SYSTEM_MESSAGE:
-            lines.append(f"System: {entry.description}")
-        elif entry.type == HistoryEntryType.HISTORY_SUMMARY:
-            lines.append(f"Summary: {entry.description}")
-        elif entry.type in [
-            HistoryEntryType.TASK_ACTIVATED,
-            HistoryEntryType.TASK_COMPLETED,
-            HistoryEntryType.TASK_CANCELLED,
-            HistoryEntryType.TASK_INTERRUPTED,
-        ]:
-            lines.append(f"Task Status ({entry.type.value}): {entry.description}")
-        # IMAGE types are handled by the caller (get_as_multimodal_list),
-        # so no 'else' needed for them here in _get_text_lines_from_entry.
-        elif entry.type not in [
-            HistoryEntryType.GENERIC_IMAGE,
-            HistoryEntryType.IMAGE_PRE_ACTION,
-        ]:
-            lines.append(f"{entry.type.value.capitalize()}: {entry.description}")
-        return lines
+        # Add a separator line before the current time
+        output_lines.append("-" * term_width)
+        output_lines.append(f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+        return "\n".join(output_lines)
 
     def get_as_multimodal_list(self) -> List[MultimodalHistoryItem]:
         """
         Convert history entries to a list of MultimodalHistoryItem objects,
         merging consecutive text entries and including specific recent images.
+        Text content is formatted consistently with get_as_string.
         """
+        now = get_now()
         multimodal_list: List[MultimodalHistoryItem] = []
         current_text_lines_block: List[str] = []
+        term_width = 80  # For separator
 
         start_index = max(0, len(self.entries) - self.MULTIMODAL_HISTORY_COUNT)
-        latest_entries = self.entries[start_index:]
+        relevant_entries = self.entries[start_index:]
 
-        # Identify indices of GENERIC_IMAGE entries
-        generic_image_indices_in_latest = [
-            i
-            for i, entry in enumerate(latest_entries)
-            if entry.type == HistoryEntryType.GENERIC_IMAGE
-        ]
-        selected_generic_image_indices = set(
-            generic_image_indices_in_latest[-self.max_recent_generic_images :]
+        if not relevant_entries:  # Handle empty history case
+            return []
+
+        unified_display_items = self._prepare_unified_display_items(
+            relevant_entries, now
         )
 
-        # Identify indices of IMAGE_PRE_ACTION entries
-        pre_action_image_indices_in_latest = [
-            i
-            for i, entry in enumerate(latest_entries)
-            if entry.type == HistoryEntryType.IMAGE_PRE_ACTION
-        ]
-        selected_pre_action_image_indices = set(
-            pre_action_image_indices_in_latest[-self.max_recent_pre_action_images :]
-        )
-
-        # Combine selected image indices
-        selected_image_indices = selected_generic_image_indices.union(
-            selected_pre_action_image_indices
-        )
-
-        for i, entry in enumerate(latest_entries):
-            if (
-                entry.type == HistoryEntryType.GENERIC_IMAGE
-                or entry.type == HistoryEntryType.IMAGE_PRE_ACTION
-            ):
-                # This is an image entry
+        for item in unified_display_items:
+            if item["is_multimodal_image"]:
                 if current_text_lines_block:
                     merged_text = "\n".join(current_text_lines_block)
                     multimodal_list.append(
@@ -439,19 +452,32 @@ class History:
                     )
                     current_text_lines_block = []
 
-                if i in selected_image_indices:
-                    multimodal_list.append(
-                        MultimodalHistoryItem(type="image", content=entry.description)
+                multimodal_list.append(
+                    MultimodalHistoryItem(
+                        type="image", content=item["multimodal_image_content"]
                     )
+                )
             else:
-                # This is a text-based entry
-                text_lines_for_entry = self._get_text_lines_from_entry(entry)
-                current_text_lines_block.extend(text_lines_for_entry)
+                # This is a text-based entry or placeholder for a non-selected image
+                current_text_lines_block.append(item["formatted_line"])
 
         if current_text_lines_block:
             merged_text = "\n".join(current_text_lines_block)
             multimodal_list.append(
                 MultimodalHistoryItem(type="text", content=merged_text)
+            )
+
+        # Add current time to the multimodal list
+        current_time_str = f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        separator_line = "-" * term_width
+
+        if multimodal_list and multimodal_list[-1].type == "text":
+            multimodal_list[-1].content += f"\n{separator_line}\n{current_time_str}"
+        else:
+            multimodal_list.append(
+                MultimodalHistoryItem(
+                    type="text", content=f"{separator_line}\n{current_time_str}"
+                )
             )
 
         return multimodal_list
