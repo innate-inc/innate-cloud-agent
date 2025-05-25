@@ -838,6 +838,9 @@ class Brain:
         registered_count = 0
         directive_registered = False
 
+        # Clean up the primitives list
+        self.primitives_list = []
+
         # Process primitives
         for primitive_data in primitives_data:
             try:
