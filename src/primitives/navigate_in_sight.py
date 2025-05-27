@@ -6,8 +6,10 @@ import base64
 import cv2
 import numpy as np
 from ultralytics import YOLO, SAM
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import os
+from PIL import Image
 
 # Import utility modules
 from src.primitives.visualization_utils import (
@@ -27,18 +29,46 @@ from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 ROBOT_CAMERA_INFO = ROBOT_PARAMS_TO_USE["camera_info"]
 
+# Gemini API constants from navigate_through_memory.py
+GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+GEMINI_TEMPERATURE = 0
+GEMINI_TOP_P = 0.95
+GEMINI_TOP_K = 64
+GEMINI_MAX_OUTPUT_TOKENS = 8192
+
 
 class NavigateInSight(Primitive):
     def __init__(self):
         """
         Load the YOLO and SAM models for segmentation.
         Using the ultralytics implementations, these models are loaded on instantiation.
+        Initialize Gemini client.
         """
 
         # YOLO model for object detection. Adjust the weights file as needed.
         self.yolo_model = YOLO("yolov8m-worldv2.pt")
         # SAM model for segmentation. Adjust the weights file as needed.
         self.sam_model = SAM("sam2_t.pt")
+
+        # Initialize Gemini API client
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key:
+            try:
+                # Attempt to create the client, which might also handle configuration.
+                # If genai.configure is still needed, it should be called before client instantiation.
+                # However, the example in navigate_through_memory.py suggests client takes api_key directly.
+                # genai.configure(api_key=api_key) # Assuming configure is not needed if client takes key
+                self.genai_client = genai.Client(api_key=api_key)
+                print("Gemini client initialized successfully.")
+            except Exception as e:
+                self.genai_client = None
+                print(f"Failed to initialize Gemini client: {e}")
+        else:
+            self.genai_client = None
+            print(
+                "Warning: GEMINI_API_KEY not found in environment variables. "
+                "Point selection with VLM will not be available."
+            )
 
     @property
     def name(self):
@@ -639,44 +669,41 @@ Please respond with ONLY the number of the best point (1, 2, 3, etc).
 
         # Use the GenerativeAI package directly, like in navigate_through_memory.py
         try:
-            # Check if API key is available
-            api_key = os.getenv("GEMINI_API_KEY")
-            if not api_key:
+            # Check if API key is available and client was initialized
+            if not self.genai_client:
                 print(
-                    "Warning: GEMINI_API_KEY not found in environment. "
+                    "Warning: Gemini client not available. "
                     "Using default point 1."
                 )
                 selected_point_id = "1"
             else:
                 print("Calling Gemini to select a navigation point...")
 
-                # Configure the genai library
-                genai.configure(api_key=api_key)
-
-                # Create model instance
-                model = genai.GenerativeModel(
-                    model_name="gemini-2.0-flash",
-                    generation_config={
-                        "temperature": 0,
-                        "top_p": 0.95,
-                        "top_k": 64,
-                        "max_output_tokens": 1024,
-                    },
-                )
-
-                # Prepare image for Gemini
-                # Convert the annotated image to bytes for the model
+                # Convert CV2 image to JPEG bytes
                 _, img_encoded = cv2.imencode(".jpg", annotated_image)
                 img_bytes = img_encoded.tobytes()
 
-                # Create content parts
-                message_parts = [
-                    {"text": user_prompt},
-                    {"mime_type": "image/jpeg", "data": img_bytes},
-                ]
+                # Create image part for Gemini
+                image_part = types.Part.from_bytes(
+                    data=img_bytes,
+                    mime_type='image/jpeg',
+                )
 
-                # Call Gemini model
-                response = model.generate_content(message_parts)
+                # Create content parts: user prompt and the image part
+                message_parts = [user_prompt, image_part]
+                
+                # Call Gemini model using the client
+                response = self.genai_client.models.generate_content(
+                    contents=message_parts,
+                    model=GEMINI_MODEL_NAME, 
+                    config=types.GenerateContentConfig( 
+                        temperature=GEMINI_TEMPERATURE,
+                        top_p=GEMINI_TOP_P,
+                        top_k=GEMINI_TOP_K,
+                        max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+                        thinking_config=types.ThinkingConfig(thinking_budget=1024),
+                    ),
+                )
                 response_text = response.text
 
                 print(f"Gemini response: {response_text}")
