@@ -52,7 +52,9 @@ class History:
     MAX_HISTORY_LENGTH = 40
     NUM_HISTORY_TO_SUMMARIZE = 20
     # Number of entries to consider for get_as_multimodal_list
-    MULTIMODAL_HISTORY_COUNT = 50
+    MULTIMODAL_HISTORY_COUNT = (
+        500  # We make it very large for now as we don't summarize yet.
+    )
 
     def __init__(
         self, max_recent_generic_images: int = 3, max_recent_pre_action_images: int = 3
@@ -291,7 +293,7 @@ class History:
             ):
                 suffix = ""
             else:
-                suffix = " || STILL SPEAKING, I SHOULD NOT REPEAT A SIMILAR MESSAGE. "
+                suffix = " || STILL SPEAKING, I SHOULD NOT SPEAK YET UNLESS IMPORTANT TO GO OVER MYSELF. "
         elif entry_display_type == DisplayEntryType.OBSERVATION:
             prefix = "Observation:"
         elif entry_display_type == DisplayEntryType.THOUGHTS:

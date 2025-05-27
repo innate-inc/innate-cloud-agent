@@ -221,6 +221,10 @@ function GeminiVisionAgentMultiImages(img: image, context_multimodal: ImageOrStr
 
         You can only use one of the following tasks: {{ primitives_list_string }}.
 
+        You should use the field "observation" to describe what you see in the image as an internal thought.
+        You should use the field "thoughts" to further think about what you should do (or not do) based on the observation and the context.
+        You should use the field "anticipation" to consider what might happen next and leave mental notes for you in the future.
+
         {{ ctx.output_format }}
     "#
 }
