@@ -393,7 +393,7 @@ class NavigationHandler:
 
             if not is_safe:
                 self.logger.warn(
-                    f"Navigation (turn and move) target at ({new_x}, {new_y}) is too close to obstacles: "
+                    f"Navigation (turn and move) target at ({new_x:.2f}, {new_y:.2f}) is too close to obstacles: "
                     f"{safety_msg}"
                 )
                 # If not safe, update the vision output to reflect the safety issue
