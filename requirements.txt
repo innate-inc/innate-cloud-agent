@@ -25,7 +25,8 @@ google-api-core==2.24.1
 google-api-python-client==2.163.0
 google-auth==2.37.0
 google-auth-httplib2==0.2.0
-google-genai==1.16.1
+google-genai==1.17.0
+google-generativeai==0.8.4
 googleapis-common-protos==1.69.0
 groq==0.17.0
 grpcio==1.70.0
@@ -97,7 +98,6 @@ torchvision==0.21.0
 tornado==6.4.2
 tqdm==4.67.1
 traitlets==5.14.3
-triton==3.2.0
 typing_extensions==4.12.2
 tzdata==2025.1
 ultralytics==8.3.78
