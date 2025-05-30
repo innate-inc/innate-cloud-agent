@@ -162,6 +162,8 @@ class Brain:
                 await self.handle_primitive_failed(message)
             elif message_type == MessageInType.PRIMITIVE_INTERRUPTED:
                 await self.handle_primitive_interrupted(message)
+            elif message_type == MessageInType.PRIMITIVE_FEEDBACK:
+                await self.handle_primitive_feedback(message)
             elif message_type == MessageInType.REGISTER_PRIMITIVES_AND_DIRECTIVE:
                 await self.handle_register_primitives_and_directive(message)
             elif message_type == MessageInType.RESET:
@@ -353,7 +355,7 @@ class Brain:
         if (
             cov_x + cov_y
         ) / 2 > AVERAGE_POS_COV_THRESHOLD or cov_yaw > AVERAGE_YAW_COV_THRESHOLD:
-            self.logger.info(
+            self.logger.debug(
                 f"Skipping image addition to pose graph because cov_x, cov_y, cov_yaw are too high: {cov_x}, {cov_y}, {cov_yaw}"
             )
             return
@@ -690,6 +692,25 @@ class Brain:
             raise ValueError(
                 f"[Brain {self.connection_id}] {task_id_msg} is not the current "
                 f"task in execution."
+            )
+
+    async def handle_primitive_feedback(self, message: MessageIn):
+        """
+        Handle messages of type 'primitive_feedback'.
+        Retrieves the feedback string and adds it to the history.
+        """
+        feedback_text = message.payload.get("feedback")
+        if feedback_text:
+            self.logger.info(f"Received primitive feedback: {feedback_text}")
+            task_name = self.primitive_in_execution.name
+            entry_text = f"'{task_name}': {feedback_text}"
+            self.history.add(
+                HistoryEntryType.TASK_FEEDBACK,
+                description=entry_text,
+            )
+        else:
+            self.logger.warning(
+                "Received primitive_feedback message with no feedback text."
             )
 
     async def handle_primitive_activated(self, message: MessageIn):

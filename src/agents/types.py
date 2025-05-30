@@ -33,7 +33,15 @@ class VisionAgentInput(BaseModel):
 
 class MultimodalHistoryItem(BaseModel):
     type: Literal["text", "image"]
-    content: str
+    content: str = Field(
+        description="Content of the history item. For images, will be '[image]' when serialized"
+    )
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        if self.type == "image":
+            data["content"] = "[image]"
+        return data
 
 
 class MultimodalVisionAgentInput(BaseModel):

@@ -18,6 +18,7 @@ class HistoryEntryType(Enum):
     TASK_INTERRUPTED = "task_interrupted"
     TASK_CANCELLED = "task_cancelled"
     TASK_COMPLETED = "task_completed"
+    TASK_FEEDBACK = "task_feedback"
     GENERIC_IMAGE = "generic_image"
     IMAGE_PRE_ACTION = "image_pre_action"
 
@@ -36,6 +37,7 @@ class DisplayEntryType(Enum):
     TASK_CANCELLED = "task_cancelled"
     TASK_COMPLETED = "task_completed"
     HISTORY_SUMMARY = "history_summary"
+    TASK_FEEDBACK = "task_feedback"
 
 
 class HistoryEntry(BaseModel):
@@ -504,6 +506,10 @@ class History:
                     type="text", content=f"{separator_line}\n{current_time_str}"
                 )
             )
+
+        # For debugging purposes, save to a file
+        with open("multimodal_history.json", "w") as f:
+            json.dump([item.model_dump() for item in multimodal_list], f, indent=2)
 
         return multimodal_list
 
