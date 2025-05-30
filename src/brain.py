@@ -350,8 +350,10 @@ class Brain:
         # If they are above a certain threshold, we should not add the image to the pose graph
         # because it means we don't know where the robot is and we want to avoid
         # adding wrong nodes to the pose graph
-        if cov_x > 0.01 or cov_y > 0.01 or cov_yaw > 0.01:
-            self.logger.debug(
+        if (
+            cov_x + cov_y
+        ) / 2 > AVERAGE_POS_COV_THRESHOLD or cov_yaw > AVERAGE_YAW_COV_THRESHOLD:
+            self.logger.info(
                 f"Skipping image addition to pose graph because cov_x, cov_y, cov_yaw are too high: {cov_x}, {cov_y}, {cov_yaw}"
             )
             return
