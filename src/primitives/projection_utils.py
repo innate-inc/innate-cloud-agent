@@ -198,7 +198,7 @@ def is_map_location_valid(
             )
             if (
                 cell_dist_grid <= obstacle_radius_cells
-                and map_array[y_cell, x_cell] == 100  # Obstacle
+                and map_array[y_cell, x_cell] > 5  # Obstacle
             ):
                 return False  # Obstacle found in target vicinity
 
