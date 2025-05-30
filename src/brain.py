@@ -26,6 +26,13 @@ from src.brain_utils.navigation_handler import NavigationHandler
 from src.brain_utils.memory_state_manager import MemoryStateManager
 
 
+from src.constants_robots import ROBOT_PARAMS_TO_USE
+
+
+AVERAGE_POS_COV_THRESHOLD = ROBOT_PARAMS_TO_USE["average_pos_cov_threshold"]
+AVERAGE_YAW_COV_THRESHOLD = ROBOT_PARAMS_TO_USE["average_yaw_cov_threshold"]
+
+
 def prim_list_to_prim_obj_list(prim_list):
     return [primitive_to_object(prim) for prim in prim_list]
 
@@ -121,7 +128,11 @@ class Brain:
 
             # If the message is not a pose_image, log the time it takes to process
             # the message
-            if message_type != MessageInType.POSE_IMAGE:
+            FREQUENT_MESSAGES_TO_NOT_LOG = [
+                MessageInType.POSE_IMAGE,
+            ]
+
+            if message_type not in FREQUENT_MESSAGES_TO_NOT_LOG:
                 self.logger.info(f"Processing message: {message_type}")
                 time_start = time.time()
 
@@ -330,6 +341,20 @@ class Brain:
         x = message.payload.get("x", 0.0)
         y = message.payload.get("y", 0.0)
         theta = message.payload.get("theta", 0.0)
+
+        cov_x = message.payload.get("cov_x", 0.0)
+        cov_y = message.payload.get("cov_y", 0.0)
+        cov_yaw = message.payload.get("cov_yaw", 0.0)
+
+        # Now we receive here cov_x, cov_y, cov_yaw
+        # If they are above a certain threshold, we should not add the image to the pose graph
+        # because it means we don't know where the robot is and we want to avoid
+        # adding wrong nodes to the pose graph
+        if cov_x > 0.01 or cov_y > 0.01 or cov_yaw > 0.01:
+            self.logger.debug(
+                f"Skipping image addition to pose graph because cov_x, cov_y, cov_yaw are too high: {cov_x}, {cov_y}, {cov_yaw}"
+            )
+            return
 
         # Update current robot coordinates
         self.current_robot_coords = {"x": x, "y": y, "theta": theta}
