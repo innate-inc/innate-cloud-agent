@@ -334,6 +334,8 @@ class Brain:
         # Send response and prepare for next image
         await self._send_vision_output(vision_output, vision_output_to_write_in_history)
 
+        self.history.check_and_summarize()
+
         return vision_output
 
     async def handle_pose_image(self, message: MessageIn):
