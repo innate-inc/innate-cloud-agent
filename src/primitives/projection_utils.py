@@ -184,6 +184,49 @@ def is_map_location_valid(
     if not (0 <= target_grid_x < map_width and 0 <= target_grid_y < map_height):
         return False
 
+    # Convert start to grid coordinates for line-of-sight check
+    start_grid_x_los = int((start_world_x - origin_x) / resolution)
+    start_grid_y_los = int((start_world_y - origin_y) / resolution)
+
+    # 1.5. Line-of-sight check
+    # Iterate over cells in a straight line from start_grid_los to target_grid
+    # Using a simple DDA-like approach for line rasterization
+    dx = target_grid_x - start_grid_x_los
+    dy = target_grid_y - start_grid_y_los
+    steps = max(abs(dx), abs(dy))
+
+    if steps > 0:  # Avoid division by zero if start and end are the same cell
+        x_increment = dx / steps
+        y_increment = dy / steps
+        current_x_check = float(start_grid_x_los)
+        current_y_check = float(start_grid_y_los)
+
+        for _ in range(int(steps) + 1):
+            check_gx = int(round(current_x_check))
+            check_gy = int(round(current_y_check))
+
+            # Ensure the check cell is within map bounds
+            if not (0 <= check_gx < map_width and 0 <= check_gy < map_height):
+                # Line goes out of bounds, could be considered obstructed or handled as per specific needs.
+                # For now, if it goes out of bounds towards the target, the target check will fail.
+                # If it goes out of bounds before reaching an obstacle, it's complex.
+                # Let's consider a line out of bounds as not clear for simplicity if it's not the target itself.
+                if not (check_gx == target_grid_x and check_gy == target_grid_y):
+                    # If the out-of-bounds cell is not the target itself, then it's an obstruction.
+                    # However, the existing target bounds check should catch this if the target is OOB.
+                    # This logic mainly focuses on obstacles *within* bounds along the path.
+                    pass  # Let boundary checks for target and start handle OOB.
+
+            # Check for obstacle (value 100)
+            # We only care about obstacles within the map bounds.
+            if 0 <= check_gx < map_width and 0 <= check_gy < map_height:
+                if map_array[check_gy, check_gx] == 100:
+                    return False  # Obstacle (100) found in direct line of sight
+
+            current_x_check += x_increment
+            current_y_check += y_increment
+    # else: start and target are in the same cell or adjacent, line-of-sight is trivial for one cell.
+
     # Calculate obstacle radius in grid cells for local check
     obstacle_radius_cells = int(min_obstacle_distance_m / resolution)
     min_gx = max(0, target_grid_x - obstacle_radius_cells)
