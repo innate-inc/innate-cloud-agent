@@ -80,6 +80,8 @@ class NavigateInSight(Primitive):
             "primitive than navigate_to_position to use when it's to navigate to a "
             "target in sight. Provide a target object name, such as 'shelf', 'table', "
             "'chair', etc.\n\n"
+            "Make sure you precise if it's on the target, or in front of it, or behind it, or to the left or right of it."
+            "For example, if we want to pick up an object, we want to in front of it, but not on it.\n\n"
             "After using it, you can use it again to get closer or pursue navigation "
             "in sight if you deem it necessary. Can be very helpful to follow paths or "
             "navigate to a target that is far."
@@ -671,10 +673,7 @@ Please respond with ONLY the number of the best point (1, 2, 3, etc).
         try:
             # Check if API key is available and client was initialized
             if not self.genai_client:
-                print(
-                    "Warning: Gemini client not available. "
-                    "Using default point 1."
-                )
+                print("Warning: Gemini client not available. " "Using default point 1.")
                 selected_point_id = "1"
             else:
                 print("Calling Gemini to select a navigation point...")
@@ -686,17 +685,17 @@ Please respond with ONLY the number of the best point (1, 2, 3, etc).
                 # Create image part for Gemini
                 image_part = types.Part.from_bytes(
                     data=img_bytes,
-                    mime_type='image/jpeg',
+                    mime_type="image/jpeg",
                 )
 
                 # Create content parts: user prompt and the image part
                 message_parts = [user_prompt, image_part]
-                
+
                 # Call Gemini model using the client
                 response = self.genai_client.models.generate_content(
                     contents=message_parts,
-                    model=GEMINI_MODEL_NAME, 
-                    config=types.GenerateContentConfig( 
+                    model=GEMINI_MODEL_NAME,
+                    config=types.GenerateContentConfig(
                         temperature=GEMINI_TEMPERATURE,
                         top_p=GEMINI_TOP_P,
                         top_k=GEMINI_TOP_K,
