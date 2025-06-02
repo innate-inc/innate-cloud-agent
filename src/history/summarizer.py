@@ -212,16 +212,16 @@ class HistorySummarizer:
             return None
 
         prompt = f"""
-Based on the following sequence of events, generate a concise internal monologue for a robot. 
-This monologue should reflect on what the robot has observed and done. It can also include self-reflective questions or ponderings, much like a character in Westworld might introspect.
-Be detailed but avoid conversational filler. Focus on the key information and internal state.
+Based on the following event log, provide a neutral and detailed summary of the robot's observations, thoughts, and any recorded anticipations or inferences.
+The summary should demonstrate how the robot keeps track of its past interactions and observations to build a clear conception of the world around it.
+It should be concise, factual, and shorter than the original log. Avoid conversational filler or emotional language.
 
 Event Log:
 ---
 {summary_input_text}
 ---
 
-Internal Monologue:
+Summary:
 """
 
         print(

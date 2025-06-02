@@ -16,8 +16,10 @@ def get_now():
 
 
 class History:
-    NUM_HISTORY_TO_SUMMARIZE = 50
+    NUM_HISTORY_TO_SUMMARIZE = 60
     # Number of entries to consider for get_as_multimodal_list
+    # At 0.3-0.4Hz, this value at 5 usually keeps fresh the last 10 seconds of history, the rest is summarized
+    # So to get at least 2mn of history at the same rate, we need 5 * 6 * 2 = 60
     MULTIMODAL_HISTORY_COUNT = (
         500  # We make it very large for now as we don't summarize yet.
     )
