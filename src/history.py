@@ -54,7 +54,6 @@ def get_now():
 
 
 class History:
-    MAX_HISTORY_LENGTH = 40
     NUM_HISTORY_TO_SUMMARIZE = 50
     # Number of entries to consider for get_as_multimodal_list
     MULTIMODAL_HISTORY_COUNT = (
@@ -552,7 +551,10 @@ class History:
         # Check if summarization is needed and not already in progress
         # No lock needed for this initial check of length and is_summarizing flag,
         # as is_summarizing is the primary gatekeeper for launching a new thread.
-        if len(self.entries) > self.MAX_HISTORY_LENGTH and not self.is_summarizing:
+        if (
+            len(self.entries) > 2 * self.NUM_HISTORY_TO_SUMMARIZE
+            and not self.is_summarizing
+        ):
             self.is_summarizing = (
                 True  # Set flag immediately to prevent multiple threads
             )
@@ -570,7 +572,7 @@ class History:
             if num_to_summarize_snapshot <= 0:
                 # This can happen if entries were removed between the initial length check
                 # and this point, though unlikely in single-threaded add.
-                # Or if MAX_HISTORY_LENGTH is very close to NUM_HISTORY_TO_SUMMARIZE.
+                # Or if NUM_HISTORY_TO_SUMMARIZE is very close to the current length.
                 self.is_summarizing = False
                 return
 
