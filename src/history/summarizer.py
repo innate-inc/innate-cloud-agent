@@ -232,16 +232,12 @@ Internal Monologue:
             response = self.genai_client.models.generate_content(
                 contents=[prompt],  # Pass prompt as a list to contents
                 model=self.GEMINI_MODEL_NAME,
-                config=genai_types.GenerationConfig(  # Use genai_types
+                config=genai_types.GenerateContentConfig(  # Use genai_types
                     temperature=self.GEMINI_TEMPERATURE,
                     top_p=self.GEMINI_TOP_P,
                     top_k=self.GEMINI_TOP_K,
                     max_output_tokens=self.GEMINI_MAX_OUTPUT_TOKENS,
-                    # Add thinking_config similar to navigate_in_sight.py
-                    # Assuming a default thinking_budget if not specified otherwise.
-                    # The value 1024 is taken from navigate_in_sight.py
-                    # Removed for now as it's not available in the current API.  We can add it back once available.
-                    # thinking_config=genai_types.ThinkingConfig(thinking_budget=1024),
+                    thinking_config=genai_types.ThinkingConfig(thinking_budget=1024),
                 ),
             )
             summary_text = response.text.strip()
