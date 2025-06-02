@@ -13,7 +13,7 @@ from src.message_types import (
     MessageOutType,
 )
 from src.primitives.transforms import primitive_to_object
-from src.history import History, HistoryEntryType
+from src.history.history import History, HistoryEntryType
 from src.agents.types import PrimitiveDefinition
 from src.primitives.navigate_in_sight import NavigateInSight
 from src.primitives.navigate_through_memory import NavigateThroughMemory

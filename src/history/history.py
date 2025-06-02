@@ -4,49 +4,11 @@ from typing import List, Dict, Any
 from datetime import datetime, timezone
 import os
 import json
-from google import genai
-from google.genai import types
 import threading
 
 from src.agents.types import MultimodalHistoryItem
-
-
-# Define history entry types – here we include only entries that are relevant.
-class HistoryEntryType(Enum):
-    AUDIO_IN = "audio_in"
-    VISION_AGENT_OUTPUT = "vision_agent_output"
-    HISTORY_SUMMARY = "history_summary"
-    SYSTEM_MESSAGE = "system_message"
-    TASK_ACTIVATED = "task_activated"
-    TASK_INTERRUPTED = "task_interrupted"
-    TASK_CANCELLED = "task_cancelled"
-    TASK_COMPLETED = "task_completed"
-    TASK_FEEDBACK = "task_feedback"
-    GENERIC_IMAGE = "generic_image"
-    IMAGE_PRE_ACTION = "image_pre_action"
-
-
-# Internal display types for formatting vision agent outputs
-class DisplayEntryType(Enum):
-    OBSERVATION = "observation"
-    THOUGHTS = "thoughts"
-    ANTICIPATION = "anticipation"
-    AUDIO_IN = "audio_in"
-    AUDIO_OUT = "audio_out"
-    SYSTEM_MESSAGE = "system_message"
-    NEXT_TASK_DECIDED = "next_task_decided"
-    TASK_ACTIVATED = "task_activated"
-    TASK_INTERRUPTED = "task_interrupted"
-    TASK_CANCELLED = "task_cancelled"
-    TASK_COMPLETED = "task_completed"
-    HISTORY_SUMMARY = "history_summary"
-    TASK_FEEDBACK = "task_feedback"
-
-
-class HistoryEntry(BaseModel):
-    timestamp: datetime
-    type: HistoryEntryType
-    description: str
+from src.history.types import HistoryEntryType, DisplayEntryType, HistoryEntry
+from src.history.summarizer import HistorySummarizer
 
 
 def get_now():
@@ -59,13 +21,6 @@ class History:
     MULTIMODAL_HISTORY_COUNT = (
         500  # We make it very large for now as we don't summarize yet.
     )
-
-    # Gemini API constants for summarization
-    GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
-    GEMINI_TEMPERATURE = 0.7  # Adjusted for more creative summarization
-    GEMINI_TOP_P = 0.95
-    GEMINI_TOP_K = 64
-    GEMINI_MAX_OUTPUT_TOKENS = 2048  # Adjusted for potentially longer summaries
 
     def __init__(
         self, max_recent_generic_images: int = 3, max_recent_pre_action_images: int = 3
@@ -83,29 +38,12 @@ class History:
         # Max number of recent pre-action images to include in multimodal history
         self.max_recent_pre_action_images = max_recent_pre_action_images
 
-        # Initialize Gemini API client for summarization
-        api_key = os.getenv(
-            "GEMINI_API_KEY"
-        )  # Used to check if configuration is likely present
-        if (
-            api_key
-        ):  # Check if API key is set in env, assuming genai.configure() or GOOGLE_API_KEY handles actual auth
-            try:
-                # Instantiate the main client. It will use GOOGLE_API_KEY or prior genai.configure().
-                self.genai_client = genai.Client(api_key=api_key)
-                print(
-                    "Gemini client for history summarization initialized successfully."
-                )
-            except Exception as e:
-                self.genai_client = None
-                print(
-                    f"Failed to initialize Gemini client for history summarization: {e}"
-                )
-        else:
-            self.genai_client = None
+        # Initialize HistorySummarizer
+        self.summarizer = HistorySummarizer()
+        if not self.summarizer.genai_client:
             print(
-                "Warning: GEMINI_API_KEY not found in environment variables. "
-                "History summarization will not be available."
+                "Warning: HistorySummarizer's Gemini client failed to initialize. "
+                "History summarization will not be available via History class."
             )
 
     def reset(self):
@@ -596,7 +534,7 @@ class History:
             # Create and start a new daemon thread for summarization.
             # Pass the *copy* of entries and the *count* of entries that this batch represents.
             thread = threading.Thread(
-                target=self._threaded_summarize,
+                target=self._perform_threaded_summarization_and_update_history,
                 args=(
                     entries_to_process_for_summary_copy,
                     len(entries_to_process_for_summary_copy),
@@ -605,118 +543,39 @@ class History:
             )
             thread.start()
 
-    def _threaded_summarize(
+    def _perform_threaded_summarization_and_update_history(
         self,
         entries_to_process_for_summary: List[HistoryEntry],
         num_original_entries_to_replace: int,
     ):
-        """Internal method to perform summarization in a separate thread."""
-        if not self.genai_client:
+        """Internal method to perform summarization in a separate thread and update history."""
+        if not self.summarizer or not self.summarizer.genai_client:
             print(
-                "History summarization skipped in thread: Gemini client not available."
+                "History summarization skipped in thread: Summarizer or its Gemini client not available."
             )
-            # Ensure is_summarizing is reset if we bail out early
-            with self.lock:  # Lock needed to safely modify is_summarizing
+            with self.lock:
                 self.is_summarizing = False
             return
 
         print(
-            f"Thread started to summarize {len(entries_to_process_for_summary)} entries."
+            f"Thread started to summarize {len(entries_to_process_for_summary)} entries using HistorySummarizer."
         )
 
         try:
-            if not entries_to_process_for_summary:
-                print("Thread received no entries to summarize.")
-                return  # is_summarizing will be reset in finally
-
-            # Prepare text for summarization using the passed-in copy of entries
-            intermediate_summary_input_entries = self._get_intermediate_display_entries(
+            # Generate summary using the HistorySummarizer instance
+            summary_text = self.summarizer.create_summary(
                 entries_to_process_for_summary
             )
 
-            summary_input_lines = []
-            for entry_dict in intermediate_summary_input_entries:
-                entry_display_type = entry_dict["type"]
-                message = entry_dict["message"]
-                original_raw_type = entry_dict["original_raw_type"]
+            if not summary_text:
+                print("Thread received no summary text from HistorySummarizer.")
+                # is_summarizing will be reset in finally
+                return
 
-                if original_raw_type == HistoryEntryType.GENERIC_IMAGE:
-                    message = "[Image data was present]"
-                elif original_raw_type == HistoryEntryType.IMAGE_PRE_ACTION:
-                    message = "[Image data before action was present]"
-
-                prefix = ""
-                if entry_display_type == DisplayEntryType.SYSTEM_MESSAGE:
-                    prefix = "System:"
-                elif entry_display_type == DisplayEntryType.AUDIO_IN:
-                    prefix = "Audio In:"
-                elif entry_display_type == DisplayEntryType.AUDIO_OUT:
-                    prefix = "Audio Out:"
-                elif entry_display_type == DisplayEntryType.OBSERVATION:
-                    prefix = "Observation:"
-                elif entry_display_type == DisplayEntryType.THOUGHTS:
-                    prefix = "Thoughts:"
-                elif entry_display_type == DisplayEntryType.ANTICIPATION:
-                    prefix = "Anticipation:"
-                elif entry_display_type == DisplayEntryType.TASK_ACTIVATED:
-                    prefix = "Task Activated:"
-                elif entry_display_type == DisplayEntryType.TASK_INTERRUPTED:
-                    prefix = "Task Interrupted:"
-                elif entry_display_type == DisplayEntryType.TASK_CANCELLED:
-                    prefix = "Task Cancelled:"
-                elif entry_display_type == DisplayEntryType.TASK_COMPLETED:
-                    prefix = "Task Completed:"
-                elif entry_display_type == DisplayEntryType.NEXT_TASK_DECIDED:
-                    prefix = "Next Task Decided:"
-                else:
-                    prefix = f"{entry_display_type.value}:"
-                summary_input_lines.append(f"{prefix} {message}")
-
-            summary_input_text = "\n".join(summary_input_lines)
-
-            if not summary_input_text.strip():
-                print("No text content to summarize after formatting in thread.")
-                return  # is_summarizing will be reset in finally
-
-            prompt = f"""
-Based on the following sequence of events, generate a concise internal monologue for a robot. 
-This monologue should reflect on what the robot has observed and done. It can also include self-reflective questions or ponderings, much like a character in Westworld might introspect.
-Be detailed but avoid conversational filler. Focus on the key information and internal state.
-
-Event Log:
----
-{summary_input_text}
----
-
-Internal Monologue:
-"""
-
-            print(
-                f"Thread sending {len(summary_input_lines)} lines of history to Gemini for summarization."
-            )
-
-            response = self.genai_client.models.generate_content(
-                contents=[prompt],  # Pass prompt as a list to contents
-                model=self.GEMINI_MODEL_NAME,
-                config=types.GenerateContentConfig(  # Use genai_types.GenerateContentConfig
-                    temperature=self.GEMINI_TEMPERATURE,
-                    top_p=self.GEMINI_TOP_P,
-                    top_k=self.GEMINI_TOP_K,
-                    max_output_tokens=self.GEMINI_MAX_OUTPUT_TOKENS,
-                    # Add thinking_config similar to navigate_in_sight.py
-                    # Assuming a default thinking_budget if not specified otherwise.
-                    # The value 1024 is taken from navigate_in_sight.py
-                    thinking_config=types.ThinkingConfig(thinking_budget=1024),
-                ),
-            )
-            summary_text = response.text.strip()
-            print(f"Thread generated summary: {summary_text}")
+            print(f"Thread generated summary via HistorySummarizer: {summary_text}")
 
             # Create a new summary entry
-            # Timestamp for the summary entry: use current time or timestamp of last summarized entry.
-            # Using current time for simplicity in threaded context.
             summary_entry_timestamp = get_now()
-            # If entries_to_process_for_summary is not empty, we can use its last entry's timestamp.
             if entries_to_process_for_summary:
                 summary_entry_timestamp = entries_to_process_for_summary[-1].timestamp
 
@@ -728,19 +587,10 @@ Internal Monologue:
 
             # CRITICAL SECTION: Update shared history lists
             with self.lock:
-                # Check if the number of entries to replace is still valid
-                # It's possible new entries were added or other summaries happened.
-                # We replace the oldest `num_original_entries_to_replace` entries.
                 if num_original_entries_to_replace > len(self.entries):
-                    # This case should be rare if is_summarizing flag works correctly
-                    # and if other modifications to self.entries are also locked or careful.
-                    # For now, if this happens, we might prepend the summary or log an error.
-                    # Let's prepend, as it means the history shrunk unexpectedly.
                     print(f"Warning: History shrunk unexpectedly. Prepending summary.")
                     self.entries.insert(0, summary_entry)
                 else:
-                    # Replace the exact number of entries that were snapshotted for this summary run
-                    # from the beginning of the current list.
                     remaining_entries_after_summary_target = self.entries[
                         num_original_entries_to_replace:
                     ]
@@ -748,48 +598,9 @@ Internal Monologue:
                         summary_entry
                     ] + remaining_entries_after_summary_target
 
-                # Update non_summarized_entries.
-                # It should contain entries that are *not* covered by any summary.
-                # The new summary entry itself is not part of non_summarized_entries.
-                # All entries *after* the new summary_entry in the updated self.entries list
-                # are effectively non-summarized relative to *this* summary operation.
-                # However, self.NUM_HISTORY_TO_SUMMARIZE defines the actual window of non-summarized entries.
-                # So, it should be the tail end of the current self.entries list.
-                self.non_summarized_entries = list(
-                    self.entries[-self.NUM_HISTORY_TO_SUMMARIZE :]
-                )
-                # Ensure non_summarized_entries does not accidentally include the summary if history is short.
-                # If the summary_entry is within the last NUM_HISTORY_TO_SUMMARIZE items, it should be removed
-                # from non_summarized_entries. This is tricky because the summary IS an entry.
-                # Let's rethink: non_summarized_entries are those that have *never* been part of input to a summary.
-                # After summarization, the entries that were *not* summarized are the ones in `remaining_entries_after_summary_target`.
-                # If `remaining_entries_after_summary_target` is shorter than NUM_HISTORY_TO_SUMMARIZE, new entries will fill it up.
-                # The safest is to reconstruct non_summarized_entries from the current state of self.entries.
-                # The last NUM_HISTORY_TO_SUMMARIZE entries of self.entries are by definition not yet summarized by a *future* run.
-
-                # If self.entries starts with a summary, that summary covers everything before it.
-                # The non_summarized list is everything *after* the leading summary (if any)
-                # up to NUM_HISTORY_TO_SUMMARIZE from the end, if there are enough entries.
-                # This logic seems best: just take the last NUM_HISTORY_TO_SUMMARIZE entries from the current self.entries.
-                # The `add` method will append to `non_summarized_entries` correctly.
-
-                # Find the actual index of the summary entry we just added, if it exists.
-                new_summary_idx = -1
-                for i, entry in enumerate(self.entries):
-                    if entry is summary_entry:  # Check by object identity
-                        new_summary_idx = i
-                        break
-
-                # non_summarized_entries should be entries that came *after* the latest summary,
-                # but also limited by NUM_HISTORY_TO_SUMMARIZE from the tail.
-                # Let's simplify: non_summarized_entries are always the last N entries that haven't been fed *into* a summary call.
-                # After we add a summary, the entries that were *not* summarized are the `remaining_entries_after_summary_target`.
-                # These are the candidates for the new `non_summarized_entries`.
                 self.non_summarized_entries = list(
                     remaining_entries_after_summary_target
                 )
-                # And new entries added via `add` will append to both self.entries and self.non_summarized_entries.
-                # This seems correct: non_summarized_entries become those that were *not* used to create the summary.
 
             print(
                 f"Thread finished summarizing. {num_original_entries_to_replace} entries replaced with 1 summary entry."
@@ -799,10 +610,8 @@ Internal Monologue:
             print(f"Error during threaded history summarization: {e}")
             import traceback
 
-            traceback.print_exc()  # Print full traceback for debugging thread errors
+            traceback.print_exc()
         finally:
-            # CRITICAL: Ensure is_summarizing is reset, even if an error occurs
-            # This must be locked to prevent race conditions on is_summarizing
             with self.lock:
                 self.is_summarizing = False
                 print("is_summarizing flag reset to False.")
