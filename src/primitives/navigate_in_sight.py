@@ -9,7 +9,8 @@ from ultralytics import YOLO, SAM
 from google import genai
 from google.genai import types
 import os
-from PIL import Image
+from pydantic import BaseModel
+from enum import Enum
 
 # Import utility modules
 from src.primitives.visualization_utils import (
@@ -666,7 +667,12 @@ The image shows several numbered green circles. Each circle represents a safe
 location I can navigate to.
 Which numbered point should I navigate to based on the description?
 
-Please respond with ONLY the number of the best point (1, 2, 3, etc).
+Please respond with the number of the best point (1, 2, 3, etc) if you found one.
+
+If no point is found, or if you think you're already close enough, return that you
+found no point, set the point_id to 0, and give the reason you didn't pick a point.
+
+If there's a need for clarification, explain in the explanation field.
 """
 
         # Use the GenerativeAI package directly, like in navigate_through_memory.py
@@ -691,6 +697,18 @@ Please respond with ONLY the number of the best point (1, 2, 3, etc).
                 # Create content parts: user prompt and the image part
                 message_parts = [user_prompt, image_part]
 
+                class PointSelectionReason(Enum):
+                    FOUND_MATCHING_POINT = "FOUND_MATCHING_POINT"
+                    NO_POINT_AVAILABLE = "NO_POINT_AVAILABLE"
+                    ALREADY_CLOSE_ENOUGH = "ALREADY_CLOSE_ENOUGH"
+                    OTHER = "OTHER"
+
+                class ResponseSchema(BaseModel):
+                    found_a_point: bool
+                    point_id: int
+                    reason: PointSelectionReason
+                    explanation: str
+
                 # Call Gemini model using the client
                 response = self.genai_client.models.generate_content(
                     contents=message_parts,
@@ -700,7 +718,9 @@ Please respond with ONLY the number of the best point (1, 2, 3, etc).
                         top_p=GEMINI_TOP_P,
                         top_k=GEMINI_TOP_K,
                         max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-                        thinking_config=types.ThinkingConfig(thinking_budget=1024),
+                        thinking_config=types.ThinkingConfig(thinking_budget=0),
+                        response_mime_type="application/json",
+                        response_schema=ResponseSchema,
                     ),
                 )
                 response_text = response.text
