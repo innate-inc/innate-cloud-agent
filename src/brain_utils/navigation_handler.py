@@ -114,8 +114,8 @@ class NavigationHandler:
             # If the execution failed, update the vision output to reflect the failure
             vision_output.stop_current_task = True
             vision_output.observation = f"Navigation in sight failed: {msg}"
+            vision_output.anticipation = f"I should use a different primitive to navigate, maybe turning and moving."
             vision_output.next_task = None
-            vision_output.to_tell_user = f"I couldn't navigate to the target: {msg}"
 
         return vision_output
 
@@ -398,12 +398,10 @@ class NavigationHandler:
                 )
                 # If not safe, update the vision output to reflect the safety issue
                 vision_output.stop_current_task = True
-                vision_output.observation = f"Navigation failed: {safety_msg}"
+                vision_output.observation = f"Navigation failed: {safety_msg}. "
+                vision_output.thoughts = f"I can't turn and move to that position because it's too close to obstacles."
                 vision_output.next_task = None
-                vision_output.to_tell_user = (
-                    f"I can't turn and move to that position because it's too close to obstacles. "
-                    f"{safety_msg}"
-                )
+                vision_output.to_tell_user = None
                 return vision_output
 
         original_primitive_id = getattr(vision_output.next_task, "primitive_id", None)
