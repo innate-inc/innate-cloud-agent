@@ -33,6 +33,7 @@ class NavigationHandler:
     async def handle_navigate_in_sight(
         self, vision_output, robot_coords, base64_img, depth_payload, map_payload=None
     ):
+        has_canceled_task = False
         nav_in_sight = next(
             (prim for prim in self.primitives_list if prim.name == "navigate_in_sight"),
             None,
@@ -111,13 +112,17 @@ class NavigationHandler:
                 f"{navigation_to_position_task.inputs}. Initial coords were: {robot_coords}"
             )
         else:
+            has_canceled_task = True
             # If the execution failed, update the vision output to reflect the failure
             vision_output.stop_current_task = True
             vision_output.observation = f"Navigation in sight failed: {msg}"
             vision_output.anticipation = f"I should use a different primitive to navigate, maybe turning and moving."
             vision_output.next_task = None
+            print(
+                f"Navigation in sight failed and we return this vision output: {vision_output}"
+            )
 
-        return vision_output
+        return vision_output, has_canceled_task
 
     def check_position_safety(self, target_x, target_y, map_payload):
         """
