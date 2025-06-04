@@ -304,13 +304,17 @@ class Brain:
             and vision_output.next_task.name == "navigate_in_sight"
         ):
             vision_output_to_write_in_history = vision_output.model_copy()
-            vision_output = await self.navigation_handler.handle_navigate_in_sight(
-                vision_output,
-                robot_coords,
-                base64_img_extracted,
-                depth_payload,
-                map_payload,
+            vision_output, has_canceled_task = (
+                await self.navigation_handler.handle_navigate_in_sight(
+                    vision_output,
+                    robot_coords,
+                    base64_img_extracted,
+                    depth_payload,
+                    map_payload,
+                )
             )
+            if has_canceled_task:
+                vision_output_to_write_in_history = vision_output.model_copy()
 
         # Handle special case for navigate_through_memory
         if (

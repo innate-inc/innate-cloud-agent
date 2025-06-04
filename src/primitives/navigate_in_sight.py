@@ -636,7 +636,11 @@ class NavigateInSight(Primitive):
                 "No valid navigation points found. "
                 "Visualizations saved for debugging."
             )
-            return "Could not find any valid navigation points", False, None
+            return (
+                "Could not find any valid navigation points, try again with a different primitive.",
+                False,
+                None,
+            )
 
         # If there's only one valid point, just use that
         if len(point_mapping) == 1:
@@ -768,23 +772,14 @@ If there's a need for clarification, explain in the explanation field.
         else:
             # If the selected point is not valid, use the first available one
             if point_mapping:
-                fallback_id = list(point_mapping.keys())[0]
-                fallback_point = point_mapping[fallback_id]
-
-                navigation_command = {
-                    "x": fallback_point["x"],
-                    "y": fallback_point["y"],
-                    "theta": fallback_point["theta"],
-                }
-
-                print(
-                    f"Selected point {selected_point_id} not found, using fallback "
-                    f"point {fallback_id}"
-                )
                 return (
-                    f"Navigation to point {fallback_id} initiated (fallback)",
-                    True,
-                    navigation_command,
+                    "Picked an invalid point, try again with a valid point",
+                    False,
+                    None,
                 )
             else:
-                return "No valid navigation points found", False, None
+                return (
+                    "No valid navigation points found. Use a different primitive to navigate.",
+                    False,
+                    None,
+                )
