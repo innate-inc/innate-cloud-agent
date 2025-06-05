@@ -386,7 +386,7 @@ def sample_valid_navigation_points(
                 continue
 
             # Check if point is a valid navigable location using the helper function
-            if (
+            if not check_map_location_valid or (
                 is_map_location_valid(
                     current_x,
                     current_y,
@@ -397,7 +397,6 @@ def sample_valid_navigation_points(
                     min_obstacle_distance,
                     path_ratio_threshold,
                 )
-                or not check_map_location_valid
             ):
                 # The navigation target will face in direction from robot to point
                 valid_points_absolute.append(point_absolute)
