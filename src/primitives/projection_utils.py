@@ -108,8 +108,6 @@ def angle_distance_to_image_coordinates(angle, distance, camera_info):
     if not is_point_in_fov(angle, distance, h_fov_deg):
         return (None, None)
 
-    print(f"Camera info: {camera_info}")
-
     # Compute camera intrinsics and homography
     T_cam_base = compute_the_vignesh_transform(height_cam, x_cam, pitch_deg)
 
@@ -314,6 +312,7 @@ def sample_valid_navigation_points(
     angles_deg=[-30, 0, 30],
     min_obstacle_distance=0.20,
     path_ratio_threshold=2.0,  # Max path/direct ratio
+    check_map_location_valid=True,
 ):
     """
     Sample valid navigation points in front of the robot.
@@ -366,6 +365,7 @@ def sample_valid_navigation_points(
         )
 
     for angle_robot_rel in angles:
+        print(f"Angle: {angle_robot_rel}")
         for distance in distances:
             # Calculate world coordinates
             # angle_world_vector is the world angle of the vector from robot to point.
@@ -386,15 +386,18 @@ def sample_valid_navigation_points(
                 continue
 
             # Check if point is a valid navigable location using the helper function
-            if is_map_location_valid(
-                current_x,
-                current_y,
-                point_x,
-                point_y,
-                map_array,
-                map_info,
-                min_obstacle_distance,
-                path_ratio_threshold,
+            if (
+                is_map_location_valid(
+                    current_x,
+                    current_y,
+                    point_x,
+                    point_y,
+                    map_array,
+                    map_info,
+                    min_obstacle_distance,
+                    path_ratio_threshold,
+                )
+                or not check_map_location_valid
             ):
                 # The navigation target will face in direction from robot to point
                 valid_points_absolute.append(point_absolute)
