@@ -11,6 +11,7 @@ COLORS = {
     "background": (255, 255, 255),  # White
     "robot": (255, 0, 255),  # Magenta
     "text": (0, 0, 0),  # Black
+    "line_green": (0, 200, 0),  # Darker Green for the line
 }
 
 
@@ -98,23 +99,56 @@ def annotate_camera_view(image, navigation_points, point_converter):
             annotated_img, img_x, img_y, point_id, point_color_key="in_fov"
         )
 
-    # Add text showing how many points are in view vs out of view
-    total_viewable_points = in_view_points + out_of_view_points
-    status_text = f"Points in view: {in_view_points}/{total_viewable_points}"
-    cv2.putText(
-        annotated_img,
-        status_text,
-        (10, height - 15),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        (255, 255, 255),
-        1,
-    )
-
     # Print warning if there are out-of-view points
     if out_of_view_points > 0:
         print(
             f"WARNING: {out_of_view_points} navigation points are outside the camera field of view"
+        )
+
+    return annotated_img
+
+
+def annotate_camera_view_with_line(image, navigation_points, point_converter):
+    """
+    Annotate camera view with a line representing a constant distance.
+
+    Args:
+        image: Original camera image
+        navigation_points: List of (angle, distance, point_id) tuples
+        point_converter: Function that converts (angle, distance) to image coordinates
+    """
+    annotated_img = image.copy()
+    image_points = []
+    out_of_view_points = 0
+
+    # Convert all navigation points to image coordinates
+    for point_data in navigation_points:
+        angle, distance, _ = point_data
+        # IN THE SIM WE HAVE TO INVERT THE ANGLE AND I DONT KNOW IF THIS
+        # WILL BE THE SAME FOR THE REAL ROBOT
+        angle = -angle
+        img_x, img_y = point_converter(angle, distance)
+
+        if img_x is not None and img_y is not None:
+            image_points.append((img_x, img_y))
+        else:
+            out_of_view_points += 1
+
+    # Draw the line if there are enough points
+    if len(image_points) > 1:
+        pts = np.array(image_points, np.int32)
+        pts = pts.reshape((-1, 1, 2))
+        cv2.polylines(
+            annotated_img,
+            [pts],
+            isClosed=False,
+            color=COLORS["line_green"],
+            thickness=5,
+        )
+
+    if out_of_view_points > 0:
+        print(
+            f"WARNING: {out_of_view_points} navigation points for the line are outside the camera field of view"
         )
 
     return annotated_img
