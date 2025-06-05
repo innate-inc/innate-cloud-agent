@@ -77,7 +77,6 @@ class NavigationHandler:
             map_payload=map_payload,
         )
 
-        vision_output.next_task = None
         return vision_output, has_canceled_task
 
     async def handle_navigate_in_sight(
@@ -105,21 +104,16 @@ class NavigationHandler:
             "target_description", target_object
         )
 
-        # Use the new point selection approach if we have a map
-        use_point_selection = map_payload is not None
-
         # Execute the primitive with the appropriate parameters
         msg, result, navigation_command = await nav_in_sight.execute(
-            target_object=target_object,
             target_description=target_description,
             map_payload=map_payload,
-            use_point_selection=use_point_selection,
         )
 
         # Only replace the output with a navigation task if the execution was successful
         if result:
             # Check if the target position is too close to obstacles using the map
-            if map_payload and not use_point_selection:
+            if map_payload:
                 # If we're using point selection, we already verified safety
                 is_safe, safety_msg = self.check_position_safety(
                     navigation_command["x"], navigation_command["y"], map_payload
