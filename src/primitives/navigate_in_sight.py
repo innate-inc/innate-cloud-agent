@@ -22,7 +22,7 @@ from src.primitives.projection_utils import (
 )
 
 # Utility to decode depth payload (assumed defined in src/utils.py)
-from src.utils import decode_depth_payload, decode_map_payload
+from src.utils import decode_map_payload
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 ROBOT_CAMERA_INFO = ROBOT_PARAMS_TO_USE["camera_info"]

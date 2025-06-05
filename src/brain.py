@@ -74,6 +74,10 @@ class Brain:
             TurnAndMove(),
         ]  # These are the ones defined in the brain here, not registered with
         # the server by the user
+        for p in self.local_primitives_list:
+            p.set_feedback_callback(
+                lambda msg: self._handle_primitive_feedback(p.name, msg)
+            )
         self.primitive_in_execution = None
         self.primitive_ids_map: Dict[str, PrimitiveDefinition] = {}
         self.directive = None  # Store the directive that will steer the VLM
@@ -987,3 +991,21 @@ class Brain:
         """
         self.running = False
         await self.message_queue.put(None)
+
+    def _handle_primitive_feedback(self, primitive_name: str, feedback_message: str):
+        """
+        Handles feedback from a primitive, called directly from the primitive.
+        """
+        if feedback_message:
+            self.logger.info(
+                f"Received primitive feedback from '{primitive_name}': {feedback_message}"
+            )
+            entry_text = f"'{primitive_name}': {feedback_message}"
+            self.history.add(
+                HistoryEntryType.TASK_FEEDBACK,
+                description=entry_text,
+            )
+        else:
+            self.logger.warning(
+                f"Received empty feedback message from primitive '{primitive_name}'."
+            )
