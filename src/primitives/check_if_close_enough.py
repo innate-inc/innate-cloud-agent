@@ -11,7 +11,7 @@ from enum import Enum
 
 # Import utility modules
 from src.primitives.visualization_utils import (
-    annotate_camera_view,
+    annotate_camera_view_with_line,
     create_map_visualization,
     save_navigation_visualizations,
 )
@@ -139,9 +139,10 @@ class CheckIfCloseEnough(Primitive):
             map_array,
             map_info,
             self.horizontal_fov,
-            min_obstacle_distance=0.20,
+            min_obstacle_distance=0.0,
             distances=[distance_meters],
-            angles_deg=[-40, -20, 0, 20, 40],
+            angles_deg=np.linspace(-40, 41, 15).tolist(),
+            check_map_location_valid=False,
         )
 
         (
@@ -218,7 +219,9 @@ class CheckIfCloseEnough(Primitive):
                 },
             )
 
-        annotated_image = annotate_camera_view(
+        print(f"Camera valid navigation points: {camera_valid_navigation_points}")
+
+        annotated_image = annotate_camera_view_with_line(
             cv_image,
             camera_valid_navigation_points,
             convert_to_image_coords,
@@ -226,7 +229,10 @@ class CheckIfCloseEnough(Primitive):
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         save_navigation_visualizations(
-            annotated_image, map_vis, timestamp, prefix="check_close_enough"
+            annotated_image,
+            map_vis,
+            timestamp,
+            prefix="check_close_enough",
         )
 
         if not self.genai_client:
@@ -236,8 +242,9 @@ class CheckIfCloseEnough(Primitive):
 
         # Create prompt for Gemini
         user_prompt = f"""
-The image shows several numbered green circles which represent a distance of {distance_meters} meters from the robot.
+The image shows a green line on the ground which represents a distance of {distance_meters} meters from the robot.
 Is the target '{target_description}' closer or further away than this distance?
+If it is under the line, it is closer. If it is above the line, it is further.
 
 Respond with whether the target is "closer" or "further".
 """
@@ -268,7 +275,7 @@ Respond with whether the target is "closer" or "further".
                     top_p=GEMINI_TOP_P,
                     top_k=GEMINI_TOP_K,
                     max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    thinking_config=types.ThinkingConfig(thinking_budget=256),
                     response_mime_type="application/json",
                     response_schema=ResponseSchema,
                 ),
