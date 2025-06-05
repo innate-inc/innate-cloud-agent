@@ -88,6 +88,18 @@ async def gemini_vision_agent_multimodal_history(
             f"Your directive is: {vlm_inputs.directive}"
         )
 
+    additional_image_data = []
+
+    if vlm_inputs.additional_image_data:
+        additional_image_data.append(
+            f"On top of that, this is what you see from the additional camera with type: {vlm_inputs.additional_image_data['camera_type']}"
+        )
+        additional_image_data.append(
+            Image.from_base64(
+                "image/jpeg", vlm_inputs.additional_image_data["image_b64"]
+            )
+        )
+
     # Join all additional text parts into a single string and append to multimodal context
     if additional_text_context_parts:
         context_multimodal.append("\n".join(additional_text_context_parts))
@@ -99,7 +111,7 @@ async def gemini_vision_agent_multimodal_history(
             primitives_list_string,
             tb,
             max_retries,
-            # agent_variant, # Not needed for single variant
+            additional_image_data,
         )
         return response
     except MaxRetriesExceededException as e:
@@ -114,17 +126,30 @@ async def decreasesmax_retries_multi_context(
     primitives_list_string: str,
     tb,
     max_retries: int,
-    # agent_variant: GeminiAgentVariant = "gemini1", # Remove variant
+    additional_image_data: dict = {},
     attempt: int = 1,
 ) -> Optional[NewVisionAgentOutput]:  # Output type is NewVisionAgentOutput
     """
     Recursively attempts to call GeminiVisionAgentMultiImages until a
     successful output is produced or max_retries is exhausted.
     """
+
+    async def recall():
+        return await decreasesmax_retries_multi_context(
+            img,
+            context_multimodal,
+            primitives_list_string,
+            tb,
+            max_retries,
+            additional_image_data,
+            attempt + 1,
+        )
+
     try:
         new_output = await asyncio.wait_for(
             b.GeminiVisionAgentMultiImages(
                 img=img,
+                additional_image_data=additional_image_data,
                 context_multimodal=context_multimodal,
                 primitives_list_string=primitives_list_string,
                 baml_options={"tb": tb},
@@ -149,14 +174,7 @@ async def decreasesmax_retries_multi_context(
                 ),
             )
         await asyncio.sleep(1)
-        return await decreasesmax_retries_multi_context(
-            img,
-            context_multimodal,
-            primitives_list_string,
-            tb,
-            max_retries,
-            attempt + 1,
-        )
+        return await recall()
     except BamlValidationError as e:
         error_msg = f"BamlValidationError on attempt {attempt}/{max_retries}: {e}"
         print(f"\033[1;31m{error_msg}\033[0m")
@@ -167,14 +185,7 @@ async def decreasesmax_retries_multi_context(
                 last_error=e,
             )
         await asyncio.sleep(1)
-        return await decreasesmax_retries_multi_context(
-            img,
-            context_multimodal,
-            primitives_list_string,
-            tb,
-            max_retries,
-            attempt + 1,
-        )
+        return await recall()
     except BamlClientError as e:
 
         def error_msg_func(e_val):
@@ -187,14 +198,7 @@ async def decreasesmax_retries_multi_context(
             print(error_msg_func("Timeout"))
             if attempt < max_retries:
                 await asyncio.sleep(1)
-                return await decreasesmax_retries_multi_context(
-                    img,
-                    context_multimodal,
-                    primitives_list_string,
-                    tb,
-                    max_retries,
-                    attempt + 1,
-                )
+                return await recall()
             else:
                 raise MaxRetriesExceededException(
                     agent_type="gemini_flash_multi_context",
@@ -205,14 +209,7 @@ async def decreasesmax_retries_multi_context(
             print(error_msg_func("SSL Error"))
             if attempt < max_retries:
                 await asyncio.sleep(1)
-                return await decreasesmax_retries_multi_context(
-                    img,
-                    context_multimodal,
-                    primitives_list_string,
-                    tb,
-                    max_retries,
-                    attempt + 1,
-                )
+                return await recall()
             else:
                 raise MaxRetriesExceededException(
                     agent_type="gemini_flash_multi_context",
@@ -223,14 +220,7 @@ async def decreasesmax_retries_multi_context(
             print(error_msg_func("503 Error"))
             if attempt < max_retries:
                 await asyncio.sleep(1)
-                return await decreasesmax_retries_multi_context(
-                    img,
-                    context_multimodal,
-                    primitives_list_string,
-                    tb,
-                    max_retries,
-                    attempt + 1,
-                )
+                return await recall()
             else:
                 raise MaxRetriesExceededException(
                     agent_type="gemini_flash_multi_context",

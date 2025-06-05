@@ -189,7 +189,7 @@ function GeminiVisionAgent4(img: image, context_text: string, primitives_list_st
 type ImageOrString = image | string
 
 
-function GeminiVisionAgentMultiImages(img: image, context_multimodal: ImageOrString[], primitives_list_string: string) -> VisionAgentOutput {
+function GeminiVisionAgentMultiImages(img: image, additional_image_data: ImageOrString[], context_multimodal: ImageOrString[], primitives_list_string: string) -> VisionAgentOutput {
     client Gemini25FlashClient
     prompt #"
         {{_.role("user")}}
@@ -210,6 +210,8 @@ function GeminiVisionAgentMultiImages(img: image, context_multimodal: ImageOrStr
         {% endfor %}
 
         This is what you see: {{ img }}.
+
+        {{ additional_image_data }}.
 
         Consider the guidelines of the tasks available carefully before picking one to do (if any).
 

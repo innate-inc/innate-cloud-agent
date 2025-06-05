@@ -38,6 +38,7 @@ class VisionService:
         directive=None,
         agent_type: VisionAgentType = VisionAgentType.GEMINI_FLASH,
         gemini_variant: str = "gemini1",
+        additional_image_data: dict = {},
     ) -> Union[VisionAgentOutput]:
         """
         Calls the external visual language model with the given inputs.
@@ -125,6 +126,7 @@ class VisionService:
                     multimodal_history=history,
                     robot_coords=robot_coords,
                     directive=directive,
+                    additional_image_data=additional_image_data,
                 )
                 completion = await gemini_vision_agent_multimodal_history(vlm_inputs)
                 return completion

@@ -52,3 +52,4 @@ class MultimodalVisionAgentInput(BaseModel):
     multimodal_history: List[MultimodalHistoryItem]
     robot_coords: Optional[Dict[str, Union[float, str]]] = None
     directive: Optional[str] = None
+    additional_image_data: Optional[Dict[str, str]] = None

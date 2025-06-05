@@ -183,15 +183,24 @@ class Brain:
         # Extract data from payload
 
         self.logger.debug(f"Received image message: {message.payload.keys()}")
-        base64_img_extracted, depth_payload, robot_coords, map_payload = (
-            self.image_processor.extract_image_data(message.payload)
-        )
+        (
+            base64_img_extracted,
+            depth_payload,
+            robot_coords,
+            map_payload,
+            additional_image_data,
+        ) = self.image_processor.extract_image_data(message.payload)
 
         current_image_for_vlm: str
         try:
             current_image_for_vlm = self.image_processor.ensure_jpeg_format(
                 base64_img_extracted
             )
+            if additional_image_data:
+                additional_image_for_vlm = self.image_processor.ensure_jpeg_format(
+                    additional_image_data["image_b64"]
+                )
+                additional_image_data["image_b64"] = additional_image_for_vlm
         except ValueError as e:
             self.logger.error(f"Image format error: {e}")
             # Send error response to client
@@ -223,6 +232,7 @@ class Brain:
             directive=self.directive,
             agent_type=VisionAgentType.GEMINI_FLASH_MULTI,
             gemini_variant=self.gemini_variant,
+            additional_image_data=additional_image_data,
         )
 
         # Log the image with appropriate type AFTER VLM call

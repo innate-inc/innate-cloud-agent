@@ -49,6 +49,17 @@ class ImageProcessor:
         # Depth payload is now optional
         depth_payload = payload.get("depth")
 
+        additional_image_data = {}
+
+        # Check if we received an additional camera image
+        if "additional_camera" in payload:
+            additional_image_data["camera_type"] = payload["additional_camera"][
+                "camera_type"
+            ]
+            additional_image_data["image_b64"] = payload["additional_camera"][
+                "image_b64"
+            ]
+
         # Validate required depth payload if present
         if depth_payload is not None:
             required_depth_fields = ["height", "width", "encoding", "data"]
@@ -78,7 +89,13 @@ class ImageProcessor:
                 f"{', '.join(missing_fields)}"
             )
 
-        return base64_img, depth_payload, robot_coords, map_payload
+        return (
+            base64_img,
+            depth_payload,
+            robot_coords,
+            map_payload,
+            additional_image_data,
+        )
 
     def process_depth(self, depth_payload):
         """
