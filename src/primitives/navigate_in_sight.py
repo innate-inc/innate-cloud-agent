@@ -260,7 +260,9 @@ class NavigateInSight(Primitive):
         )
 
         # Save visualizations
-        save_navigation_visualizations(annotated_image, map_vis, timestamp)
+        save_navigation_visualizations(
+            annotated_image, map_vis, timestamp, prefix="nav_in_sight"
+        )
 
         # If no valid points are found, exit early but still save visualizations for debugging
         if not point_mapping:

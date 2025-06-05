@@ -263,11 +263,12 @@ Respond with whether the target is "closer" or "further".
             response = self.genai_client.models.generate_content(
                 contents=message_parts,
                 model=GEMINI_MODEL_NAME,
-                generation_config=types.GenerateContentConfig(
+                config=types.GenerateContentConfig(
                     temperature=GEMINI_TEMPERATURE,
                     top_p=GEMINI_TOP_P,
                     top_k=GEMINI_TOP_K,
                     max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
                     response_mime_type="application/json",
                     response_schema=ResponseSchema,
                 ),
@@ -283,11 +284,11 @@ Respond with whether the target is "closer" or "further".
                 return feedback_msg, True, {"is_close_enough": True}
             elif response_data.proximity == Proximity.FURTHER:
                 feedback_msg = f"The target {target_description} is further away than {distance_meters}m"
-                self.feedback_callback(feedback_msg)
+                self._send_feedback(feedback_msg)
                 return feedback_msg, True, {"is_close_enough": False}
             else:
                 feedback_msg = f"Could not determine proximity for {target_description}. Reason: {response_data.reason}"
-                self.feedback_callback(feedback_msg)
+                self._send_feedback(feedback_msg)
                 return feedback_msg, False, None
 
         except Exception as e:

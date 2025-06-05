@@ -77,6 +77,7 @@ class NavigationHandler:
             map_payload=map_payload,
         )
 
+        vision_output.next_task = None
         return vision_output, has_canceled_task
 
     async def handle_navigate_in_sight(

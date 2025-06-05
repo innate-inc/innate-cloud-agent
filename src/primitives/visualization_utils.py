@@ -344,15 +344,17 @@ def create_map_visualization(
     return map_with_border
 
 
-def save_navigation_visualizations(camera_image, map_vis, timestamp=None):
+def save_navigation_visualizations(camera_image, map_vis, timestamp=None, prefix=""):
     """Save both camera and map visualizations with timestamp."""
     if timestamp is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    os.makedirs("navigation_points", exist_ok=True)
+    os.makedirs("navigation_visualizations", exist_ok=True)
 
-    camera_path = f"navigation_points/camera_with_points_{timestamp}.jpg"
-    map_path = f"navigation_points/map_with_points_{timestamp}.jpg"
+    camera_path = (
+        f"navigation_visualizations/{prefix}_camera_with_points_{timestamp}.jpg"
+    )
+    map_path = f"navigation_visualizations/{prefix}_map_with_points_{timestamp}.jpg"
 
     cv2.imwrite(camera_path, camera_image)
     cv2.imwrite(map_path, map_vis)
