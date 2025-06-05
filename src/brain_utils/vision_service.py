@@ -1,6 +1,12 @@
 import traceback
 from enum import Enum
 from typing import Union
+import json
+from pathlib import Path
+
+# Flag to control serialization of VLM inputs and outputs
+SERIALIZE_VLM_IO = True  # Set to False to disable
+VLM_IO_DUMP_FILE = Path("test_data/vlm_io_dump.jsonl")
 
 from src.agents.baml_agent import vision_agent
 from src.agents.gemini_flash_baml_agent import gemini_vision_agent
@@ -86,37 +92,8 @@ class VisionService:
             if agent_type in [
                 VisionAgentType.ANTHROPIC,
                 VisionAgentType.GEMINI_FLASH,
-            ]:
-                # Create the input for the vision agent
-                vlm_inputs = VisionAgentInput(
-                    base64_img=base64_img,
-                    user_prompt_text=user_prompt_text,
-                    primitive_in_execution=primitive_object,
-                    primitives_list=primitives_list,
-                    history_as_string=history,
-                    robot_coords=robot_coords,
-                    directive=directive,
-                )
-
-                if agent_type == VisionAgentType.ANTHROPIC:
-                    completion = await vision_agent(vlm_inputs)
-                else:
-                    # Validate gemini_variant
-                    if gemini_variant not in (
-                        "gemini1",
-                        "gemini2",
-                        "gemini3",
-                        "gemini4",
-                    ):
-                        self.logger.warning(
-                            f"Invalid Gemini variant: {gemini_variant}. Using gemini1."
-                        )
-                        gemini_variant = "gemini1"
-
-                    completion = await gemini_vision_agent(
-                        vlm_inputs, agent_variant=gemini_variant
-                    )
-                    return completion
+            ]:  # deprecated
+                raise ValueError(f"Unsupported agent type: {agent_type}")
             elif agent_type == VisionAgentType.GEMINI_FLASH_MULTI:
                 vlm_inputs = MultimodalVisionAgentInput(
                     base64_img=base64_img,
@@ -129,6 +106,22 @@ class VisionService:
                     additional_image_data=additional_image_data,
                 )
                 completion = await gemini_vision_agent_multimodal_history(vlm_inputs)
+
+                if SERIALIZE_VLM_IO:
+                    try:
+                        VLM_IO_DUMP_FILE.parent.mkdir(parents=True, exist_ok=True)
+                        # Assuming vlm_inputs and completion are Pydantic models
+                        data_to_serialize = {
+                            "input": vlm_inputs.model_dump(mode="json"),
+                            "output": completion.model_dump(mode="json"),
+                        }
+                        with open(VLM_IO_DUMP_FILE, "a") as f:
+                            f.write(json.dumps(data_to_serialize) + "\n")
+                        self.logger.info(f"Serialized VLM I/O to {VLM_IO_DUMP_FILE}")
+                    except Exception as ser_exc:
+                        self.logger.error(
+                            f"Error during VLM I/O serialization: {ser_exc}, Input: {vlm_inputs}, Completion: {completion}"
+                        )
                 return completion
             else:
                 raise ValueError(f"Unsupported agent type: {agent_type}")
