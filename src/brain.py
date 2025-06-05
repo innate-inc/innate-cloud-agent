@@ -18,6 +18,7 @@ from src.agents.types import PrimitiveDefinition
 from src.primitives.navigate_in_sight import NavigateInSight
 from src.primitives.navigate_through_memory import NavigateThroughMemory
 from src.primitives.turn_and_move import TurnAndMove
+from src.primitives.check_if_close_enough import CheckIfCloseEnough
 
 from src.brain_utils.logger import BrainLogger
 from src.brain_utils.image_processor import ImageProcessor
@@ -72,6 +73,7 @@ class Brain:
             NavigateInSight(),
             NavigateThroughMemory(),
             TurnAndMove(),
+            CheckIfCloseEnough(),
         ]  # These are the ones defined in the brain here, not registered with
         # the server by the user
         for p in self.local_primitives_list:
@@ -348,6 +350,22 @@ class Brain:
             vision_output = await self.navigation_handler.handle_turn_and_move(
                 vision_output, robot_coords, map_payload
             )
+
+        # Handle special case for check_if_close_enough
+        if (
+            vision_output.next_task
+            and vision_output.next_task.name == "check_if_close_enough"
+        ):
+            vision_output, has_canceled_task = (
+                await self.navigation_handler.handle_check_if_close_enough(
+                    vision_output,
+                    robot_coords,
+                    base64_img_extracted,
+                    depth_payload,
+                    map_payload,
+                )
+            )
+            vision_output_to_write_in_history = vision_output
 
         # Send response and prepare for next image
         await self._send_vision_output(vision_output, vision_output_to_write_in_history)

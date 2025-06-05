@@ -30,6 +30,55 @@ class NavigationHandler:
         self.logger = logger
         self.primitives_list = primitives_list
 
+    async def handle_check_if_close_enough(
+        self, vision_output, robot_coords, base64_img, depth_payload, map_payload=None
+    ):
+        has_canceled_task = False
+        check_prim = next(
+            (
+                prim
+                for prim in self.primitives_list
+                if prim.name == "check_if_close_enough"
+            ),
+            None,
+        )
+
+        if not check_prim:
+            self.logger.error("CheckIfCloseEnough primitive not found")
+            vision_output.observation = (
+                "CheckIfCloseEnough primitive not found, cannot perform check."
+            )
+            vision_output.next_task = None
+            has_canceled_task = True
+            return vision_output, has_canceled_task
+
+        check_prim.update_current_vars(
+            current_x=robot_coords["x"],
+            current_y=robot_coords["y"],
+            current_yaw=robot_coords["theta"],
+            image_b64=base64_img,
+            depth_payload=depth_payload,
+            horizontal_fov=MAURICE_OAK_D_HORIZONTAL_FOV,
+            vertical_fov=MAURICE_OAK_D_VERTICAL_FOV,
+        )
+
+        distance_meters = vision_output.next_task.inputs.get("distance_meters")
+        target_description = vision_output.next_task.inputs.get("target_description")
+
+        if distance_meters is None or target_description is None:
+            vision_output.observation = "Missing 'distance_meters' or 'target_description' for check_if_close_enough."
+            vision_output.next_task = None
+            has_canceled_task = True
+            return vision_output, has_canceled_task
+
+        await check_prim.execute(
+            distance_meters=distance_meters,
+            target_description=target_description,
+            map_payload=map_payload,
+        )
+
+        return vision_output, has_canceled_task
+
     async def handle_navigate_in_sight(
         self, vision_output, robot_coords, base64_img, depth_payload, map_payload=None
     ):
