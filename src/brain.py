@@ -368,12 +368,14 @@ class Brain:
             )
             # We should also mark this primitive as activated and then completed
             self.history.add(
-                HistoryEntryType.PRIMITIVE_ACTIVATED,
+                HistoryEntryType.TASK_ACTIVATED,
                 description=f"Primitive {vision_output.next_task.name} activated",
             )
             self.history.add(
-                HistoryEntryType.PRIMITIVE_COMPLETED,
+                HistoryEntryType.TASK_COMPLETED,
+                description=f"Primitive {vision_output.next_task.name} completed",
             )
+            vision_output.next_task = None
 
         # Send response and prepare for next image
         await self._send_vision_output(vision_output, vision_output_to_write_in_history)
@@ -939,7 +941,7 @@ class Brain:
         for primitive_data in primitives_data:
             try:
                 name = primitive_data.get("name")
-                guideline = primitive_data.get("guideline")
+                guidelines = primitive_data.get("guidelines")
                 inputs = primitive_data.get("inputs", {})
 
                 # Validate required fields
@@ -959,7 +961,7 @@ class Brain:
                     continue
 
                 new_primitive = PrimitiveDefinition(
-                    name=name, guideline=guideline, inputs=inputs
+                    name=name, guidelines=guidelines, inputs=inputs
                 )
                 self.primitives_list.append(new_primitive)
                 registered_count += 1
