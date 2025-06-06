@@ -10,7 +10,7 @@ def primitive_to_object(primitive_obj: Primitive) -> PrimitiveDefinition:
     """
     Given a Primitive instance, returns a dict with:
       - "name": the name of the primitive
-      - "guideline": the guidelines text (if a guidelines() method exists)
+      - "guidelines": the guidelines text (if a guidelines() method exists)
       - "inputs": a dict mapping each parameter (excluding 'self') of execute to its type name
       - "primitive_id": a unique identifier for this primitive instance
     """
@@ -22,7 +22,7 @@ def primitive_to_object(primitive_obj: Primitive) -> PrimitiveDefinition:
     # If the object has a guidelines method, call it and store its result.
     guidelines_func = getattr(primitive_obj, "guidelines", None)
     if callable(guidelines_func):
-        result["guideline"] = guidelines_func()
+        result["guidelines"] = guidelines_func()
 
     # Use inspect.signature to get the parameters of the execute method.
     execute_func = getattr(primitive_obj, "execute", None)
@@ -70,7 +70,7 @@ def create_type_builder(primitives: list[PrimitiveDefinition]) -> TypeBuilder:
     # Process each primitive and create a new dynamic class.
     for i, prim in enumerate(primitives):
         task_name = prim.name
-        task_desc = prim.guideline
+        task_desc = prim.guidelines
         dynamic_class_name = f"NextTask{i+1}"
 
         # Create the dynamic composite type for this primitive.

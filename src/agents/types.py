@@ -4,10 +4,14 @@ from pydantic import BaseModel, Field, ConfigDict
 
 class PrimitiveDefinition(BaseModel):
     name: str
-    # This field will accept either a key named "description" (via the alias) or "guideline"
-    guideline: Optional[str] = Field(
+    # This field will accept either a key named "description" (via the alias) or "guidelines"
+    guidelines: Optional[str] = Field(
         default=None,
-        description="Guideline for the task. Can be provided as 'description' in inputs.",
+        description="Guidelines for the task. Can be provided as 'description' in inputs.",
+    )
+    guidelines_when_running: Optional[str] = Field(
+        default=None,
+        description="Guidelines for the task when running. Can be provided as 'description_when_running' in inputs.",
     )
     inputs: Dict[str, Any]
     primitive_id: Optional[str] = Field(
