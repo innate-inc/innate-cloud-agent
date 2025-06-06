@@ -68,10 +68,11 @@ class NavigateInSight(Primitive):
         return (
             "To use to navigate to an object or target in sight. Is a much better "
             "primitive than navigate_to_position to use when it's to navigate to a "
-            "target in sight. Provide a target object name, such as 'shelf', 'table', "
-            "'chair', etc.\n\n"
+            "target in sight. Provide a target object description, such as 'in front of shelf', 'on table', "
+            "'left of the chair', etc.\n\n"
             "Make sure you precise if it's on the target, or in front of it, or behind it, or to the left or right of it."
-            "For example, if we want to pick up an object, we want to in front of it, but not on it.\n\n"
+            "For example, if we want to pick up an object, we want to be in front of it, but not on it.\n\n"
+            "If the goal is next to interact with the target, make sure you ask to stop in front of it.\n\n"
             "After using it, you can use it again to get closer or pursue navigation "
             "in sight if you deem it necessary. Can be very helpful to follow paths or "
             "navigate to a target that is far."
@@ -104,6 +105,7 @@ class NavigateInSight(Primitive):
     async def execute(
         self,
         target_description: str = None,
+        stop_in_front_of_target: bool = True,
         map_payload: dict = None,
     ):
         """
@@ -111,6 +113,7 @@ class NavigateInSight(Primitive):
 
         Args:
             target_description (str, optional): Description of where to navigate
+            stop_in_front_of_target (bool, optional): Whether to stop in front of the target
             map_payload (dict, optional): Map payload from the robot
 
         Returns:
@@ -297,6 +300,16 @@ class NavigateInSight(Primitive):
                 navigation_command,
             )
 
+        if stop_in_front_of_target:
+            additional_prompt = (
+                "Make sure you stop in front of the target, not after it or on the side of it! "
+                "If there is no point in front of the target, return that you found no point, "
+                "set the point_id to 0, and give the reason you didn't pick a point is because you're already close enough."
+                "Do not pick a point too close to the target, as it might be too close to obstacles."
+            )
+        else:
+            additional_prompt = ""
+
         # Create prompt for Gemini to select a navigation point
         user_prompt = f"""
 I need to navigate to: {target_description}
@@ -311,6 +324,8 @@ If no point is found, or if you think you're already close enough, return that y
 found no point, set the point_id to 0, and give the reason you didn't pick a point.
 
 If there's a need for clarification, explain in the explanation field.
+
+{additional_prompt}
 """
 
         # Use the GenerativeAI package directly, like in navigate_through_memory.py
@@ -362,22 +377,17 @@ If there's a need for clarification, explain in the explanation field.
                     ),
                 )
                 response_text = response.text
+                response_parsed = response.parsed
 
-                print(f"Gemini response: {response_text}")
+                print(f"Gemini response: {response_parsed}")
 
-                # Extract the number from the response
-                import re
-
-                numbers = re.findall(r"\\d+", response_text)
-                if numbers:
-                    selected_point_id = numbers[0]
+                if response_parsed.found_a_point:
+                    selected_point_id = str(response_parsed.point_id)
                     print(f"Extracted selected point ID: {selected_point_id}")
                 else:
-                    # Default to the first point if no number found
-                    selected_point_id = "1"
+                    selected_point_id = "0"
                     print(
-                        f"No point number found in response, defaulting to point "
-                        f"{selected_point_id}"
+                        f"No point found in response, defaulting to point {selected_point_id}"
                     )
         except Exception as e:
             print(f"Error calling Gemini API: {e}")

@@ -103,9 +103,13 @@ class NavigationHandler:
         target_description = vision_output.next_task.inputs.get(
             "target_description", target_object
         )
+        stop_in_front_of_target = vision_output.next_task.inputs.get(
+            "stop_in_front_of_target", False
+        )
 
         # Execute the primitive with the appropriate parameters
         msg, result, navigation_command = await nav_in_sight.execute(
+            stop_in_front_of_target=stop_in_front_of_target,
             target_description=target_description,
             map_payload=map_payload,
         )
