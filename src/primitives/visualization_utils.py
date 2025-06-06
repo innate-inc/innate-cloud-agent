@@ -16,21 +16,28 @@ COLORS = {
 
 
 def draw_navigation_point(
-    image, x, y, point_id, circle_radius=15, point_color_key="in_fov"
+    image, x, y, point_id, circle_radius=10, point_color_key="in_fov"
 ):
     """Draw a single navigation point with ID on the image."""
     # Ensure coordinates are integers
     x, y = int(x), int(y)
 
-    # Draw black outline circle
-    cv2.circle(image, (x, y), circle_radius + 2, COLORS["text"], -1)
+    # Create an overlay for the transparent circle
+    overlay = image.copy()
 
-    # Draw filled circle
-    cv2.circle(image, (x, y), circle_radius, COLORS[point_color_key], -1)
+    # Draw a filled circle on the overlay
+    cv2.circle(overlay, (x, y), circle_radius, COLORS[point_color_key], -1)
+
+    # Blend the overlay with the original image for transparency
+    alpha = 0.5
+    cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
+
+    # Draw outline for the circle
+    cv2.circle(image, (x, y), circle_radius, COLORS["text"], 2)  # 2 pixel outline
 
     # Add number text
-    font_size = 0.8
-    font_thickness = 2
+    font_size = 0.6
+    font_thickness = 1
     text = str(point_id)
     text_size, _ = cv2.getTextSize(
         text, cv2.FONT_HERSHEY_SIMPLEX, font_size, font_thickness
@@ -143,7 +150,7 @@ def annotate_camera_view_with_line(image, navigation_points, point_converter):
             [pts],
             isClosed=False,
             color=COLORS["line_green"],
-            thickness=5,
+            thickness=3,
         )
 
     if out_of_view_points > 0:
