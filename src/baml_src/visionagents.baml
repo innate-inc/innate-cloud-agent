@@ -189,7 +189,7 @@ function GeminiVisionAgent4(img: image, context_text: string, primitives_list_st
 type ImageOrString = image | string
 
 
-function GeminiVisionAgentMultiImages(img: image, additional_image_data: ImageOrString[], context_multimodal: ImageOrString[], primitives_list_string: string) -> VisionAgentOutput {
+function GeminiVisionAgentMultiImages(img: image, additional_image_data: ImageOrString[], running_primitive_guidelines: string | null, context_multimodal: ImageOrString[], primitives_list_string: string) -> VisionAgentOutput {
     client Gemini25FlashClient
     prompt #"
         {{_.role("user")}}
@@ -212,6 +212,11 @@ function GeminiVisionAgentMultiImages(img: image, additional_image_data: ImageOr
         This is what you see: {{ img }}.
 
         {{ additional_image_data }}.
+
+        {% if running_primitive_guidelines %}
+        Here are the guidelines for the task currently running. Watch them carefully:
+        {{ running_primitive_guidelines }}
+        {% endif %}
 
         Consider the guidelines of the tasks available carefully before picking one to do (if any).
 

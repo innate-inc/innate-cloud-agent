@@ -104,14 +104,21 @@ async def gemini_vision_agent_multimodal_history(
     if additional_text_context_parts:
         context_multimodal.append("\n".join(additional_text_context_parts))
 
+    running_primitive_guidelines = (
+        vlm_inputs.primitive_in_execution.guidelines_when_running
+        if vlm_inputs.primitive_in_execution
+        else ""
+    )
+
     try:
         response = await decreasesmax_retries_multi_context(
-            img,
-            context_multimodal,
-            primitives_list_string,
-            tb,
-            max_retries,
-            additional_image_data,
+            img=img,
+            context_multimodal=context_multimodal,
+            running_primitive_guidelines=running_primitive_guidelines,
+            primitives_list_string=primitives_list_string,
+            tb=tb,
+            max_retries=max_retries,
+            additional_image_data=additional_image_data,
         )
         return response
     except MaxRetriesExceededException as e:
@@ -123,6 +130,7 @@ async def gemini_vision_agent_multimodal_history(
 async def decreasesmax_retries_multi_context(
     img: Image,
     context_multimodal: List[Image | str],  # Updated context type
+    running_primitive_guidelines: str,
     primitives_list_string: str,
     tb,
     max_retries: int,
@@ -136,13 +144,14 @@ async def decreasesmax_retries_multi_context(
 
     async def recall():
         return await decreasesmax_retries_multi_context(
-            img,
-            context_multimodal,
-            primitives_list_string,
-            tb,
-            max_retries,
-            additional_image_data,
-            attempt + 1,
+            img=img,
+            context_multimodal=context_multimodal,
+            running_primitive_guidelines=running_primitive_guidelines,
+            primitives_list_string=primitives_list_string,
+            tb=tb,
+            max_retries=max_retries,
+            additional_image_data=additional_image_data,
+            attempt=attempt + 1,
         )
 
     try:
@@ -150,6 +159,7 @@ async def decreasesmax_retries_multi_context(
             b.GeminiVisionAgentMultiImages(
                 img=img,
                 additional_image_data=additional_image_data,
+                running_primitive_guidelines=running_primitive_guidelines,
                 context_multimodal=context_multimodal,
                 primitives_list_string=primitives_list_string,
                 baml_options={"tb": tb},

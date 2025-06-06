@@ -24,6 +24,12 @@ def primitive_to_object(primitive_obj: Primitive) -> PrimitiveDefinition:
     if callable(guidelines_func):
         result["guidelines"] = guidelines_func()
 
+    guidelines_when_running_func = getattr(
+        primitive_obj, "guidelines_when_running", None
+    )
+    if callable(guidelines_when_running_func):
+        result["guidelines_when_running"] = guidelines_when_running_func()
+
     # Use inspect.signature to get the parameters of the execute method.
     execute_func = getattr(primitive_obj, "execute", None)
     inputs = {}

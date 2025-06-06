@@ -28,6 +28,7 @@ from src.brain_utils.memory_state_manager import MemoryStateManager
 
 
 from src.constants_robots import ROBOT_PARAMS_TO_USE
+from src.primitives.types import Primitive
 
 
 AVERAGE_POS_COV_THRESHOLD = ROBOT_PARAMS_TO_USE["average_pos_cov_threshold"]
@@ -795,7 +796,11 @@ class Brain:
             )
             if matched_prim is not None:
                 # Convert the dict to a PrimitiveDefinition instance with the ID
-                prim_obj = primitive_to_object(matched_prim)
+                prim_obj = (
+                    primitive_to_object(matched_prim)
+                    if isinstance(matched_prim, Primitive)
+                    else matched_prim
+                )
                 # Override the ID if provided in the message
                 if primitive_id:
                     prim_obj.primitive_id = primitive_id
@@ -942,6 +947,7 @@ class Brain:
             try:
                 name = primitive_data.get("name")
                 guidelines = primitive_data.get("guidelines")
+                guidelines_when_running = primitive_data.get("guidelines_when_running")
                 inputs = primitive_data.get("inputs", {})
 
                 # Validate required fields
@@ -961,7 +967,10 @@ class Brain:
                     continue
 
                 new_primitive = PrimitiveDefinition(
-                    name=name, guidelines=guidelines, inputs=inputs
+                    name=name,
+                    guidelines=guidelines,
+                    guidelines_when_running=guidelines_when_running,
+                    inputs=inputs,
                 )
                 self.primitives_list.append(new_primitive)
                 registered_count += 1

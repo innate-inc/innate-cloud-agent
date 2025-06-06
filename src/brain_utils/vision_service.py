@@ -4,6 +4,8 @@ from typing import Union
 import json
 from pathlib import Path
 
+from src.primitives.types import Primitive
+
 # Flag to control serialization of VLM inputs and outputs
 SERIALIZE_VLM_IO = True  # Set to False to disable
 VLM_IO_DUMP_FILE = Path("test_data/vlm_io_dump.jsonl")
@@ -37,7 +39,7 @@ class VisionService:
         self,
         base64_img,
         user_prompt_text,
-        primitive_in_execution: Union[PrimitiveDefinition, None],
+        primitive_in_execution: Union[PrimitiveDefinition, Primitive, None],
         primitives_list,
         history,
         robot_coords,
@@ -86,7 +88,10 @@ class VisionService:
             # Convert primitive_in_execution if needed
             primitive_object = None
             if primitive_in_execution:
-                primitive_object = primitive_to_object(primitive_in_execution)
+                if isinstance(primitive_in_execution, Primitive):
+                    primitive_object = primitive_to_object(primitive_in_execution)
+                else:
+                    primitive_object = primitive_in_execution
 
             # Call the appropriate vision agent based on the agent_type
             if agent_type in [
