@@ -30,7 +30,7 @@ class NavigationHandler:
         self.logger = logger
         self.primitives_list = primitives_list
 
-    async def handle_check_if_close_enough(
+    async def handle_check_distance_and_orientation(
         self, vision_output, robot_coords, base64_img, depth_payload, map_payload=None
     ):
         has_canceled_task = False
@@ -38,15 +38,15 @@ class NavigationHandler:
             (
                 prim
                 for prim in self.primitives_list
-                if prim.name == "check_if_close_enough"
+                if prim.name == "check_distance_and_orientation"
             ),
             None,
         )
 
         if not check_prim:
-            self.logger.error("CheckIfCloseEnough primitive not found")
+            self.logger.error("CheckDistanceAndOrientation primitive not found")
             vision_output.observation = (
-                "CheckIfCloseEnough primitive not found, cannot perform check."
+                "CheckDistanceAndOrientation primitive not found, cannot perform check."
             )
             vision_output.next_task = None
             has_canceled_task = True
@@ -66,7 +66,7 @@ class NavigationHandler:
         target_description = vision_output.next_task.inputs.get("target_description")
 
         if distance_meters is None or target_description is None:
-            vision_output.observation = "Missing 'distance_meters' or 'target_description' for check_if_close_enough."
+            vision_output.observation = "Missing 'distance_meters' or 'target_description' for check_distance_and_orientation."
             vision_output.next_task = None
             has_canceled_task = True
             return vision_output, has_canceled_task

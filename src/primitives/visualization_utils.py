@@ -404,3 +404,261 @@ def save_navigation_visualizations(camera_image, map_vis, timestamp=None, prefix
     print(f"Saved map visualization to {map_path}")
 
     return camera_path, map_path
+
+
+def annotate_camera_view_with_orientation_lines(
+    image, orientation_angles, point_converter, camera_info
+):
+    """
+    Annotate camera view with vertical lines representing orientation angles.
+
+    Args:
+        image: Original camera image
+        orientation_angles: List of angles in degrees relative to robot's forward direction
+        point_converter: Function that converts (angle, distance) to image coordinates
+        camera_info: Camera information dictionary
+    """
+    annotated_img = image.copy()
+    image_height, image_width = annotated_img.shape[:2]
+
+    # Define distances to create vertical lines (from ground to horizon)
+    min_distance = 0.5  # Start close to robot
+    max_distance = 5.0  # Extend to horizon
+    distance_steps = 20  # Number of points to create smooth vertical lines
+
+    for angle_deg in orientation_angles:
+        angle_rad = np.deg2rad(angle_deg)
+        line_points = []
+
+        # Create points along the vertical line at this angle
+        for distance in np.linspace(min_distance, max_distance, distance_steps):
+            # IN THE SIM WE HAVE TO INVERT THE ANGLE AND I DONT KNOW IF THIS
+            # WILL BE THE SAME FOR THE REAL ROBOT
+            img_x, img_y = point_converter(-angle_rad, distance)
+
+            if img_x is not None and img_y is not None:
+                line_points.append((img_x, img_y))
+
+        # Draw the vertical line if we have enough points
+        if len(line_points) > 1:
+            # Sort points by y-coordinate to ensure proper line drawing
+            line_points.sort(key=lambda p: p[1])
+
+            # Draw the line
+            pts = np.array(line_points, np.int32)
+            pts = pts.reshape((-1, 1, 2))
+
+            # Use blue color for orientation lines
+            line_color = (255, 0, 0)  # Blue in BGR
+            cv2.polylines(
+                annotated_img,
+                [pts],
+                isClosed=False,
+                color=line_color,
+                thickness=2,
+            )
+
+            # Add angle label at the bottom of the line if there are points
+            if line_points:
+                bottom_point = max(
+                    line_points, key=lambda p: p[1]
+                )  # Point with highest y value
+                label = f"{angle_deg:+.0f}°"
+
+                # Add text background for better visibility
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.5
+                font_thickness = 1
+                text_size, _ = cv2.getTextSize(label, font, font_scale, font_thickness)
+
+                text_x = max(
+                    0,
+                    min(
+                        image_width - text_size[0], bottom_point[0] - text_size[0] // 2
+                    ),
+                )
+                text_y = min(image_height - 5, bottom_point[1] + 20)
+
+                # Draw background rectangle
+                cv2.rectangle(
+                    annotated_img,
+                    (text_x - 2, text_y - text_size[1] - 2),
+                    (text_x + text_size[0] + 2, text_y + 2),
+                    (255, 255, 255),  # White background
+                    -1,
+                )
+
+                # Draw text
+                cv2.putText(
+                    annotated_img,
+                    label,
+                    (text_x, text_y),
+                    font,
+                    font_scale,
+                    (0, 0, 0),  # Black text
+                    font_thickness,
+                )
+
+    return annotated_img
+
+
+def annotate_camera_view_with_corridors(
+    image, horizontal_fov_deg, point_converter, camera_info
+):
+    """
+    Annotate camera view with corridors delimited by vertical lines.
+    Each corridor is 20 degrees wide, centered on 0, with mean angle displayed at bottom.
+
+    Args:
+        image: Original camera image
+        horizontal_fov_deg: Horizontal field of view in degrees
+        point_converter: Function that converts (angle, distance) to image coordinates
+        camera_info: Camera information dictionary
+    """
+    annotated_img = image.copy()
+    image_height, image_width = annotated_img.shape[:2]
+
+    # Define corridor parameters
+    corridor_width = 20.0  # degrees
+    corridor_half_width = corridor_width / 2.0
+
+    # Calculate the range we can cover
+    max_angle = horizontal_fov_deg / 2.0
+
+    # Generate corridors centered on 0
+    corridors = []
+
+    # Start with center corridor
+    center_corridor = (-corridor_half_width, corridor_half_width)
+    corridors.append(center_corridor)
+
+    # Add corridors to the left and right alternately
+    left_start = -corridor_half_width
+    right_start = corridor_half_width
+
+    while True:
+        added_corridor = False
+
+        # Try to add corridor to the left
+        left_end = left_start - corridor_width
+        if left_end >= -max_angle:
+            corridors.insert(
+                0, (left_end, left_start)
+            )  # Insert at beginning to maintain order
+            left_start = left_end
+            added_corridor = True
+        elif left_start > -max_angle:
+            # Add partial corridor on the left
+            corridors.insert(0, (-max_angle, left_start))
+            left_start = -max_angle  # Update to prevent further left attempts
+            added_corridor = True
+
+        # Try to add corridor to the right
+        right_end = right_start + corridor_width
+        if right_end <= max_angle:
+            corridors.append((right_start, right_end))
+            right_start = right_end
+            added_corridor = True
+        elif right_start < max_angle:
+            # Add partial corridor on the right
+            corridors.append((right_start, max_angle))
+            right_start = max_angle  # Update to prevent further right attempts
+            added_corridor = True
+
+        if not added_corridor:
+            break
+
+    print(
+        f"Generated {len(corridors)} corridors for hfov={horizontal_fov_deg}°: {corridors}"
+    )
+
+    # Define distances to create vertical lines (from ground to horizon)
+    min_distance = 0.5  # Start close to robot
+    max_distance = 5.0  # Extend to horizon
+    distance_steps = 20  # Number of points to create smooth vertical lines
+
+    # Colors for corridors (alternating for better visibility)
+    corridor_colors = [
+        (255, 0, 0),  # Blue
+        (0, 255, 0),  # Green
+        (0, 0, 255),  # Red
+        (255, 255, 0),  # Cyan
+        (255, 0, 255),  # Magenta
+        (0, 255, 255),  # Yellow
+    ]
+
+    # Draw corridor delimiter lines and labels
+    for i, (start_angle, end_angle) in enumerate(corridors):
+        mean_angle = (start_angle + end_angle) / 2.0
+        color = corridor_colors[i % len(corridor_colors)]
+
+        # Draw left boundary line (except for leftmost corridor)
+        if i > 0 or start_angle > -max_angle:
+            left_line_points = []
+            for distance in np.linspace(min_distance, max_distance, distance_steps):
+                # IN THE SIM WE HAVE TO INVERT THE ANGLE
+                img_x, img_y = point_converter(-np.deg2rad(start_angle), distance)
+                if img_x is not None and img_y is not None:
+                    left_line_points.append((img_x, img_y))
+
+            if len(left_line_points) > 1:
+                left_line_points.sort(key=lambda p: p[1])
+                pts = np.array(left_line_points, np.int32).reshape((-1, 1, 2))
+                cv2.polylines(
+                    annotated_img, [pts], isClosed=False, color=color, thickness=2
+                )
+
+        # Draw right boundary line (except for rightmost corridor)
+        if i < len(corridors) - 1 or end_angle < max_angle:
+            right_line_points = []
+            for distance in np.linspace(min_distance, max_distance, distance_steps):
+                # IN THE SIM WE HAVE TO INVERT THE ANGLE
+                img_x, img_y = point_converter(-np.deg2rad(end_angle), distance)
+                if img_x is not None and img_y is not None:
+                    right_line_points.append((img_x, img_y))
+
+            if len(right_line_points) > 1:
+                right_line_points.sort(key=lambda p: p[1])
+                pts = np.array(right_line_points, np.int32).reshape((-1, 1, 2))
+                cv2.polylines(
+                    annotated_img, [pts], isClosed=False, color=color, thickness=2
+                )
+
+        # Add mean angle label at the bottom of the corridor
+        # Find a point at the mean angle to position the label
+        label_distance = min_distance + 0.2  # Slightly above ground
+        img_x, img_y = point_converter(-np.deg2rad(mean_angle), label_distance)
+
+        if img_x is not None and img_y is not None:
+            label = f"{mean_angle:+.0f}°"
+
+            # Add text background for better visibility
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.6
+            font_thickness = 2
+            text_size, _ = cv2.getTextSize(label, font, font_scale, font_thickness)
+
+            text_x = max(0, min(image_width - text_size[0], img_x - text_size[0] // 2))
+            text_y = min(image_height - 10, img_y + 40)  # Position near bottom
+
+            # Draw background rectangle
+            cv2.rectangle(
+                annotated_img,
+                (text_x - 3, text_y - text_size[1] - 3),
+                (text_x + text_size[0] + 3, text_y + 3),
+                (255, 255, 255),  # White background
+                -1,
+            )
+
+            # Draw text
+            cv2.putText(
+                annotated_img,
+                label,
+                (text_x, text_y),
+                font,
+                font_scale,
+                (0, 0, 0),  # Black text
+                font_thickness,
+            )
+
+    return annotated_img, corridors

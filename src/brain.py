@@ -18,7 +18,7 @@ from src.agents.types import PrimitiveDefinition
 from src.primitives.navigate_in_sight import NavigateInSight
 from src.primitives.navigate_through_memory import NavigateThroughMemory
 from src.primitives.turn_and_move import TurnAndMove
-from src.primitives.check_if_close_enough import CheckIfCloseEnough
+from src.primitives.check_distance_and_orientation import CheckDistanceAndOrientation
 
 from src.brain_utils.logger import BrainLogger
 from src.brain_utils.image_processor import ImageProcessor
@@ -74,7 +74,7 @@ class Brain:
             NavigateInSight(),
             NavigateThroughMemory(),
             TurnAndMove(),
-            CheckIfCloseEnough(),
+            CheckDistanceAndOrientation(),
         ]  # These are the ones defined in the brain here, not registered with
         # the server by the user
         for p in self.local_primitives_list:
@@ -352,14 +352,14 @@ class Brain:
                 vision_output, robot_coords, map_payload
             )
 
-        # Handle special case for check_if_close_enough
+        # Handle special case for check_distance_and_orientation
         if (
             vision_output.next_task
-            and vision_output.next_task.name == "check_if_close_enough"
+            and vision_output.next_task.name == "check_distance_and_orientation"
         ):
             vision_output_to_write_in_history = vision_output.model_copy()
             vision_output, has_canceled_task = (
-                await self.navigation_handler.handle_check_if_close_enough(
+                await self.navigation_handler.handle_check_distance_and_orientation(
                     vision_output,
                     robot_coords,
                     base64_img_extracted,
