@@ -7,7 +7,8 @@ import numpy as np
 from datetime import datetime
 import base64
 from typing import Optional, Tuple
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import json
 from PIL import Image
 from io import BytesIO
@@ -32,7 +33,7 @@ IMAGE_FILE_EXTENSION = ".jpg"
 TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 
 # Gemini API constants
-GEMINI_MODEL_NAME = "gemini-2.0-flash"
+GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
 GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64
@@ -89,19 +90,10 @@ class PoseGraphMemory:
         # Initialize Gemini API if API key is available
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
-            genai.configure(api_key=api_key)
-            self.gemini_model = genai.GenerativeModel(
-                model_name=GEMINI_MODEL_NAME,
-                generation_config={
-                    "temperature": GEMINI_TEMPERATURE,
-                    "top_p": GEMINI_TOP_P,
-                    "top_k": GEMINI_TOP_K,
-                    "max_output_tokens": GEMINI_MAX_OUTPUT_TOKENS,
-                    "response_mime_type": GEMINI_RESPONSE_MIME_TYPE,
-                },
-            )
+            self.genai_client = genai.Client(api_key=api_key)
+            
         else:
-            self.gemini_model = None
+            self.genai_client = None
             print(
                 "Warning: GEMINI_API_KEY not found in environment variables. "
                 "VLM-based navigation will not be available."
@@ -228,17 +220,8 @@ class PoseGraphMemory:
             return None
 
         # If Gemini model is not available, fall back to most recent node
-        if self.gemini_model is None:
-            print("Gemini model not available. Falling back to most recent node.")
-            most_recent_node = max(
-                graph.nodes, key=lambda n: graph.nodes[n].get("timestamp", 0)
-            )
-            node_data = graph.nodes[most_recent_node]
-            return (
-                node_data["position"]["x"],
-                node_data["position"]["y"],
-                node_data["position"]["theta"],
-            )
+        if self.genai_client is None:
+            raise ValueError("Gemini model not available. Please set GEMINI_API_KEY in environment variables.")
 
         try:
             # Create a mapping from frame numbers to node IDs
@@ -282,11 +265,16 @@ class PoseGraphMemory:
                             img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION))
 
                         # Create a Gemini image part
-                        buff = BytesIO()
-                        img.save(buff, format=IMAGE_FORMAT_JPEG)
-                        img_bytes = buff.getvalue()
-                        img_part = {"mime_type": "image/jpeg", "data": img_bytes}
-                        message_parts.append(img_part)
+                        # Save PIL image to bytes buffer
+                        with BytesIO() as buf:
+                            img.save(buf, format=IMAGE_FORMAT_JPEG)
+                            image_bytes = buf.getvalue()
+                        
+                        image_part = types.Part.from_bytes(
+                            data=image_bytes,
+                            mime_type='image/jpeg' # Use constant or 'image/jpeg'
+                        )
+                        message_parts.append(image_part)
                         message_parts.append(f"Frame {frame_num}.")
                 else:
                     images_not_found.append(image_path)
@@ -308,7 +296,13 @@ class PoseGraphMemory:
             message_parts.append(last_message)
 
             # Call Gemini model
-            response = self.gemini_model.generate_content(message_parts)
+            response = self.genai_client.models.generate_content(
+                contents=message_parts,
+                model=GEMINI_MODEL_NAME,
+                config=types.GenerateContentConfig(
+                    thinking_config=types.ThinkingConfig(thinking_budget=1024)
+                ),
+            )
 
             # Parse the response
             try:

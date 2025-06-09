@@ -1,13 +1,17 @@
-from typing import Optional, List, Dict, Any, Union
+from typing import Literal, Optional, List, Dict, Any, Union
 from pydantic import BaseModel, Field, ConfigDict
 
 
 class PrimitiveDefinition(BaseModel):
     name: str
-    # This field will accept either a key named "description" (via the alias) or "guideline"
-    guideline: Optional[str] = Field(
+    # This field will accept either a key named "description" (via the alias) or "guidelines"
+    guidelines: Optional[str] = Field(
         default=None,
-        description="Guideline for the task. Can be provided as 'description' in inputs.",
+        description="Guidelines for the task. Can be provided as 'description' in inputs.",
+    )
+    guidelines_when_running: Optional[str] = Field(
+        default=None,
+        description="Guidelines for the task when running. Can be provided as 'description_when_running' in inputs.",
     )
     inputs: Dict[str, Any]
     primitive_id: Optional[str] = Field(
@@ -29,3 +33,27 @@ class VisionAgentInput(BaseModel):
     history_as_string: str
     robot_coords: Optional[Dict[str, Union[float, str]]] = None
     directive: Optional[str] = None
+
+
+class MultimodalHistoryItem(BaseModel):
+    type: Literal["text", "image"]
+    content: str = Field(
+        description="Content of the history item. For images, will be '[image]' when serialized"
+    )
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        if self.type == "image":
+            data["content"] = "[image]"
+        return data
+
+
+class MultimodalVisionAgentInput(BaseModel):
+    base64_img: str
+    user_prompt_text: Optional[str] = None
+    primitive_in_execution: Optional[PrimitiveDefinition] = None
+    primitives_list: List[PrimitiveDefinition]
+    multimodal_history: List[MultimodalHistoryItem]
+    robot_coords: Optional[Dict[str, Union[float, str]]] = None
+    directive: Optional[str] = None
+    additional_image_data: Optional[Dict[str, str]] = None

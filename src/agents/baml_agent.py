@@ -19,7 +19,7 @@ async def vision_agent(vlm_inputs: VisionAgentInput) -> Optional[VisionAgentOutp
       - primitive_in_execution: (Optional) The current primitive in execution.
       - primitives_list: A list of primitives with fields:
             - name: Unique name of the task.
-            - description: (Aliased to 'guideline' internally) Guidelines for the task.
+            - description: (Aliased to 'guidelines' internally) Guidelines for the task.
             - inputs: A dictionary mapping input fields to their type strings.
       - history_as_string: A history of events.
       - robot_coords: (Optional) A dictionary with the robot's coordinates.

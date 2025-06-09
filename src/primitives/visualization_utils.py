@@ -11,25 +11,33 @@ COLORS = {
     "background": (255, 255, 255),  # White
     "robot": (255, 0, 255),  # Magenta
     "text": (0, 0, 0),  # Black
+    "line_green": (0, 200, 0),  # Darker Green for the line
 }
 
 
 def draw_navigation_point(
-    image, x, y, point_id, circle_radius=15, point_color_key="in_fov"
+    image, x, y, point_id, circle_radius=10, point_color_key="in_fov"
 ):
     """Draw a single navigation point with ID on the image."""
     # Ensure coordinates are integers
     x, y = int(x), int(y)
 
-    # Draw black outline circle
-    cv2.circle(image, (x, y), circle_radius + 2, COLORS["text"], -1)
+    # Create an overlay for the transparent circle
+    overlay = image.copy()
 
-    # Draw filled circle
-    cv2.circle(image, (x, y), circle_radius, COLORS[point_color_key], -1)
+    # Draw a filled circle on the overlay
+    cv2.circle(overlay, (x, y), circle_radius, COLORS[point_color_key], -1)
+
+    # Blend the overlay with the original image for transparency
+    alpha = 0.5
+    cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
+
+    # Draw outline for the circle
+    cv2.circle(image, (x, y), circle_radius, COLORS["text"], 2)  # 2 pixel outline
 
     # Add number text
-    font_size = 0.8
-    font_thickness = 2
+    font_size = 0.6
+    font_thickness = 1
     text = str(point_id)
     text_size, _ = cv2.getTextSize(
         text, cv2.FONT_HERSHEY_SIMPLEX, font_size, font_thickness
@@ -98,23 +106,56 @@ def annotate_camera_view(image, navigation_points, point_converter):
             annotated_img, img_x, img_y, point_id, point_color_key="in_fov"
         )
 
-    # Add text showing how many points are in view vs out of view
-    total_viewable_points = in_view_points + out_of_view_points
-    status_text = f"Points in view: {in_view_points}/{total_viewable_points}"
-    cv2.putText(
-        annotated_img,
-        status_text,
-        (10, height - 15),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        (255, 255, 255),
-        1,
-    )
-
     # Print warning if there are out-of-view points
     if out_of_view_points > 0:
         print(
             f"WARNING: {out_of_view_points} navigation points are outside the camera field of view"
+        )
+
+    return annotated_img
+
+
+def annotate_camera_view_with_line(image, navigation_points, point_converter):
+    """
+    Annotate camera view with a line representing a constant distance.
+
+    Args:
+        image: Original camera image
+        navigation_points: List of (angle, distance, point_id) tuples
+        point_converter: Function that converts (angle, distance) to image coordinates
+    """
+    annotated_img = image.copy()
+    image_points = []
+    out_of_view_points = 0
+
+    # Convert all navigation points to image coordinates
+    for point_data in navigation_points:
+        angle, distance, _ = point_data
+        # IN THE SIM WE HAVE TO INVERT THE ANGLE AND I DONT KNOW IF THIS
+        # WILL BE THE SAME FOR THE REAL ROBOT
+        angle = -angle
+        img_x, img_y = point_converter(angle, distance)
+
+        if img_x is not None and img_y is not None:
+            image_points.append((img_x, img_y))
+        else:
+            out_of_view_points += 1
+
+    # Draw the line if there are enough points
+    if len(image_points) > 1:
+        pts = np.array(image_points, np.int32)
+        pts = pts.reshape((-1, 1, 2))
+        cv2.polylines(
+            annotated_img,
+            [pts],
+            isClosed=False,
+            color=COLORS["line_green"],
+            thickness=3,
+        )
+
+    if out_of_view_points > 0:
+        print(
+            f"WARNING: {out_of_view_points} navigation points for the line are outside the camera field of view"
         )
 
     return annotated_img
@@ -344,15 +385,17 @@ def create_map_visualization(
     return map_with_border
 
 
-def save_navigation_visualizations(camera_image, map_vis, timestamp=None):
+def save_navigation_visualizations(camera_image, map_vis, timestamp=None, prefix=""):
     """Save both camera and map visualizations with timestamp."""
     if timestamp is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    os.makedirs("navigation_points", exist_ok=True)
+    os.makedirs("navigation_visualizations", exist_ok=True)
 
-    camera_path = f"navigation_points/camera_with_points_{timestamp}.jpg"
-    map_path = f"navigation_points/map_with_points_{timestamp}.jpg"
+    camera_path = (
+        f"navigation_visualizations/{prefix}_camera_with_points_{timestamp}.jpg"
+    )
+    map_path = f"navigation_visualizations/{prefix}_map_with_points_{timestamp}.jpg"
 
     cv2.imwrite(camera_path, camera_image)
     cv2.imwrite(map_path, map_vis)

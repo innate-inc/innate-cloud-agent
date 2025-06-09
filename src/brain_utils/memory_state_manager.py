@@ -4,7 +4,7 @@ import shutil
 from datetime import datetime
 from typing import Optional, List
 
-from src.history import History, HistoryEntryType
+from src.history.history import History, HistoryEntryType
 from src.brain_utils.logger import BrainLogger
 from src.primitives.navigate_through_memory import NavigateThroughMemory
 

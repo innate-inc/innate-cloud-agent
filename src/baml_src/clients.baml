@@ -48,7 +48,7 @@ client<llm> Gemini25FlashClient {
     api_key env.GEMINI_API_KEY
     generationConfig {
         thinkingConfig {
-          thinkingBudget 256
+          thinkingBudget 0
       }
     }
   }

@@ -30,9 +30,59 @@ class NavigationHandler:
         self.logger = logger
         self.primitives_list = primitives_list
 
+    async def handle_check_if_close_enough(
+        self, vision_output, robot_coords, base64_img, depth_payload, map_payload=None
+    ):
+        has_canceled_task = False
+        check_prim = next(
+            (
+                prim
+                for prim in self.primitives_list
+                if prim.name == "check_if_close_enough"
+            ),
+            None,
+        )
+
+        if not check_prim:
+            self.logger.error("CheckIfCloseEnough primitive not found")
+            vision_output.observation = (
+                "CheckIfCloseEnough primitive not found, cannot perform check."
+            )
+            vision_output.next_task = None
+            has_canceled_task = True
+            return vision_output, has_canceled_task
+
+        check_prim.update_current_vars(
+            current_x=robot_coords["x"],
+            current_y=robot_coords["y"],
+            current_yaw=robot_coords["theta"],
+            image_b64=base64_img,
+            depth_payload=depth_payload,
+            horizontal_fov=MAURICE_OAK_D_HORIZONTAL_FOV,
+            vertical_fov=MAURICE_OAK_D_VERTICAL_FOV,
+        )
+
+        distance_meters = vision_output.next_task.inputs.get("distance_meters")
+        target_description = vision_output.next_task.inputs.get("target_description")
+
+        if distance_meters is None or target_description is None:
+            vision_output.observation = "Missing 'distance_meters' or 'target_description' for check_if_close_enough."
+            vision_output.next_task = None
+            has_canceled_task = True
+            return vision_output, has_canceled_task
+
+        await check_prim.execute(
+            distance_meters=distance_meters,
+            target_description=target_description,
+            map_payload=map_payload,
+        )
+
+        return vision_output, has_canceled_task
+
     async def handle_navigate_in_sight(
         self, vision_output, robot_coords, base64_img, depth_payload, map_payload=None
     ):
+        has_canceled_task = False
         nav_in_sight = next(
             (prim for prim in self.primitives_list if prim.name == "navigate_in_sight"),
             None,
@@ -53,22 +103,21 @@ class NavigationHandler:
         target_description = vision_output.next_task.inputs.get(
             "target_description", target_object
         )
-
-        # Use the new point selection approach if we have a map
-        use_point_selection = map_payload is not None
+        stop_in_front_of_target = vision_output.next_task.inputs.get(
+            "stop_in_front_of_target", False
+        )
 
         # Execute the primitive with the appropriate parameters
         msg, result, navigation_command = await nav_in_sight.execute(
-            target_object=target_object,
+            stop_in_front_of_target=stop_in_front_of_target,
             target_description=target_description,
             map_payload=map_payload,
-            use_point_selection=use_point_selection,
         )
 
         # Only replace the output with a navigation task if the execution was successful
         if result:
             # Check if the target position is too close to obstacles using the map
-            if map_payload and not use_point_selection:
+            if map_payload:
                 # If we're using point selection, we already verified safety
                 is_safe, safety_msg = self.check_position_safety(
                     navigation_command["x"], navigation_command["y"], map_payload
@@ -111,13 +160,17 @@ class NavigationHandler:
                 f"{navigation_to_position_task.inputs}. Initial coords were: {robot_coords}"
             )
         else:
+            has_canceled_task = True
             # If the execution failed, update the vision output to reflect the failure
             vision_output.stop_current_task = True
             vision_output.observation = f"Navigation in sight failed: {msg}"
+            vision_output.anticipation = f"I should use a different primitive to navigate, maybe turning and moving."
             vision_output.next_task = None
-            vision_output.to_tell_user = f"I couldn't navigate to the target: {msg}"
+            print(
+                f"Navigation in sight failed and we return this vision output: {vision_output}"
+            )
 
-        return vision_output
+        return vision_output, has_canceled_task
 
     def check_position_safety(self, target_x, target_y, map_payload):
         """
@@ -393,17 +446,15 @@ class NavigationHandler:
 
             if not is_safe:
                 self.logger.warn(
-                    f"Navigation (turn and move) target at ({new_x}, {new_y}) is too close to obstacles: "
+                    f"Navigation (turn and move) target at ({new_x:.2f}, {new_y:.2f}) is too close to obstacles: "
                     f"{safety_msg}"
                 )
                 # If not safe, update the vision output to reflect the safety issue
                 vision_output.stop_current_task = True
-                vision_output.observation = f"Navigation failed: {safety_msg}"
+                vision_output.observation = f"Navigation failed: {safety_msg}. "
+                vision_output.thoughts = f"I can't turn and move to that position because it's too close to obstacles."
                 vision_output.next_task = None
-                vision_output.to_tell_user = (
-                    f"I can't turn and move to that position because it's too close to obstacles. "
-                    f"{safety_msg}"
-                )
+                vision_output.to_tell_user = None
                 return vision_output
 
         original_primitive_id = getattr(vision_output.next_task, "primitive_id", None)

@@ -192,7 +192,8 @@ async def decreasesmax_retries(
                 agent_type=f"gemini_flash_{agent_variant}",
                 max_retries=max_retries,
                 last_error=TimeoutError(
-                    f"GeminiVisionAgent call exceeded {FLASH_EXECUTION_TIMEOUT} second timeout"
+                    f"GeminiVisionAgent call exceeded "
+                    f"{FLASH_EXECUTION_TIMEOUT} second timeout"
                 ),
             )
         await asyncio.sleep(1)
@@ -227,8 +228,11 @@ async def decreasesmax_retries(
         )
     except BamlClientError as e:
 
-        def error_msg(e):
-            return f"\033[1;31mBamlClientError on attempt {attempt}/{max_retries}: {e}\033[0m"
+        def error_msg(e_val):
+            return (
+                f"\033[1;31mBamlClientError on attempt {attempt}/{max_retries}: "
+                f"{e_val}\033[0m"
+            )
 
         if "hyper_util::client::legacy::Error(Connect, TimedOut)" in str(e):
             # For timeout errors, retry
