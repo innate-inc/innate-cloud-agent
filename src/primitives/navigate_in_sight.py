@@ -35,6 +35,20 @@ GEMINI_TOP_K = 64
 GEMINI_MAX_OUTPUT_TOKENS = 8192
 
 
+class PointSelectionReason(Enum):
+    FOUND_MATCHING_POINT = "FOUND_MATCHING_POINT"
+    NO_POINT_AVAILABLE = "NO_POINT_AVAILABLE"
+    ALREADY_CLOSE_ENOUGH = "ALREADY_CLOSE_ENOUGH"
+    OTHER = "OTHER"
+
+
+class ResponseSchema(BaseModel):
+    found_a_point: bool
+    point_id: int
+    reason: PointSelectionReason
+    explanation: str
+
+
 class NavigateInSight(Primitive):
     def __init__(self):
         """
@@ -102,53 +116,42 @@ class NavigateInSight(Primitive):
         self.x_cam = ROBOT_CAMERA_INFO["x_cam"]
         self.height_cam = ROBOT_CAMERA_INFO["height_cam"]
 
-    async def execute(
-        self,
-        target_description: str = None,
-        stop_in_front_of_target: bool = True,
-        map_payload: dict = None,
-    ):
+    def _decode_and_prepare_image(self):
         """
-        Execute the navigate_in_sight primitive using point selection.
-
-        Args:
-            target_description (str, optional): Description of where to navigate
-            stop_in_front_of_target (bool, optional): Whether to stop in front of the target
-            map_payload (dict, optional): Map payload from the robot
+        Decode the base64 image and prepare it for processing.
 
         Returns:
-            tuple: (message, success, navigation_command)
+            tuple: (cv_image, image_width, image_height, error_message)
         """
-        print(
-            f"NavigateInSight: Starting navigation from ({self.current_x}, "
-            f"{self.current_y})"
-        )
-
-        # Decode the map payload
-        try:
-            map_array, map_info = decode_map_payload(map_payload)
-        except Exception as e:
-            error_msg = f"Failed to decode map payload: {e}"
-            print(error_msg)
-            return error_msg, False, None
-
-        # Decode the provided image from base64 into a cv2 image.
         try:
             image_bytes = base64.b64decode(self.image_b64)
             image_array = np.frombuffer(image_bytes, np.uint8)
             cv_image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
 
-            image_height, image_width = cv_image.shape[:2]
-
             if cv_image is None:
                 print("Failed to decode image into cv_image.")
-                return "Failed to decode image", False, None
+                return None, None, None, "Failed to decode image"
+
+            image_height, image_width = cv_image.shape[:2]
+            return cv_image, image_width, image_height, None
+
         except Exception as e:
             print(f"Exception decoding image: {e}")
-            return "Image decode error", False, None
+            return None, None, None, "Image decode error"
 
-        # Sample valid navigation points using the utility function
-        result = sample_valid_navigation_points(
+    def _sample_navigation_points_with_angles(self, map_array, map_info, angles):
+        """
+        Sample navigation points using the given angles.
+
+        Args:
+            map_array: The map array
+            map_info: Map information
+            angles: List of angles to sample
+
+        Returns:
+            tuple: (valid_points_absolute, valid_points_angle_distance, invalid_points_absolute, invalid_points_angle_distance)
+        """
+        return sample_valid_navigation_points(
             self.current_x,
             self.current_y,
             self.current_yaw,
@@ -157,28 +160,21 @@ class NavigateInSight(Primitive):
             self.horizontal_fov,
             min_obstacle_distance=0.20,
             distances=[0.5, 1.0, 2.0],
-            angles_deg=[-40, -20, 0, 20, 40],
+            angles_deg=angles,
         )
 
-        # Unpack the tuple of absolute points and angle-distance points
-        (
-            valid_navigation_points_absolute,
-            valid_navigation_points_angle_distance,
-            invalid_navigation_points_absolute,
-            invalid_navigation_points_angle_distance,
-        ) = result
+    def _create_point_mapping(
+        self,
+        valid_navigation_points_absolute,
+        valid_navigation_points_angle_distance,
+        map_info,
+    ):
+        """
+        Create point mapping and visualization points from navigation data.
 
-        # Create visualizations
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        # Convert robot position from world coordinates to grid coordinates
-        robot_pixel_x, robot_pixel_y = world_to_grid_coordinates(
-            self.current_x, self.current_y, map_info
-        )
-        robot_pos = (robot_pixel_x, robot_pixel_y, self.current_yaw)
-
-        # Create point mapping from valid navigation points
-        # This ensures the same point ID is used in both camera and map views
+        Returns:
+            tuple: (point_mapping, grid_valid_points, camera_valid_points)
+        """
         point_mapping = {}
         grid_valid_navigation_points = []
         camera_valid_navigation_points = []
@@ -206,9 +202,24 @@ class NavigateInSight(Primitive):
                 "theta": point_theta,
             }
 
-        print(f"Generated {len(point_mapping)} valid navigation points")
+        return (
+            point_mapping,
+            grid_valid_navigation_points,
+            camera_valid_navigation_points,
+        )
 
-        # Prepare invalid points for visualization
+    def _prepare_invalid_points_for_visualization(
+        self,
+        invalid_navigation_points_absolute,
+        invalid_navigation_points_angle_distance,
+        map_info,
+    ):
+        """
+        Prepare invalid points for visualization.
+
+        Returns:
+            tuple: (grid_invalid_points, camera_invalid_points)
+        """
         grid_invalid_navigation_points = []
         camera_invalid_navigation_points = []
 
@@ -218,8 +229,7 @@ class NavigateInSight(Primitive):
                 invalid_navigation_points_angle_distance,
             )
         ):
-            # Using negative IDs for invalid points to distinguish them if needed,
-            # though visualization utils might just use color.
+            # Using negative IDs for invalid points to distinguish them if needed
             point_id = -(i + 1)
             pixel_x, pixel_y = world_to_grid_coordinates(point_x, point_y, map_info)
             grid_invalid_navigation_points.append(
@@ -227,17 +237,36 @@ class NavigateInSight(Primitive):
             )
             camera_invalid_navigation_points.append((angle, distance, point_id))
 
-        print(
-            f"Generated {len(grid_invalid_navigation_points)} invalid navigation points"
+        return grid_invalid_navigation_points, camera_invalid_navigation_points
+
+    def _create_visualizations(
+        self,
+        cv_image,
+        image_width,
+        image_height,
+        map_array,
+        map_info,
+        grid_valid_points,
+        grid_invalid_points,
+        camera_valid_points,
+        timestamp,
+    ):
+        """
+        Create and save visualizations for navigation points.
+        """
+        # Convert robot position from world coordinates to grid coordinates
+        robot_pixel_x, robot_pixel_y = world_to_grid_coordinates(
+            self.current_x, self.current_y, map_info
         )
+        robot_pos = (robot_pixel_x, robot_pixel_y, self.current_yaw)
 
         # Create map visualization with grid coordinates
         map_vis = create_map_visualization(
             map_array,
             robot_pos,
-            grid_valid_navigation_points,
+            grid_valid_points,
             map_info,
-            invalid_points=grid_invalid_navigation_points,
+            invalid_points=grid_invalid_points,
         )
 
         # Create a wrapper function for angle_distance_to_image_coordinates
@@ -258,7 +287,7 @@ class NavigateInSight(Primitive):
 
         annotated_image = annotate_camera_view(
             cv_image,
-            camera_valid_navigation_points,
+            camera_valid_points,
             convert_to_image_coords,
         )
 
@@ -267,39 +296,17 @@ class NavigateInSight(Primitive):
             annotated_image, map_vis, timestamp, prefix="nav_in_sight"
         )
 
-        # If no valid points are found, exit early but still save visualizations for debugging
-        if not point_mapping:
-            print(
-                "No valid navigation points found. "
-                "Visualizations saved for debugging."
-            )
-            return (
-                "Could not find any valid navigation points, try again with a different primitive.",
-                False,
-                None,
-            )
+        return annotated_image
 
-        # If there's only one valid point, just use that
-        if len(point_mapping) == 1:
-            selected_point_id = list(point_mapping.keys())[0]
-            selected_point = point_mapping[selected_point_id]
+    def _call_gemini_for_point_selection(
+        self, target_description, stop_in_front_of_target, annotated_image
+    ):
+        """
+        Call Gemini API to select a navigation point.
 
-            navigation_command = {
-                "x": selected_point["x"],
-                "y": selected_point["y"],
-                "theta": selected_point["theta"],
-            }
-
-            print(
-                f"Only one valid point found, automatically selecting point "
-                f"{selected_point_id}"
-            )
-            return (
-                f"Navigation to point {selected_point_id} initiated",
-                True,
-                navigation_command,
-            )
-
+        Returns:
+            tuple: (selected_point_id, gemini_response)
+        """
         if stop_in_front_of_target:
             additional_prompt = (
                 "Make sure you stop in front of the target, not after it or on the side of it! "
@@ -320,20 +327,22 @@ Which numbered point should I navigate to based on the description?
 
 Please respond with the number of the best point (1, 2, 3, etc) if you found one.
 
-If no point is found, or if you think you're already close enough, return that you
-found no point, set the point_id to 0, and give the reason you didn't pick a point.
+- If no point is found and it might be because the numbers are occluding part of the image,
+return NO_POINT_AVAILABLE.
+
+- If you think you're already close enough, return ALREADY_CLOSE_ENOUGH, set the point_id to 0,
+ and explain a little more the reason you didn't pick a point.
 
 If there's a need for clarification, explain in the explanation field.
 
 {additional_prompt}
 """
 
-        # Use the GenerativeAI package directly, like in navigate_through_memory.py
         try:
             # Check if API key is available and client was initialized
             if not self.genai_client:
-                print("Warning: Gemini client not available. " "Using default point 1.")
-                selected_point_id = "1"
+                print("Warning: Gemini client not available. Using default point 1.")
+                return "1", None
             else:
                 print("Calling Gemini to select a navigation point...")
 
@@ -350,18 +359,6 @@ If there's a need for clarification, explain in the explanation field.
                 # Create content parts: user prompt and the image part
                 message_parts = [user_prompt, image_part]
 
-                class PointSelectionReason(Enum):
-                    FOUND_MATCHING_POINT = "FOUND_MATCHING_POINT"
-                    NO_POINT_AVAILABLE = "NO_POINT_AVAILABLE"
-                    ALREADY_CLOSE_ENOUGH = "ALREADY_CLOSE_ENOUGH"
-                    OTHER = "OTHER"
-
-                class ResponseSchema(BaseModel):
-                    found_a_point: bool
-                    point_id: int
-                    reason: PointSelectionReason
-                    explanation: str
-
                 # Call Gemini model using the client
                 response = self.genai_client.models.generate_content(
                     contents=message_parts,
@@ -376,7 +373,6 @@ If there's a need for clarification, explain in the explanation field.
                         response_schema=ResponseSchema,
                     ),
                 )
-                response_text = response.text
                 response_parsed = response.parsed
 
                 print(f"Gemini response: {response_parsed}")
@@ -384,17 +380,30 @@ If there's a need for clarification, explain in the explanation field.
                 if response_parsed.found_a_point:
                     selected_point_id = str(response_parsed.point_id)
                     print(f"Extracted selected point ID: {selected_point_id}")
+                    return selected_point_id, response_parsed
                 else:
                     selected_point_id = "0"
                     print(
                         f"No point found in response, defaulting to point {selected_point_id}"
                     )
+                    return selected_point_id, response_parsed
+
         except Exception as e:
             print(f"Error calling Gemini API: {e}")
             # Default to the first point
             selected_point_id = "1"
             print(f"Error with Gemini API, defaulting to point {selected_point_id}")
+            return selected_point_id, None
 
+    def _handle_point_selection_response(
+        self, selected_point_id, gemini_response, point_mapping
+    ):
+        """
+        Handle the point selection response and create navigation command.
+
+        Returns:
+            tuple: (message, success, navigation_command)
+        """
         # Get the selected point
         if selected_point_id in point_mapping:
             selected_point = point_mapping[selected_point_id]
@@ -413,8 +422,30 @@ If there's a need for clarification, explain in the explanation field.
                 True,
                 navigation_command,
             )
+        elif selected_point_id == "0":
+            # Handle special cases from Gemini response
+            if (
+                gemini_response
+                and gemini_response.reason == PointSelectionReason.ALREADY_CLOSE_ENOUGH
+            ):
+                return (
+                    f"Already close enough to target: {gemini_response.explanation}",
+                    True,
+                    None,  # No navigation needed
+                )
+            elif (
+                gemini_response
+                and gemini_response.reason == PointSelectionReason.NO_POINT_AVAILABLE
+            ):
+                return None  # Signal to retry with different angles
+            else:
+                return (
+                    "No valid navigation points found. Use a different primitive to navigate.",
+                    False,
+                    None,
+                )
         else:
-            # If the selected point is not valid, use the first available one
+            # If the selected point is not valid
             if point_mapping:
                 return (
                     "Picked an invalid point, try again with a valid point",
@@ -427,3 +458,210 @@ If there's a need for clarification, explain in the explanation field.
                     False,
                     None,
                 )
+
+    def _execute_with_angles(
+        self,
+        target_description,
+        stop_in_front_of_target,
+        map_array,
+        map_info,
+        cv_image,
+        image_width,
+        image_height,
+        angles,
+        attempt,
+    ):
+        """
+        Execute navigation with a specific set of angles.
+
+        Returns:
+            tuple: (message, success, navigation_command) or None to continue with retry
+        """
+        if attempt > 0:
+            print(f"Retrying with different angles: {angles}")
+
+        # Sample valid navigation points using the utility function
+        result = self._sample_navigation_points_with_angles(map_array, map_info, angles)
+
+        # Unpack the tuple of absolute points and angle-distance points
+        (
+            valid_navigation_points_absolute,
+            valid_navigation_points_angle_distance,
+            invalid_navigation_points_absolute,
+            invalid_navigation_points_angle_distance,
+        ) = result
+
+        # Create visualizations
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if attempt > 0:
+            timestamp += "_retry"
+
+        # Create point mapping and visualization points
+        point_mapping, grid_valid_points, camera_valid_points = (
+            self._create_point_mapping(
+                valid_navigation_points_absolute,
+                valid_navigation_points_angle_distance,
+                map_info,
+            )
+        )
+
+        print(f"Generated {len(point_mapping)} valid navigation points")
+
+        # Prepare invalid points for visualization
+        grid_invalid_points, camera_invalid_points = (
+            self._prepare_invalid_points_for_visualization(
+                invalid_navigation_points_absolute,
+                invalid_navigation_points_angle_distance,
+                map_info,
+            )
+        )
+
+        print(f"Generated {len(grid_invalid_points)} invalid navigation points")
+
+        # Create visualizations
+        annotated_image = self._create_visualizations(
+            cv_image,
+            image_width,
+            image_height,
+            map_array,
+            map_info,
+            grid_valid_points,
+            grid_invalid_points,
+            camera_valid_points,
+            timestamp,
+        )
+
+        # If no valid points are found, try the next set of angles (if not already retried)
+        if not point_mapping:
+            if attempt == 0:
+                print(
+                    "No valid navigation points found with initial angles, will retry with different angles..."
+                )
+                return None  # Signal to continue with retry
+            else:
+                print(
+                    "No valid navigation points found even after retry. Visualizations saved for debugging."
+                )
+                return (
+                    "Could not find any valid navigation points, try again with a different primitive.",
+                    False,
+                    None,
+                )
+
+        # If there's only one valid point, just use that
+        if len(point_mapping) == 1:
+            selected_point_id = list(point_mapping.keys())[0]
+            selected_point = point_mapping[selected_point_id]
+
+            navigation_command = {
+                "x": selected_point["x"],
+                "y": selected_point["y"],
+                "theta": selected_point["theta"],
+            }
+
+            print(
+                f"Only one valid point found, automatically selecting point {selected_point_id}"
+            )
+            return (
+                f"Navigation to point {selected_point_id} initiated",
+                True,
+                navigation_command,
+            )
+
+        # Call Gemini for point selection
+        selected_point_id, gemini_response = self._call_gemini_for_point_selection(
+            target_description, stop_in_front_of_target, annotated_image
+        )
+
+        # Check if this is NO_POINT_AVAILABLE and we haven't retried yet
+        if (
+            gemini_response
+            and gemini_response.reason == PointSelectionReason.NO_POINT_AVAILABLE
+            and attempt == 0
+        ):
+            print(
+                "Gemini returned NO_POINT_AVAILABLE, will retry with different angles..."
+            )
+            return None  # Signal to continue with retry
+
+        # Handle the point selection response
+        result = self._handle_point_selection_response(
+            selected_point_id, gemini_response, point_mapping
+        )
+
+        if result is None and attempt == 0:
+            # This means NO_POINT_AVAILABLE was returned, try with different angles
+            return None
+        elif result is None and attempt > 0:
+            # This means NO_POINT_AVAILABLE was returned even after retry
+            return (
+                f"No suitable navigation points found even after retry: {gemini_response.explanation}",
+                False,
+                None,
+            )
+        else:
+            return result
+
+    async def execute(
+        self,
+        target_description: str = None,
+        stop_in_front_of_target: bool = True,
+        map_payload: dict = None,
+    ):
+        """
+        Execute the navigate_in_sight primitive using point selection.
+
+        Args:
+            target_description (str, optional): Description of where to navigate
+            stop_in_front_of_target (bool, optional): Whether to stop in front of the target
+            map_payload (dict, optional): Map payload from the robot
+
+        Returns:
+            tuple: (message, success, navigation_command)
+        """
+        print(
+            f"NavigateInSight: Starting navigation from ({self.current_x}, {self.current_y})"
+        )
+
+        # Decode the map payload
+        try:
+            map_array, map_info = decode_map_payload(map_payload)
+        except Exception as e:
+            error_msg = f"Failed to decode map payload: {e}"
+            print(error_msg)
+            return error_msg, False, None
+
+        # Decode and prepare the image
+        cv_image, image_width, image_height, error_msg = (
+            self._decode_and_prepare_image()
+        )
+        if error_msg:
+            return error_msg, False, None
+
+        # Initial angles for sampling navigation points
+        initial_angles = [-40, -20, 0, 20, 40]
+        retry_angles = [-50, -30, -10, 10, 30, 50]  # Alternative angles for retry
+
+        # Try with initial angles first, then retry with different angles if needed
+        for attempt, angles in enumerate([initial_angles, retry_angles]):
+            result = self._execute_with_angles(
+                target_description,
+                stop_in_front_of_target,
+                map_array,
+                map_info,
+                cv_image,
+                image_width,
+                image_height,
+                angles,
+                attempt,
+            )
+
+            if result is not None:
+                return result
+
+        # This should not be reached, but just in case
+        return (
+            "Navigation failed after all attempts.",
+            False,
+            None,
+        )
