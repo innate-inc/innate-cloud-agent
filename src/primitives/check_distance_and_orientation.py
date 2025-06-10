@@ -35,6 +35,8 @@ GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64
 GEMINI_MAX_OUTPUT_TOKENS = 8192
 
+CORRIDOR_WIDTH = 30.0  # degrees
+
 
 class Proximity(Enum):
     CLOSER = "CLOSER"
@@ -84,11 +86,8 @@ class CheckDistanceAndOrientation(Primitive):
 
     def guidelines(self):
         return (
-            "Use this primitive to check if the robot is close enough to a target and if it is facing the target. "
-            "You need to provide a target description and a distance in meters. "
-            "It will determine if the target is closer or further than the specified distance and if the robot is facing the target. "
-            "The orientation check uses 20-degree wide corridors centered on the robot's forward direction. "
-            "If the target is not in the center corridor, it will provide turn recommendations."
+            f"Use this primitive to check if the robot is close enough to a target and if it is facing the target. "
+            "You need to provide a target description and a distance in meters. Be specific about the target."
         )
 
     def update_current_vars(
@@ -261,6 +260,7 @@ class CheckDistanceAndOrientation(Primitive):
                 "x_cam": self.x_cam,
                 "height_cam": self.height_cam,
             },
+            corridor_width=CORRIDOR_WIDTH,
         )
 
         # Log corridor information for debugging
