@@ -503,7 +503,7 @@ def annotate_camera_view_with_orientation_lines(
 
 
 def annotate_camera_view_with_corridors(
-    image, horizontal_fov_deg, point_converter, camera_info
+    image, horizontal_fov_deg, point_converter, corridor_width, camera_info
 ):
     """
     Annotate camera view with corridors delimited by vertical lines.
@@ -519,7 +519,6 @@ def annotate_camera_view_with_corridors(
     image_height, image_width = annotated_img.shape[:2]
 
     # Define corridor parameters
-    corridor_width = 20.0  # degrees
     corridor_half_width = corridor_width / 2.0
 
     # Calculate the range we can cover
