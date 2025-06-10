@@ -68,7 +68,6 @@ class CheckDistanceAndOrientation(Primitive):
         if api_key:
             try:
                 self.genai_client = genai.Client(api_key=api_key)
-                print("Gemini client initialized successfully.")
             except Exception as e:
                 self.genai_client = None
                 print(f"Failed to initialize Gemini client: {e}")
@@ -130,11 +129,6 @@ class CheckDistanceAndOrientation(Primitive):
         Returns:
             tuple: (message, success, data)
         """
-        print(
-            f"CheckDistanceAndOrientation: Starting check from ({self.current_x}, "
-            f"{self.current_y}) for target '{target_description}' at distance {distance_meters}m "
-            f"using 20-degree corridor-based orientation checking."
-        )
 
         # Decode the map payload
         try:
@@ -181,7 +175,6 @@ class CheckDistanceAndOrientation(Primitive):
 
         if not valid_points_absolute:
             msg = "Could not find any valid points at the specified distance."
-            print(msg)
             return msg, False, None
 
         # Create visualizations
@@ -246,8 +239,6 @@ class CheckDistanceAndOrientation(Primitive):
                 },
             )
 
-        print(f"Camera valid navigation points: {camera_valid_navigation_points}")
-
         # Create distance line annotation
         distance_annotated_image = annotate_camera_view_with_line(
             cv_image,
@@ -277,7 +268,6 @@ class CheckDistanceAndOrientation(Primitive):
         for start_angle, end_angle in corridors:
             mean_angle = (start_angle + end_angle) / 2.0
             corridor_info.append(f"{mean_angle:+.0f}°")
-        print(f"Generated corridors with mean angles: {', '.join(corridor_info)}")
 
         # Save both visualizations
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -286,12 +276,10 @@ class CheckDistanceAndOrientation(Primitive):
         os.makedirs("navigation_visualizations", exist_ok=True)
         distance_path = f"navigation_visualizations/distance_check_{timestamp}.jpg"
         cv2.imwrite(distance_path, distance_annotated_image)
-        print(f"Saved distance visualization to {distance_path}")
 
         # Save orientation image
         orientation_path = f"navigation_visualizations/corridor_check_{timestamp}.jpg"
         cv2.imwrite(orientation_path, orientation_annotated_image)
-        print(f"Saved corridor visualization to {orientation_path}")
 
         # Also save map visualization
         save_navigation_visualizations(
@@ -303,7 +291,6 @@ class CheckDistanceAndOrientation(Primitive):
 
         if not self.genai_client:
             msg = "Gemini client not available. Cannot perform check."
-            print(msg)
             return msg, False, None
 
         # Create prompts for Gemini - distance and orientation checks
@@ -331,8 +318,6 @@ Example: If the target is in the corridor labeled "+20°", respond with corridor
 """
 
         try:
-            print("Calling Gemini to check proximity and corridor-based orientation...")
-
             # Encode both images
             _, distance_img_encoded = cv2.imencode(".jpg", distance_annotated_image)
             distance_img_bytes = distance_img_encoded.tobytes()
@@ -400,9 +385,6 @@ Example: If the target is in the corridor labeled "+20°", respond with corridor
 
             print(f"Gemini distance response: {distance_data}")
             print(f"Gemini orientation response: {orientation_data}")
-            print(
-                f"Target detected in corridor: {orientation_data.corridor_angle:+.0f}°"
-            )
 
             # Determine results
             is_close_enough = distance_data.proximity == Proximity.CLOSER
