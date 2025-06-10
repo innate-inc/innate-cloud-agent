@@ -370,6 +370,8 @@ class NavigationHandler:
 
         original_primitive_id = getattr(vision_output.next_task, "primitive_id", None)
 
+        has_canceled_task = False
+
         if success and navigation_command:
             # Check if target position is safe if map_payload is available
             if map_payload:
@@ -405,6 +407,7 @@ class NavigationHandler:
                 f"{navigation_command}"
             )
         else:
+            has_canceled_task = True
             # If the execution failed, update the vision output to reflect the failure
             vision_output.stop_current_task = True
             vision_output.observation = f"Navigation through memory failed: {result}"
@@ -413,7 +416,7 @@ class NavigationHandler:
                 f"I couldn't navigate to that location: {result}"
             )
 
-        return vision_output
+        return vision_output, has_canceled_task
 
     async def handle_turn_and_move(self, vision_output, robot_coords, map_payload=None):
         """
@@ -440,6 +443,8 @@ class NavigationHandler:
         new_x = current_x + distance * math.cos(new_theta)
         new_y = current_y + distance * math.sin(new_theta)
 
+        has_canceled_task = False
+
         # Check if target position is safe if map_payload is available
         if map_payload:
             is_safe, safety_msg = self.check_position_safety(new_x, new_y, map_payload)
@@ -455,7 +460,7 @@ class NavigationHandler:
                 vision_output.thoughts = f"I can't turn and move to that position because it's too close to obstacles."
                 vision_output.next_task = None
                 vision_output.to_tell_user = None
-                return vision_output
+                return vision_output, True
 
         original_primitive_id = getattr(vision_output.next_task, "primitive_id", None)
 
@@ -479,4 +484,4 @@ class NavigationHandler:
             f"Initial coords were: {robot_coords}"
         )
 
-        return vision_output
+        return vision_output, has_canceled_task

@@ -339,18 +339,24 @@ class Brain:
             and vision_output.next_task.name == "navigate_through_memory"
         ):
             vision_output_to_write_in_history = vision_output.model_copy()
-            vision_output = (
+            vision_output, has_canceled_task = (
                 await self.navigation_handler.handle_navigate_through_memory(
                     vision_output, self.connection_id, map_payload
                 )
             )
+            if has_canceled_task:
+                vision_output_to_write_in_history = vision_output.model_copy()
 
         # Handle special case for turn_and_move
         if vision_output.next_task and vision_output.next_task.name == "turn_and_move":
             vision_output_to_write_in_history = vision_output.model_copy()
-            vision_output = await self.navigation_handler.handle_turn_and_move(
-                vision_output, robot_coords, map_payload
+            vision_output, has_canceled_task = (
+                await self.navigation_handler.handle_turn_and_move(
+                    vision_output, robot_coords, map_payload
+                )
             )
+            if has_canceled_task:
+                vision_output_to_write_in_history = vision_output.model_copy()
 
         # Handle special case for check_distance_and_orientation
         if (
