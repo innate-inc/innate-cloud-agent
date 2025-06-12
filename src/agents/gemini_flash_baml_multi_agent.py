@@ -2,6 +2,7 @@ from typing import Optional, List
 import base64
 import json
 from pathlib import Path
+from datetime import datetime
 from baml_py import Image
 from baml_py.errors import BamlValidationError, BamlClientError
 from src.baml_client import b
@@ -12,7 +13,7 @@ from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlCli
 import asyncio
 
 # Flag to control saving of debug data
-SAVE_DEBUG_DATA = False  # Set to False to disable
+SAVE_DEBUG_DATA = True  # Set to False to disable
 DEBUG_DATA_DIR = Path("test_data/debug_agent_images")
 
 FLASH_EXECUTION_TIMEOUT = 5
@@ -57,7 +58,10 @@ def _save_base64_image(base64_img: str, filename: str) -> str:
             ext = ".jpg"  # Default to jpg
 
         # Create full file path
-        file_path = DEBUG_DATA_DIR / f"{filename}{ext}"
+        file_path = (
+            DEBUG_DATA_DIR
+            / f"{filename}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
+        )
 
         # Write image data to file
         with open(file_path, "wb") as f:
@@ -87,7 +91,10 @@ def _save_context_data(context_data: dict, filename: str) -> str:
         DEBUG_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
         # Create full file path
-        file_path = DEBUG_DATA_DIR / f"{filename}.txt"
+        file_path = (
+            DEBUG_DATA_DIR
+            / f"{filename}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        )
 
         # Write context data to file
         with open(file_path, "w", encoding="utf-8") as f:
