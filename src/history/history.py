@@ -16,16 +16,17 @@ def get_now():
 
 
 class History:
-    NUM_HISTORY_TO_SUMMARIZE = 60
+    NUM_HISTORY_TO_SUMMARIZE = 150
     # Number of entries to consider for get_as_multimodal_list
     # At 0.3-0.4Hz, this value at 5 usually keeps fresh the last 10 seconds of history, the rest is summarized
     # So to get at least 2mn of history at the same rate, we need 5 * 6 * 2 = 60
+    # For 5 minutes, we need 5 * 6 * 5 = 150
     MULTIMODAL_HISTORY_COUNT = (
         500  # We make it very large for now as we don't summarize yet.
     )
 
     def __init__(
-        self, max_recent_generic_images: int = 3, max_recent_pre_action_images: int = 3
+        self, max_recent_generic_images: int = 0, max_recent_pre_action_images: int = 0
     ):
         # Entries that have not yet been summarized.
         self.entries: List[HistoryEntry] = []
@@ -459,7 +460,16 @@ class History:
                     )
                 )
             else:
-                # This is a text-based entry or placeholder for a non-selected image
+                # Skip image placeholders entirely - we don't want them in multimodal history
+                # Check if this is an image placeholder by looking at the formatted line content
+                formatted_line = item["formatted_line"]
+                if (
+                    "[Image data]" in formatted_line
+                    or "[Image Before Action]" in formatted_line
+                ):
+                    continue  # Skip image placeholders
+
+                # This is a text-based entry
                 current_text_lines_block.append(item["formatted_line"])
 
         if current_text_lines_block:

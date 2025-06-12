@@ -87,7 +87,9 @@ class CheckDistanceAndOrientation(Primitive):
     def guidelines(self):
         return (
             f"Use this primitive to check if the robot is close enough to a target and if it is facing the target. "
-            "You need to provide a target description and a distance in meters. Be specific about the target."
+            "You need to provide a target description and a distance in meters. Be specific about the target. "
+            "Executing this primitive will let you know if you need to adjust your distance and angle to the target."
+            "It will NOT make you move though, you need to use turn_and_move to move and / or rotate to the target."
         )
 
     def update_current_vars(
@@ -251,7 +253,8 @@ class CheckDistanceAndOrientation(Primitive):
             cv_image,  # Start with original image
             self.horizontal_fov,  # Pass the horizontal FOV
             convert_to_image_coords,
-            {
+            corridor_width=CORRIDOR_WIDTH,
+            camera_info={
                 "width": image_width,
                 "height": image_height,
                 "horizontal_fov": self.horizontal_fov,
@@ -260,7 +263,6 @@ class CheckDistanceAndOrientation(Primitive):
                 "x_cam": self.x_cam,
                 "height_cam": self.height_cam,
             },
-            corridor_width=CORRIDOR_WIDTH,
         )
 
         # Log corridor information for debugging
@@ -396,7 +398,7 @@ Example: If the target is in the corridor labeled "+20°", respond with corridor
             if not is_facing and corridor_angle != 0:
                 turn_direction = "left" if corridor_angle < 0 else "right"
                 turn_amount = abs(corridor_angle)
-                turn_recommendation = f" The robot should turn {turn_direction} by approximately {turn_amount:.0f}° to face the target."
+                turn_recommendation = f" The robot should turn {turn_direction} by approximately {turn_amount:.0f}° to face the target. You should use turn_and_move to align."
 
             # Create combined feedback message
             distance_status = (

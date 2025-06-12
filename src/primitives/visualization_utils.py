@@ -572,7 +572,7 @@ def annotate_camera_view_with_corridors(
     )
 
     # Define distances to create vertical lines (from ground to horizon)
-    min_distance = 0.5  # Start close to robot
+    min_distance = 0.3  # Start close to robot
     max_distance = 5.0  # Extend to horizon
     distance_steps = 20  # Number of points to create smooth vertical lines
 
@@ -629,7 +629,7 @@ def annotate_camera_view_with_corridors(
         img_x, img_y = point_converter(-np.deg2rad(mean_angle), label_distance)
 
         if img_x is not None and img_y is not None:
-            label = f"{mean_angle:+.0f}°"
+            label = f"{mean_angle}"
 
             # Add text background for better visibility
             font = cv2.FONT_HERSHEY_SIMPLEX

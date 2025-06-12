@@ -310,7 +310,7 @@ class NavigateInSight(Primitive):
         if stop_in_front_of_target:
             additional_prompt = (
                 "Make sure you stop in front of the target, not after it or on the side of it! "
-                "If there is no point in front of the target, return that you found no point, "
+                "If there is no point between you and the target, return that you found no point, "
                 "set the point_id to 0, and give the reason you didn't pick a point is because you're already close enough."
                 "Do not pick a point too close to the target, as it might be too close to obstacles."
             )
@@ -368,7 +368,7 @@ If there's a need for clarification, explain in the explanation field.
                         top_p=GEMINI_TOP_P,
                         top_k=GEMINI_TOP_K,
                         max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-                        thinking_config=types.ThinkingConfig(thinking_budget=0),
+                        thinking_config=types.ThinkingConfig(thinking_budget=2048),
                         response_mime_type="application/json",
                         response_schema=ResponseSchema,
                     ),
