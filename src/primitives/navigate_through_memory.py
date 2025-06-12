@@ -233,7 +233,7 @@ class PoseGraphMemory:
 
         if not graph.nodes:
             print(f"No locations found for user {user_token}")
-            return None
+            return None, None
 
         # If Gemini model is not available, fall back to most recent node
         if self.genai_client is None:
@@ -341,27 +341,27 @@ class PoseGraphMemory:
                             node_data["position"]["x"],
                             node_data["position"]["y"],
                             node_data["position"]["theta"],
-                        )
+                        ), response_parsed
                     else:
                         print(f"Invalid frame number in VLM response: {frame_number}")
                 else:
                     print(f"No matching location found: {response_parsed.explanation}")
-                    return None
+                    return None, response_parsed
 
             except Exception as e:
                 print(
                     f"Error parsing structured VLM response: {e}. Response: {response}"
                 )
-                return None
+                return None, None
 
         except Exception as e:
             print(f"Error using VLM for navigation: {e}")
             import traceback
 
             traceback.print_exc()
-            return None
+            return None, None
 
-        return None
+        return None, None
 
     def _save_image(self, user_token: str, image_data: str) -> str:
         """Save an image to disk and return the path."""
@@ -538,18 +538,26 @@ class NavigateThroughMemory(Primitive):
             )
 
         # Find the location in the pose graph
-        location = self.pose_graph_memory.find_location_by_description(
-            user_token, description
+        (location, response_parsed) = (
+            self.pose_graph_memory.find_location_by_description(user_token, description)
         )
 
         if location is None:
-            return (
-                f"No location matching '{description}' found in memory. "
-                f"The robot has {len(graph.nodes)} locations stored, but none match the description. "
-                f"Try a different description or have the robot explore more areas.",
-                False,
-                None,
-            )
+            if response_parsed is not None:
+                return (
+                    (
+                        f"No location matching '{description}' was selected. "
+                        f"The reason is: {response_parsed.explanation}."
+                    ),
+                    False,
+                    None,
+                )
+            else:
+                return (
+                    f"An unexpected error occurred while searching for the location. ",
+                    False,
+                    None,
+                )
 
         x, y, theta = location
 

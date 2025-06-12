@@ -412,9 +412,7 @@ class NavigationHandler:
             vision_output.stop_current_task = True
             vision_output.observation = f"Navigation through memory failed: {result}"
             vision_output.next_task = None
-            vision_output.to_tell_user = (
-                f"I couldn't navigate to that location: {result}"
-            )
+            vision_output.to_tell_user = None
 
         return vision_output, has_canceled_task
 
