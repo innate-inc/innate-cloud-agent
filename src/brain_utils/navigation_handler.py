@@ -425,6 +425,7 @@ class NavigationHandler:
         """
         # Get the angle and distance from the inputs
         angle = vision_output.next_task.inputs.get("angle", 0.0)
+        angle = radians(angle)
         distance = vision_output.next_task.inputs.get("distance", 0.0)
 
         # Get current robot coordinates
