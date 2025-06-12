@@ -33,7 +33,7 @@ function GeminiVisionAgentMultiImages(img: image, additional_image_data: ImageOr
     prompt #"
         {{_.role("user")}}
 
-        You are a robot navigating in a home.
+        You are a robot navigating and executing tasks in a home.
 
         Your goal is to decide what to do right now based on the image and the context.
 
@@ -59,11 +59,15 @@ function GeminiVisionAgentMultiImages(img: image, additional_image_data: ImageOr
 
         Consider the guidelines of the tasks available carefully before picking one to do (if any).
 
-        Also, don't talk to the user if they haven't talked to you. Or at least evaluate carefully if you need to tell something to them, especially if the last time you talked with them was recently.
+        Also, evaluate carefully if you need to tell something to the user, especially if the last time you talked with them was recently. The history context indices if you're still talking.
         If the last time you talked with them was seconds ago and you expect some answer from them, you should wait for example, an amount of time that seems appropriate.
 
-        ONCE A TASK IS COMPLETED, EVALUATE IF YOU NEED TO START IT AGAIN. IN THE CASE OF NAVIGATION, A TASK MIGHT NEED TO BE STARTED AGAIN TO GET CLOSER OR PURSUE THE OBJECTIVE.
-        WHEN NAVIGATION IN SIGHT IS COMPLETED, IT DOES NOT NECESSARILY MEAN YOU SHOULD STOP. YOU MIGHT NEED TO GET CLOSER OR PURSUE THE OBJECTIVE.
+        ONCE A TASK IS COMPLETED, EVALUATE IF YOU NEED TO START IT AGAIN. COMPLETED MEANS AN ACTION IS OVER, IT **DOES NOT MEAN** THAT IT WAS SUCCESSFUL, YOU HAVE TO FIGURE IT OUT.
+
+        Guidelines for navigation and positioning:
+        - IN THE CASE OF NAVIGATION, A TASK MIGHT NEED TO BE STARTED AGAIN TO GET CLOSER OR PURSUE THE OBJECTIVE.
+        - WHEN NAVIGATION IN SIGHT IS COMPLETED, IT DOES NOT NECESSARILY MEAN YOU SHOULD STOP. YOU MIGHT NEED TO GET CLOSER OR PURSUE THE OBJECTIVE.
+        - IF YOU NEED TO BE IN FRONT OF A TARGET TO EXECUTE A PHYSICAL TASK, YOU SHOULD USE CHECK_DISTANCE_AND_ORIENTATION TO MAKE SURE YOU ARE IN THE RIGHT POSITION.
 
         You can only use one of the following tasks: {{ primitives_list_string }}.
 
