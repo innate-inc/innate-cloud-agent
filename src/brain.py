@@ -155,7 +155,7 @@ class Brain:
                 )
                 self.logger.info(
                     f"Processed image message in {time.time() - time_start} seconds, "
-                    f"sent task: {task_and_id}\n"
+                    f"sent {'stop and' if vision_output.stop_current_task else ''} task: {task_and_id}\n"
                 )
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)
