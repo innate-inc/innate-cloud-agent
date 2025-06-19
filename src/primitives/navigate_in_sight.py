@@ -583,6 +583,16 @@ If there's a need for clarification, explain in the explanation field.
                 "Gemini returned NO_POINT_AVAILABLE, will retry with different angles..."
             )
             return None  # Signal to continue with retry
+        elif (
+            gemini_response
+            and gemini_response.reason == PointSelectionReason.ALREADY_CLOSE_ENOUGH
+        ):
+            print("Gemini returned ALREADY_CLOSE_ENOUGH, we can just stay here.")
+            return (
+                f"Already close enough to target: {gemini_response.explanation}",
+                True,
+                None,
+            )
 
         # Handle the point selection response
         result = self._handle_point_selection_response(

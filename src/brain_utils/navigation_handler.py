@@ -115,7 +115,7 @@ class NavigationHandler:
         )
 
         # Only replace the output with a navigation task if the execution was successful
-        if result:
+        if result and navigation_command is not None:
             # Check if the target position is too close to obstacles using the map
             if map_payload:
                 # If we're using point selection, we already verified safety
@@ -158,6 +158,17 @@ class NavigationHandler:
             self.logger.info(
                 f"Converted navigate_in_sight to navigate_to_position with inputs: "
                 f"{navigation_to_position_task.inputs}. Initial coords were: {robot_coords}"
+            )
+        elif result and navigation_command is None:
+            vision_output.stop_current_task = True
+            vision_output.observation = (
+                f"Navigation indicates we're already close enough to the target: {msg}"
+            )
+            vision_output.anticipation = None
+            vision_output.next_task = None
+            vision_output.to_tell_user = None
+            print(
+                f"Navigation in sight indicates we're already close enough to the target and we return this vision output: {vision_output}"
             )
         else:
             has_canceled_task = True
