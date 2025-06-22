@@ -1,3 +1,8 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 ROBOT_PARAMS_SIM = {
     "vertical_fov": 80.0,
     "horizontal_fov": 128.0,
@@ -10,6 +15,7 @@ ROBOT_PARAMS_SIM = {
     },
     "average_pos_cov_threshold": 0.05,
     "average_yaw_cov_threshold": 0.04,  # Could be lower?
+    "enable_visualizations": False,
 }
 
 ROBOT_PARAMS_MAURICE_OAK_D = {
@@ -24,6 +30,21 @@ ROBOT_PARAMS_MAURICE_OAK_D = {
     },
     "average_pos_cov_threshold": 0.05,
     "average_yaw_cov_threshold": 0.04,
+    "enable_visualizations": False,
 }
 
-ROBOT_PARAMS_TO_USE = ROBOT_PARAMS_MAURICE_OAK_D
+ROBOTS_PARAMS = {
+    "maurice_oak_d": ROBOT_PARAMS_MAURICE_OAK_D,
+    "sim": ROBOT_PARAMS_SIM,
+}
+
+# Get robot type from environment variable, default to maurice_oak_d
+ROBOT_TYPE = os.environ.get("ROBOT_TYPE", "undef")
+
+# Validate robot type
+if ROBOT_TYPE not in ROBOTS_PARAMS:
+    raise ValueError(
+        f"Invalid ROBOT_TYPE '{ROBOT_TYPE}'. Must be one of: {list(ROBOTS_PARAMS.keys())}"
+    )
+
+ROBOT_PARAMS_TO_USE = ROBOTS_PARAMS[ROBOT_TYPE]

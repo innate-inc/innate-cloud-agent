@@ -26,13 +26,16 @@ from src.utils import decode_map_payload
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 ROBOT_CAMERA_INFO = ROBOT_PARAMS_TO_USE["camera_info"]
+MIN_OBSTACLE_DISTANCE = ROBOT_PARAMS_TO_USE["min_obstacle_distance"]
+ENABLE_VISUALIZATIONS = ROBOT_PARAMS_TO_USE["enable_visualizations"]
 
 # Gemini API constants from navigate_through_memory.py
-GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+GEMINI_MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17"
 GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64
 GEMINI_MAX_OUTPUT_TOKENS = 8192
+THINKING_BUDGET = 512
 
 
 class PointSelectionReason(Enum):
@@ -158,7 +161,7 @@ class NavigateInSight(Primitive):
             map_array,
             map_info,
             self.horizontal_fov,
-            min_obstacle_distance=0.20,
+            min_obstacle_distance=MIN_OBSTACLE_DISTANCE * 2,
             distances=[0.5, 1.0, 2.0],
             angles_deg=angles,
         )
@@ -254,20 +257,6 @@ class NavigateInSight(Primitive):
         """
         Create and save visualizations for navigation points.
         """
-        # Convert robot position from world coordinates to grid coordinates
-        robot_pixel_x, robot_pixel_y = world_to_grid_coordinates(
-            self.current_x, self.current_y, map_info
-        )
-        robot_pos = (robot_pixel_x, robot_pixel_y, self.current_yaw)
-
-        # Create map visualization with grid coordinates
-        map_vis = create_map_visualization(
-            map_array,
-            robot_pos,
-            grid_valid_points,
-            map_info,
-            invalid_points=grid_invalid_points,
-        )
 
         # Create a wrapper function for angle_distance_to_image_coordinates
         def convert_to_image_coords(angle, distance):
@@ -285,16 +274,34 @@ class NavigateInSight(Primitive):
                 },
             )
 
+        # Always create annotated image (needed for Gemini point selection)
         annotated_image = annotate_camera_view(
             cv_image,
             camera_valid_points,
             convert_to_image_coords,
         )
 
-        # Save visualizations
-        save_navigation_visualizations(
-            annotated_image, map_vis, timestamp, prefix="nav_in_sight"
-        )
+        # Only create and save additional visualizations if enabled
+        if ENABLE_VISUALIZATIONS:
+            # Convert robot position from world coordinates to grid coordinates
+            robot_pixel_x, robot_pixel_y = world_to_grid_coordinates(
+                self.current_x, self.current_y, map_info
+            )
+            robot_pos = (robot_pixel_x, robot_pixel_y, self.current_yaw)
+
+            # Create map visualization with grid coordinates
+            map_vis = create_map_visualization(
+                map_array,
+                robot_pos,
+                grid_valid_points,
+                map_info,
+                invalid_points=grid_invalid_points,
+            )
+
+            # Save visualizations
+            save_navigation_visualizations(
+                annotated_image, map_vis, timestamp, prefix="nav_in_sight"
+            )
 
         return annotated_image
 
@@ -368,7 +375,9 @@ If there's a need for clarification, explain in the explanation field.
                         top_p=GEMINI_TOP_P,
                         top_k=GEMINI_TOP_K,
                         max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-                        thinking_config=types.ThinkingConfig(thinking_budget=2048),
+                        thinking_config=types.ThinkingConfig(
+                            thinking_budget=THINKING_BUDGET
+                        ),
                         response_mime_type="application/json",
                         response_schema=ResponseSchema,
                     ),

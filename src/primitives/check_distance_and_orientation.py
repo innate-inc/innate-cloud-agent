@@ -29,11 +29,13 @@ from src.constants_robots import ROBOT_PARAMS_TO_USE
 ROBOT_CAMERA_INFO = ROBOT_PARAMS_TO_USE["camera_info"]
 
 # Gemini API constants
-GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+GEMINI_MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17"
 GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64
 GEMINI_MAX_OUTPUT_TOKENS = 8192
+DISTANCE_THINKING_BUDGET = 512
+ORIENTATION_THINKING_BUDGET = 512
 
 CORRIDOR_WIDTH = 30.0  # degrees
 
@@ -354,7 +356,9 @@ Example: If the target is in the corridor labeled "+20°", respond with corridor
                         top_p=GEMINI_TOP_P,
                         top_k=GEMINI_TOP_K,
                         max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-                        thinking_config=types.ThinkingConfig(thinking_budget=256),
+                        thinking_config=types.ThinkingConfig(
+                            thinking_budget=DISTANCE_THINKING_BUDGET
+                        ),
                         response_mime_type="application/json",
                         response_schema=ResponseSchema,
                     ),
@@ -369,7 +373,9 @@ Example: If the target is in the corridor labeled "+20°", respond with corridor
                         top_p=GEMINI_TOP_P,
                         top_k=GEMINI_TOP_K,
                         max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-                        thinking_config=types.ThinkingConfig(thinking_budget=256),
+                        thinking_config=types.ThinkingConfig(
+                            thinking_budget=ORIENTATION_THINKING_BUDGET
+                        ),
                         response_mime_type="application/json",
                         response_schema=OrientationResponseSchema,
                     ),
