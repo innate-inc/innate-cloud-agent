@@ -15,6 +15,9 @@ from src.agents.gemini_flash_baml_agent import gemini_vision_agent
 from src.agents.gemini_flash_baml_multi_agent import (
     gemini_vision_agent_multimodal_history,
 )
+from src.agents.native_gemini_vision_agent import (
+    native_gemini_vision_agent_multimodal_history,
+)
 from src.agents.types import (
     MultimodalVisionAgentInput,
     PrimitiveDefinition,
@@ -29,6 +32,7 @@ class VisionAgentType(str, Enum):
     ANTHROPIC = "anthropic"
     GEMINI_FLASH = "gemini_flash"
     GEMINI_FLASH_MULTI = "gemini_flash_multi"
+    NATIVE_GEMINI_MULTI = "native_gemini_multi"
 
 
 class VisionService:
@@ -44,7 +48,7 @@ class VisionService:
         history,
         robot_coords,
         directive=None,
-        agent_type: VisionAgentType = VisionAgentType.GEMINI_FLASH,
+        agent_type: VisionAgentType = VisionAgentType.NATIVE_GEMINI_MULTI,
         gemini_variant: str = "gemini1",
         additional_image_data: dict = {},
     ) -> Union[VisionAgentOutput]:
@@ -59,7 +63,8 @@ class VisionService:
             history: A history of events.
             robot_coords: A dictionary with the robot's coordinates.
             directive: A directive to steer the vision language model.
-            agent_type: The type of agent to use.
+            agent_type: The type of agent to use. Options: "gemini_flash_multi" (BAML-based),
+                "native_gemini_multi" (native Google Gemini implementation)
             gemini_variant: The variant of Gemini agent to use if agent_type is
                 GEMINI_FLASH. Options: "gemini1", "gemini2", "gemini3", "gemini4"
 
@@ -111,6 +116,37 @@ class VisionService:
                     additional_image_data=additional_image_data,
                 )
                 completion = await gemini_vision_agent_multimodal_history(vlm_inputs)
+
+                if SERIALIZE_VLM_IO:
+                    try:
+                        VLM_IO_DUMP_FILE.parent.mkdir(parents=True, exist_ok=True)
+                        # Assuming vlm_inputs and completion are Pydantic models
+                        data_to_serialize = {
+                            "input": vlm_inputs.model_dump(mode="json"),
+                            "output": completion.model_dump(mode="json"),
+                        }
+                        with open(VLM_IO_DUMP_FILE, "a") as f:
+                            f.write(json.dumps(data_to_serialize) + "\n")
+                        self.logger.info(f"Serialized VLM I/O to {VLM_IO_DUMP_FILE}")
+                    except Exception as ser_exc:
+                        self.logger.error(
+                            f"Error during VLM I/O serialization: {ser_exc}, Input: {vlm_inputs}, Completion: {completion}"
+                        )
+                return completion
+            elif agent_type == VisionAgentType.NATIVE_GEMINI_MULTI:
+                vlm_inputs = MultimodalVisionAgentInput(
+                    base64_img=base64_img,
+                    user_prompt_text=user_prompt_text,
+                    primitive_in_execution=primitive_object,
+                    primitives_list=primitives_list,
+                    multimodal_history=history,
+                    robot_coords=robot_coords,
+                    directive=directive,
+                    additional_image_data=additional_image_data,
+                )
+                completion = await native_gemini_vision_agent_multimodal_history(
+                    vlm_inputs
+                )
 
                 if SERIALIZE_VLM_IO:
                     try:

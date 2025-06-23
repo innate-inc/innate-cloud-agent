@@ -237,7 +237,7 @@ class Brain:
             history=self.history.get_as_multimodal_list(),
             robot_coords=robot_coords,
             directive=self.directive,
-            agent_type=VisionAgentType.GEMINI_FLASH_MULTI,
+            agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,
             gemini_variant=self.gemini_variant,
             additional_image_data=additional_image_data,
         )
