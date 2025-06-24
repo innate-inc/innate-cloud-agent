@@ -4,12 +4,13 @@ from enum import Enum
 from src.agents.types import PrimitiveDefinition
 
 
-class NextTask(BaseModel):
-    """Next task model for Gemini API."""
+class NextPrimitive(BaseModel):
+    """Next primitive model for Gemini API."""
 
-    name: str = Field(..., description="Name of the task to execute")
+    name: str = Field(..., description="Name of the primitive to execute")
     inputs: str = Field(
-        default="{}", description="JSON string containing input parameters for the task"
+        default="{}",
+        description="JSON string containing input parameters for the primitive",
     )
 
 
@@ -18,7 +19,9 @@ class VisionAgentOutput(BaseModel):
     Pydantic model matching the exact BAML VisionAgentOutput schema.
     """
 
-    stop_current_task: bool = Field(..., description="Whether to stop the current task")
+    stop_current_primitive: bool = Field(
+        ..., description="Whether to stop the current primitive"
+    )
     observation: str = Field(
         ..., description="What the robot observes in the current situation"
     )
@@ -30,8 +33,8 @@ class VisionAgentOutput(BaseModel):
     to_tell_user: Optional[str] = Field(
         None, description="Message to tell the user (optional)"
     )
-    next_task: Optional[NextTask] = Field(
-        None, description="The next task to execute, if any"
+    next_primitive: Optional[NextPrimitive] = Field(
+        None, description="The next primitive to execute, if any"
     )
 
 
@@ -41,28 +44,30 @@ class BrainCompatibleVisionAgentOutput(BaseModel):
     This prevents type mismatch warnings during serialization.
     """
 
-    stop_current_task: bool
+    stop_current_primitive: bool
     observation: str
     thoughts: str
     new_goal: Optional[str] = None
     anticipation: Optional[str] = None
     to_tell_user: Optional[str] = None
-    next_task: Optional[Dict[str, Any]] = None  # Already in PrimitiveDefinition format
+    next_primitive: Optional[Dict[str, Any]] = (
+        None  # Already in PrimitiveDefinition format
+    )
 
 
 def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
     """
-    Create a Gemini-compatible Pydantic model with dynamic next_task Union.
+    Create a Gemini-compatible Pydantic model with dynamic next_primitive Union.
     This mimics BAML's create_type_builder functionality.
 
     Args:
-        primitives: List of available primitives to create specific task models for
+        primitives: List of available primitives to create specific primitive models for
 
     Returns:
         VisionAgentOutput Pydantic model class for Gemini API
     """
-    # Create individual task models for each primitive
-    task_models = []
+    # Create individual primitive models for each primitive
+    primitive_models = []
 
     for i, primitive in enumerate(primitives):
         # Create input fields dict for this primitive
@@ -88,42 +93,42 @@ def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
             )
 
         # Create inputs model for this primitive
-        inputs_model_name = f"Task{i+1}Inputs"
+        inputs_model_name = f"Primitive{i+1}Inputs"
         if input_fields:
             inputs_model = create_model(inputs_model_name, **input_fields)
         else:
             # For primitives with no inputs, create empty model
             inputs_model = create_model(inputs_model_name)
 
-        # Create task model for this primitive
-        task_model_name = f"Task{i+1}"
-        task_model = create_model(
-            task_model_name,
+        # Create primitive model for this primitive
+        primitive_model_name = f"Primitive{i+1}"
+        primitive_model = create_model(
+            primitive_model_name,
             name=(
                 Literal[primitive.name],
-                Field(..., description=f"Task: {primitive.guidelines}"),
+                Field(..., description=f"Primitive: {primitive.guidelines}"),
             ),
             inputs=(
                 inputs_model,
-                Field(..., description="Input parameters for the task"),
+                Field(..., description="Input parameters for the primitive"),
             ),
         )
 
-        task_models.append(task_model)
+        primitive_models.append(primitive_model)
 
-    # Create Union of all task models
-    if task_models:
-        NextTaskUnion = Union[tuple(task_models)]
+    # Create Union of all primitive models
+    if primitive_models:
+        NextPrimitiveUnion = Union[tuple(primitive_models)]
     else:
         # Fallback if no primitives
-        NextTaskUnion = None
+        NextPrimitiveUnion = None
 
     # Create the main VisionAgentOutput model
     VisionAgentOutput = create_model(
         "VisionAgentOutput",
-        stop_current_task=(
+        stop_current_primitive=(
             bool,
-            Field(..., description="Whether to stop the current task"),
+            Field(..., description="Whether to stop the current primitive"),
         ),
         observation=(
             str,
@@ -139,9 +144,9 @@ def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
             Optional[str],
             Field(None, description="Message to tell the user (optional)"),
         ),
-        next_task=(
-            Optional[NextTaskUnion],
-            Field(None, description="The next task to execute, if any"),
+        next_primitive=(
+            Optional[NextPrimitiveUnion],
+            Field(None, description="The next primitive to execute, if any"),
         ),
     )
 
@@ -169,31 +174,31 @@ def convert_to_brain_compatible_output(
     to prevent type mismatch warnings during serialization.
 
     Args:
-        gemini_output: The output from Gemini API with typed Task objects
+        gemini_output: The output from Gemini API with typed Primitive objects
 
     Returns:
-        BrainCompatibleVisionAgentOutput with proper dictionary next_task
+        BrainCompatibleVisionAgentOutput with proper dictionary next_primitive
     """
-    next_task_dict = None
+    next_primitive_dict = None
 
-    if gemini_output.next_task:
+    if gemini_output.next_primitive:
         # Extract inputs from the properly typed Pydantic model
         inputs_dict = {}
-        if hasattr(gemini_output.next_task, "inputs"):
+        if hasattr(gemini_output.next_primitive, "inputs"):
             # Convert the inputs model to a dictionary
-            if hasattr(gemini_output.next_task.inputs, "model_dump"):
-                inputs_dict = gemini_output.next_task.inputs.model_dump()
+            if hasattr(gemini_output.next_primitive.inputs, "model_dump"):
+                inputs_dict = gemini_output.next_primitive.inputs.model_dump()
             else:
                 # Fallback to converting to dict, filtering private attributes
                 inputs_dict = {
                     k: v
-                    for k, v in gemini_output.next_task.inputs.__dict__.items()
+                    for k, v in gemini_output.next_primitive.inputs.__dict__.items()
                     if not k.startswith("_")
                 }
 
         # Create a PrimitiveDefinition-compatible dictionary
-        next_task_dict = {
-            "name": gemini_output.next_task.name,
+        next_primitive_dict = {
+            "name": gemini_output.next_primitive.name,
             "inputs": inputs_dict,
             "guidelines": None,  # We don't have guidelines in the response
             "primitive_id": None,  # Will be assigned by brain.py
@@ -201,11 +206,11 @@ def convert_to_brain_compatible_output(
 
     # Create a new object with the proper type schema
     return BrainCompatibleVisionAgentOutput(
-        stop_current_task=gemini_output.stop_current_task,
+        stop_current_primitive=gemini_output.stop_current_primitive,
         observation=gemini_output.observation,
         thoughts=gemini_output.thoughts,
         new_goal=gemini_output.new_goal,
         anticipation=gemini_output.anticipation,
         to_tell_user=gemini_output.to_tell_user,
-        next_task=next_task_dict,
+        next_primitive=next_primitive_dict,
     )

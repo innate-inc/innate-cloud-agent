@@ -33,60 +33,77 @@ EXECUTION_TIMEOUT = 5  # seconds
 SAVE_DEBUG_DATA = True
 DEBUG_DATA_DIR = Path("test_data/debug_native_gemini_html")
 
+# Template for the main prompt
+VISION_AGENT_PROMPT_TEMPLATE = """<system_role>
+You are a robot navigating and executing primitives in a home.
 
-class NativeVisionAgentOutput(BaseModel):
-    """
-    Native output model matching NewVisionAgentOutput structure from BAML.
-    """
+You are following a directive that guides your actions, and you can pick primitives to execute to achieve your goal.
 
-    model_config = ConfigDict(extra="allow")
+You have to decide what to do right now based on the current image you see (in <main_camera_image>), the history of your actions and observations (in <history_of_events>), and the current primitive that is being executed (in <primitive_in_execution>).
 
-    current_observation: str
-    current_thoughts: str
-    action_decision: Literal["continue", "change_task", "stop_task", "start_task"]
-    to_tell_user: Optional[str] = None
-    next_task: Optional[Any] = (
-        None  # Will be dynamically typed based on available primitives
-    )
+You are also being provided with what the user most recently said (in <user_input>).
+</system_role>
 
+<rules_and_constraints>
+<primitive_execution_rules>
+If there is no primitive currently being executed, you can choose to do one next or nothing depending on the context.
 
-class LegacyVisionAgentOutput(BaseModel):
-    """
-    Legacy output model matching VisionAgentOutput structure from BAML.
-    This is what the vision_service.py expects.
-    """
+TO STOP THE CURRENT PRIMITIVE, YOU HAVE TO HAVE BEEN EXPLICITLY TOLD TO DO IT BY THE USER OR BE IN A SITUATION THAT CLEARLY NEEDS YOU TO STOP ACCORDING TO YOUR DIRECTIVE.
 
-    model_config = ConfigDict(extra="allow")
+**THIS IS VERY IMPORTANT. I REPEAT, DO NOT STOP THE CURRENT PRIMITIVE UNLESS IT'S REQUESTED BY THE USER OR IT'S CLEARLY STATED IN YOUR DIRECTIVE.**
+</primitive_execution_rules>
+</rules_and_constraints>
 
-    stop_current_task: bool
-    observation: str
-    thoughts: str
-    new_goal: Optional[str] = None
-    anticipation: Optional[str] = None
-    to_tell_user: Optional[str] = None
-    next_task: Optional[Any] = (
-        None  # Will be dynamically typed based on available primitives
-    )
+<current_context>
+{history_of_events}
 
+<user_input>
+{user_input}
+</user_input>
 
-def convert_to_legacy_output(
-    native_output: NativeVisionAgentOutput,
-) -> LegacyVisionAgentOutput:
-    """
-    Convert NativeVisionAgentOutput to LegacyVisionAgentOutput for backward compatibility.
-    """
-    # Convert action_decision to stop_current_task boolean
-    stop_current_task = native_output.action_decision in ["stop_task", "change_task"]
+<primitive_in_execution>
+{primitive_in_execution}
+</primitive_in_execution>
 
-    return LegacyVisionAgentOutput(
-        stop_current_task=stop_current_task,
-        observation=native_output.current_observation,
-        thoughts=native_output.current_thoughts,
-        new_goal=None,  # Not present in new output
-        anticipation=None,  # Not present in new output
-        to_tell_user=native_output.to_tell_user,
-        next_task=native_output.next_task,
-    )
+{robot_position}
+
+{directive}
+
+{current_primitive_guidelines}
+</current_context>
+
+<operational_guidelines>
+<primitive_evaluation>
+Consider the guidelines of the primitives available carefully before picking one to do (if any).
+
+Also, evaluate carefully if you need to tell something to the user, especially if the last time you talked with them was recently. The history context indicates if you're still talking.
+If the last time you talked with them was seconds ago and you expect some answer from them, you should wait for example, an amount of time that seems appropriate.
+
+**ONCE A PRIMITIVE IS COMPLETED, EVALUATE IF YOU NEED TO START IT AGAIN. COMPLETED MEANS AN ACTION IS OVER, IT **DOES NOT MEAN** THAT IT WAS SUCCESSFUL, YOU HAVE TO FIGURE IT OUT.**
+</primitive_evaluation>
+
+<navigation_rules>
+- **IN THE CASE OF NAVIGATION, A PRIMITIVE MIGHT NEED TO BE STARTED AGAIN TO GET CLOSER OR PURSUE THE OBJECTIVE.**
+- **WHEN NAVIGATION IN SIGHT IS COMPLETED, IT DOES NOT NECESSARILY MEAN YOU SHOULD STOP. YOU MIGHT NEED TO GET CLOSER OR PURSUE THE OBJECTIVE.**
+- **IF YOU NEED TO BE IN FRONT OF A TARGET TO EXECUTE A PHYSICAL PRIMITIVE, YOU SHOULD USE CHECK_DISTANCE_AND_ORIENTATION TO MAKE SURE YOU ARE IN THE RIGHT POSITION.**
+</navigation_rules>
+</operational_guidelines>
+
+<available_primitives>
+You can only use one of the following primitives: {available_primitives}.
+</available_primitives>
+
+<response_requirements>
+Use the following fields in your response:
+
+- "observation": Describe what you see in the image as an internal thought
+- "thoughts": Think about what you should do (or not do) based on the observation and context
+- "stop_current_primitive": Decide whether to stop the current primitive
+- "anticipation": Consider what might happen next and leave mental notes for future reference
+- "to_tell_user": Communicate something to the user (if needed)
+- "next_primitive": Specify which primitive to execute next (if any)
+</response_requirements>
+"""
 
 
 class NativeGeminiVisionAgent:
@@ -197,7 +214,7 @@ class NativeGeminiVisionAgent:
 
     def _build_main_prompt(self, vlm_inputs: MultimodalVisionAgentInput) -> str:
         """
-        Build the main prompt based on BAML template.
+        Build the main prompt using a markdown template.
 
         Args:
             vlm_inputs: Input data
@@ -205,111 +222,75 @@ class NativeGeminiVisionAgent:
         Returns:
             Main prompt string
         """
-        # Start with the core role and goal definition
-        prompt_parts = [
-            "You are a robot navigating and executing tasks in a home.",
-            "",
-            "Your goal is to decide what to do right now based on the image and the context.",
-            "",
-            "You are being provided with what the user most recently said, the task that is currently being executed, and the image you see in front of you.",
-            "",
-            "If there is no task currently being executed, you can choose to do one next or nothing depending on the context.",
-            "TO STOP THE CURRENT TASK, YOU HAVE TO HAVE BEEN EXPLICITLY TOLD TO DO IT BY THE USER OR BE IN A SITUATION THAT CLEARLY NEEDS YOU TO STOP ACCORDING TO YOUR DIRECTIVE.",
-            "",
-            "THIS IS VERY IMPORTANT. I REPEAT, DO NOT STOP THE CURRENT TASK UNLESS IT'S REQUESTED BY THE USER OR IT'S CLEARLY STATED IN YOUR DIRECTIVE.",
-            "",
-        ]
+        # Prepare conversation history from multimodal history (text parts only)
+        history_of_events = ""
+        if vlm_inputs.multimodal_history:
+            history_text_parts = []
+            for history_item in vlm_inputs.multimodal_history:
+                if history_item.type == "text":
+                    history_text_parts.append(history_item.content)
 
-        # Add user message context
+            if history_text_parts:
+                history_of_events = f"""<history_of_events>
+{chr(10).join(history_text_parts)}
+</history_of_events>
+"""
+
+        # Prepare user message context
         if vlm_inputs.user_prompt_text:
-            prompt_parts.append(f"The user said: {vlm_inputs.user_prompt_text}")
+            user_input = f"The user said: {vlm_inputs.user_prompt_text}"
         else:
-            prompt_parts.append("The user did not say anything.")
-        prompt_parts.append("")
+            user_input = "The user did not say anything."
 
-        # Add current primitive context
+        # Prepare current primitive context
         if vlm_inputs.primitive_in_execution:
-            prompt_parts.append(
-                f"The current task is: {vlm_inputs.primitive_in_execution.model_dump_json()}"
-            )
+            current_primitive = f"The current primitive is: {vlm_inputs.primitive_in_execution.model_dump_json()}"
         else:
-            prompt_parts.append("You are not currently executing a task.")
-        prompt_parts.append("")
+            current_primitive = "You are not currently executing a primitive."
 
-        # Add robot coordinates if available
+        # Prepare robot coordinates section
+        robot_coordinates = ""
         if vlm_inputs.robot_coords:
             coords = vlm_inputs.robot_coords
-            prompt_parts.append(
-                f"Your coordinates if useful to know are: "
-                f"x={coords.get('x')}, y={coords.get('y')}, "
-                f"z={coords.get('z')}, theta={coords.get('theta')}"
-            )
-            prompt_parts.append("")
+            robot_coordinates = f"""<robot_position>
+Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={coords.get('theta')}
+</robot_position>
+"""
 
-        # Add directive if present
+        # Prepare directive section
+        directive_section = ""
         if vlm_inputs.directive:
-            prompt_parts.append(f"Your directive is: {vlm_inputs.directive}")
-            prompt_parts.append("")
+            directive_section = f"""<directive>
+{vlm_inputs.directive}
+</directive>
+"""
 
-        # Add running primitive guidelines
+        # Prepare primitive guidelines section
+        primitive_guidelines = ""
         if (
             vlm_inputs.primitive_in_execution
             and vlm_inputs.primitive_in_execution.guidelines_when_running
         ):
-            prompt_parts.extend(
-                [
-                    "Here are the guidelines for the task currently running. Watch them carefully:",
-                    vlm_inputs.primitive_in_execution.guidelines_when_running,
-                    "",
-                ]
-            )
+            primitive_guidelines = f"""<current_primitive_guidelines>
+Here are the guidelines for the primitive currently running. Watch them carefully:
+{vlm_inputs.primitive_in_execution.guidelines_when_running}
+</current_primitive_guidelines>
+"""
 
-        # Add task completion evaluation guidelines
-        prompt_parts.extend(
-            [
-                "Consider the guidelines of the tasks available carefully before picking one to do (if any).",
-                "",
-                "Also, evaluate carefully if you need to tell something to the user, especially if the last time you talked with them was recently. The history context indicates if you're still talking.",
-                "If the last time you talked with them was seconds ago and you expect some answer from them, you should wait for example, an amount of time that seems appropriate.",
-                "",
-                "ONCE A TASK IS COMPLETED, EVALUATE IF YOU NEED TO START IT AGAIN. COMPLETED MEANS AN ACTION IS OVER, IT **DOES NOT MEAN** THAT IT WAS SUCCESSFUL, YOU HAVE TO FIGURE IT OUT.",
-                "",
-            ]
-        )
-
-        # Add navigation-specific guidelines
-        prompt_parts.extend(
-            [
-                "Guidelines for navigation and positioning:",
-                "- IN THE CASE OF NAVIGATION, A TASK MIGHT NEED TO BE STARTED AGAIN TO GET CLOSER OR PURSUE THE OBJECTIVE.",
-                "- WHEN NAVIGATION IN SIGHT IS COMPLETED, IT DOES NOT NECESSARILY MEAN YOU SHOULD STOP. YOU MIGHT NEED TO GET CLOSER OR PURSUE THE OBJECTIVE.",
-                "- IF YOU NEED TO BE IN FRONT OF A TARGET TO EXECUTE A PHYSICAL TASK, YOU SHOULD USE CHECK_DISTANCE_AND_ORIENTATION TO MAKE SURE YOU ARE IN THE RIGHT POSITION.",
-                "",
-            ]
-        )
-
-        # Add available primitives
+        # Prepare available primitives
         primitive_names = [prim.name for prim in vlm_inputs.primitives_list]
-        primitives_list_string = ", ".join(primitive_names)
-        prompt_parts.append(
-            f"You can only use one of the following tasks: {primitives_list_string}."
-        )
-        prompt_parts.append("")
+        available_primitives = ", ".join(primitive_names)
 
-        # Add field usage instructions
-        prompt_parts.extend(
-            [
-                'You should use the field "observation" to describe what you see in the image as an internal thought.',
-                'You should use the field "thoughts" to further think about what you should do (or not do) based on the observation and the context.',
-                'You should use the field "stop_current_task" to decide whether to stop the current task.',
-                'You should use the field "anticipation" to consider what might happen next and leave mental notes for you in the future.',
-                'You should use the field "to_tell_user" if you need to communicate something to the user.',
-                'You should use the field "next_task" to specify which task to execute next (if any).',
-                "",
-            ]
+        # Format the template with all the prepared sections
+        return VISION_AGENT_PROMPT_TEMPLATE.format(
+            history_of_events=history_of_events,
+            user_input=user_input,
+            primitive_in_execution=current_primitive,
+            robot_position=robot_coordinates,
+            directive=directive_section,
+            current_primitive_guidelines=primitive_guidelines,
+            available_primitives=available_primitives,
         )
-
-        return "\n".join(prompt_parts)
 
     async def call_gemini_api(
         self, vlm_inputs: MultimodalVisionAgentInput
