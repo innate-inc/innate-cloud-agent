@@ -378,12 +378,9 @@ class Brain:
                 HistoryEntryType.PRIMITIVE_ACTIVATED,
                 description=f"Primitive {vision_output.next_task.name} activated",
             ),
-            out_entry = (
-                HistoryEntry(
-                    timestamp=get_now(),
-                    type=HistoryEntryType.PRIMITIVE_COMPLETED,
-                    description=f"Primitive {vision_output.next_task.name} completed",
-                ),
+            self.history.add(
+                HistoryEntryType.PRIMITIVE_COMPLETED,
+                description=f"Primitive {vision_output.next_task.name} completed",
             )
             vision_output.next_task = None
 
