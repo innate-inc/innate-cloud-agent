@@ -53,7 +53,13 @@ TO STOP THE CURRENT PRIMITIVE, YOU HAVE TO HAVE BEEN EXPLICITLY TOLD TO DO IT BY
 </rules_and_constraints>
 
 <current_context>
-{history_of_events}
+<history_of_events>
+{multimodal_history}
+</history_of_events>
+
+<main_camera_image>
+{main_camera_image}
+</main_camera_image>
 
 <user_input>
 {user_input}
@@ -63,11 +69,19 @@ TO STOP THE CURRENT PRIMITIVE, YOU HAVE TO HAVE BEEN EXPLICITLY TOLD TO DO IT BY
 {primitive_in_execution}
 </primitive_in_execution>
 
+<robot_position>
 {robot_position}
+</robot_position>
 
+<directive>
 {directive}
+</directive>
 
+<current_primitive_guidelines>
 {current_primitive_guidelines}
+</current_primitive_guidelines>
+
+{additional_camera_image}
 </current_context>
 
 <operational_guidelines>
@@ -130,7 +144,7 @@ class NativeGeminiVisionAgent:
         self, vlm_inputs: MultimodalVisionAgentInput
     ) -> List[Union[str, dict]]:
         """
-        Prepare multimodal content for Gemini API call.
+        Prepare multimodal content for Gemini API call using integrated template formatting.
 
         Args:
             vlm_inputs: Input data containing images and text
@@ -138,13 +152,75 @@ class NativeGeminiVisionAgent:
         Returns:
             List of content parts for Gemini API
         """
+        return self._format_multimodal_template(vlm_inputs)
+
+    def _format_multimodal_template(
+        self, vlm_inputs: MultimodalVisionAgentInput
+    ) -> List[Union[str, dict]]:
+        """
+        Format the multimodal template with integrated image and text content.
+
+        This function handles special placeholders in the template and returns
+        a list of content parts that preserves the order and context.
+
+        Args:
+            vlm_inputs: Input data
+
+        Returns:
+            List of content parts for Gemini API
+        """
         content_parts = []
 
-        # Add the main prompt based on BAML template
-        main_prompt = self._build_main_prompt(vlm_inputs)
-        content_parts.append(main_prompt)
+        # Prepare all the template variables
+        template_vars = self._prepare_template_variables(vlm_inputs)
 
-        # Process multimodal history
+        # Split the template into sections and process each part
+        template_sections = self._split_template_by_multimodal_placeholders(
+            VISION_AGENT_PROMPT_TEMPLATE
+        )
+
+        for section in template_sections:
+            if section["type"] == "text":
+                # Format regular text section with non-multimodal variables
+                formatted_text = section["content"].format(**template_vars["text_vars"])
+                if formatted_text.strip():  # Only add non-empty text
+                    content_parts.append(formatted_text)
+
+            elif section["type"] == "multimodal_history":
+                # Add multimodal history content
+                content_parts.extend(template_vars["multimodal_history_parts"])
+
+            elif section["type"] == "main_camera_image":
+                # Add main camera image with description
+                if template_vars["main_camera_image_part"]:
+                    content_parts.append("This is what you see:")
+                    content_parts.append(template_vars["main_camera_image_part"])
+                else:
+                    content_parts.append("Main camera image could not be processed.")
+
+            elif section["type"] == "additional_camera_image":
+                # Add additional camera image if present
+                if template_vars["additional_camera_parts"]:
+                    content_parts.extend(template_vars["additional_camera_parts"])
+
+        return content_parts
+
+    def _prepare_template_variables(
+        self, vlm_inputs: MultimodalVisionAgentInput
+    ) -> dict:
+        """
+        Prepare all template variables including multimodal content.
+
+        Args:
+            vlm_inputs: Input data
+
+        Returns:
+            Dictionary containing all template variables and multimodal parts
+        """
+        # Prepare multimodal history parts
+        multimodal_history_parts = []
+        history_text_parts = []
+
         for history_item in vlm_inputs.multimodal_history:
             if history_item.type == "image":
                 # Convert base64 image to genai.types.Part format
@@ -154,15 +230,22 @@ class NativeGeminiVisionAgent:
                         data=image_data,
                         mime_type="image/jpeg",
                     )
-                    content_parts.append(image_part)
+                    multimodal_history_parts.append(image_part)
                 except Exception as e:
                     print(f"Error processing history image: {e}")
                     # Skip invalid images
                     continue
             else:  # text
-                content_parts.append(history_item.content)
+                history_text_parts.append(history_item.content)
+                multimodal_history_parts.append(history_item.content)
 
-        # Add the main camera image
+        # Prepare history text for template
+        history_of_events = ""
+        if history_text_parts:
+            history_of_events = chr(10).join(history_text_parts)
+
+        # Prepare main camera image
+        main_camera_image_part = None
         try:
             # Remove data URL prefix if present
             img_data = vlm_inputs.base64_img
@@ -171,17 +254,15 @@ class NativeGeminiVisionAgent:
 
             # Convert to bytes and create Part
             image_bytes = base64.b64decode(img_data)
-            main_image_part = types.Part.from_bytes(
+            main_camera_image_part = types.Part.from_bytes(
                 data=image_bytes,
                 mime_type="image/jpeg",
             )
-            content_parts.append("This is what you see:")
-            content_parts.append(main_image_part)
         except Exception as e:
             print(f"Error processing main image: {e}")
-            content_parts.append("Main camera image could not be processed.")
 
-        # Add additional camera images if present
+        # Prepare additional camera images
+        additional_camera_parts = []
         if vlm_inputs.additional_image_data:
             camera_type = vlm_inputs.additional_image_data.get("camera_type", "unknown")
             image_b64 = vlm_inputs.additional_image_data.get("image_b64", "")
@@ -198,41 +279,15 @@ class NativeGeminiVisionAgent:
                         data=image_bytes,
                         mime_type="image/jpeg",
                     )
-                    content_parts.append(
+                    additional_camera_parts.append(
                         f"On top of that, this is what you see from the additional camera with type: {camera_type}"
                     )
-                    content_parts.append(additional_image_part)
+                    additional_camera_parts.append(additional_image_part)
                 except Exception as e:
                     print(f"Error processing additional image: {e}")
-                    content_parts.append(
+                    additional_camera_parts.append(
                         f"Additional camera ({camera_type}) image could not be processed."
                     )
-
-        return content_parts
-
-    def _build_main_prompt(self, vlm_inputs: MultimodalVisionAgentInput) -> str:
-        """
-        Build the main prompt using a markdown template.
-
-        Args:
-            vlm_inputs: Input data
-
-        Returns:
-            Main prompt string
-        """
-        # Prepare conversation history from multimodal history (text parts only)
-        history_of_events = ""
-        if vlm_inputs.multimodal_history:
-            history_text_parts = []
-            for history_item in vlm_inputs.multimodal_history:
-                if history_item.type == "text":
-                    history_text_parts.append(history_item.content)
-
-            if history_text_parts:
-                history_of_events = f"""<history_of_events>
-{chr(10).join(history_text_parts)}
-</history_of_events>
-"""
 
         # Prepare user message context
         if vlm_inputs.user_prompt_text:
@@ -250,18 +305,12 @@ class NativeGeminiVisionAgent:
         robot_coordinates = ""
         if vlm_inputs.robot_coords:
             coords = vlm_inputs.robot_coords
-            robot_coordinates = f"""<robot_position>
-Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={coords.get('theta')}
-</robot_position>
-"""
+            robot_coordinates = f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={coords.get('theta')}"
 
         # Prepare directive section
         directive_section = ""
         if vlm_inputs.directive:
-            directive_section = f"""<directive>
-{vlm_inputs.directive}
-</directive>
-"""
+            directive_section = vlm_inputs.directive
 
         # Prepare primitive guidelines section
         primitive_guidelines = ""
@@ -269,26 +318,86 @@ Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}
             vlm_inputs.primitive_in_execution
             and vlm_inputs.primitive_in_execution.guidelines_when_running
         ):
-            primitive_guidelines = f"""<current_primitive_guidelines>
-Here are the guidelines for the primitive currently running. Watch them carefully:
-{vlm_inputs.primitive_in_execution.guidelines_when_running}
-</current_primitive_guidelines>
-"""
+            primitive_guidelines = f"Here are the guidelines for the primitive currently running. Watch them carefully:\n{vlm_inputs.primitive_in_execution.guidelines_when_running}"
 
         # Prepare available primitives
         primitive_names = [prim.name for prim in vlm_inputs.primitives_list]
         available_primitives = ", ".join(primitive_names)
 
-        # Format the template with all the prepared sections
-        return VISION_AGENT_PROMPT_TEMPLATE.format(
-            history_of_events=history_of_events,
-            user_input=user_input,
-            primitive_in_execution=current_primitive,
-            robot_position=robot_coordinates,
-            directive=directive_section,
-            current_primitive_guidelines=primitive_guidelines,
-            available_primitives=available_primitives,
-        )
+        return {
+            "text_vars": {
+                "user_input": user_input,
+                "primitive_in_execution": current_primitive,
+                "robot_position": robot_coordinates,
+                "directive": directive_section,
+                "current_primitive_guidelines": primitive_guidelines,
+                "available_primitives": available_primitives,
+                # Note: multimodal placeholders are handled separately
+                "multimodal_history": history_of_events,  # Fallback text version
+                "main_camera_image": "[Image will be displayed here]",  # Placeholder text
+                "additional_camera_image": "",  # Placeholder text
+            },
+            "multimodal_history_parts": multimodal_history_parts,
+            "main_camera_image_part": main_camera_image_part,
+            "additional_camera_parts": additional_camera_parts,
+        }
+
+    def _split_template_by_multimodal_placeholders(self, template: str) -> List[dict]:
+        """
+        Split the template into sections based on multimodal placeholders.
+
+        Args:
+            template: The template string
+
+        Returns:
+            List of sections with type and content
+        """
+        sections = []
+        current_pos = 0
+
+        # Define multimodal placeholders and their markers
+        multimodal_markers = [
+            (
+                "<history_of_events>\n{multimodal_history}\n</history_of_events>",
+                "multimodal_history",
+            ),
+            (
+                "<main_camera_image>\n{main_camera_image}\n</main_camera_image>",
+                "main_camera_image",
+            ),
+            ("{additional_camera_image}", "additional_camera_image"),
+        ]
+
+        # Find all marker positions
+        marker_positions = []
+        for marker_text, marker_type in multimodal_markers:
+            pos = template.find(marker_text)
+            if pos != -1:
+                marker_positions.append((pos, pos + len(marker_text), marker_type))
+
+        # Sort by position
+        marker_positions.sort(key=lambda x: x[0])
+
+        # Split template into sections
+        for start_pos, end_pos, marker_type in marker_positions:
+            # Add text before this marker
+            if current_pos < start_pos:
+                text_content = template[current_pos:start_pos]
+                if text_content.strip():
+                    sections.append({"type": "text", "content": text_content})
+
+            # Add the multimodal marker section
+            sections.append({"type": marker_type, "content": ""})
+
+            current_pos = end_pos
+
+        # Add remaining text
+        if current_pos < len(template):
+            remaining_text = template[current_pos:]
+            if remaining_text.strip():
+                sections.append({"type": "text", "content": remaining_text})
+
+        return sections
 
     async def call_gemini_api(
         self, vlm_inputs: MultimodalVisionAgentInput
