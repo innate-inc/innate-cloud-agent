@@ -18,6 +18,7 @@ from src.agents.native_gemini_schema_builder import (
     VisionAgentOutput,
     convert_to_brain_compatible_output,
 )
+from src.agents.debug_html_generator import save_content_parts_html
 
 # Gemini API constants (matching BAML configuration)
 GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
@@ -30,7 +31,7 @@ EXECUTION_TIMEOUT = 5  # seconds
 
 # Debug settings
 SAVE_DEBUG_DATA = True
-DEBUG_DATA_DIR = Path("test_data/debug_native_gemini_images")
+DEBUG_DATA_DIR = Path("test_data/debug_native_gemini_html")
 
 
 class NativeVisionAgentOutput(BaseModel):
@@ -338,6 +339,12 @@ class NativeGeminiVisionAgent:
             response_mime_type="application/json",
             response_schema=response_schema,
         )
+
+        # SAVE TO FILE
+        if SAVE_DEBUG_DATA:
+            save_content_parts_html(
+                content_parts, "gemini_content_parts", DEBUG_DATA_DIR
+            )
 
         # Use asyncio.to_thread to run the synchronous call in a thread
         response = await asyncio.to_thread(
