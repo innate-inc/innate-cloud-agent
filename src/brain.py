@@ -74,7 +74,7 @@ class Brain:
             NavigateInSight(),
             NavigateThroughMemory(),
             TurnAndMove(),
-            CheckDistanceAndOrientation(),
+            # CheckDistanceAndOrientation(),
         ]  # These are the ones defined in the brain here, not registered with
         # the server by the user
         for p in self.local_primitives_list:
@@ -375,12 +375,15 @@ class Brain:
             )
             # We should also mark this primitive as activated and then completed
             self.history.add(
-                HistoryEntryType.TASK_ACTIVATED,
+                HistoryEntryType.PRIMITIVE_ACTIVATED,
                 description=f"Primitive {vision_output.next_task.name} activated",
-            )
-            self.history.add(
-                HistoryEntryType.TASK_COMPLETED,
-                description=f"Primitive {vision_output.next_task.name} completed",
+            ),
+            out_entry = (
+                HistoryEntry(
+                    timestamp=get_now(),
+                    type=HistoryEntryType.PRIMITIVE_COMPLETED,
+                    description=f"Primitive {vision_output.next_task.name} completed",
+                ),
             )
             vision_output.next_task = None
 
@@ -685,7 +688,7 @@ class Brain:
             )
             # Use system message type for completion
             self.history.add(
-                HistoryEntryType.TASK_COMPLETED,
+                HistoryEntryType.PRIMITIVE_COMPLETED,
                 description=f"Task '{self.primitive_in_execution.name}' completed.",
             )
             self.primitive_in_execution = None
@@ -710,10 +713,10 @@ class Brain:
             task_name = self.primitive_in_execution.name
             self.logger.info(f"Task '{task_name}' failed.")
 
-            # Use task_cancelled type for failed tasks
+            # Use primitive_cancelled type for failed primitives
             self.history.add(
-                HistoryEntryType.TASK_CANCELLED,
-                description=f"Task '{task_name}' failed.",
+                HistoryEntryType.PRIMITIVE_CANCELLED,
+                description=f"Primitive '{primitive_name}' failed.",
             )
             self.primitive_in_execution = None
         else:
@@ -738,8 +741,8 @@ class Brain:
             task_name = self.primitive_in_execution.name
             self.logger.info(f"Task '{task_name}' interrupted.")
             self.history.add(
-                HistoryEntryType.TASK_INTERRUPTED,
-                description=f"Task '{task_name}' interrupted.",
+                HistoryEntryType.PRIMITIVE_INTERRUPTED,
+                description=f"Primitive '{primitive_name}' interrupted.",
             )
             self.primitive_in_execution = None
         else:
@@ -760,7 +763,7 @@ class Brain:
             task_name = self.primitive_in_execution.name
             entry_text = f"'{task_name}': {feedback_text}"
             self.history.add(
-                HistoryEntryType.TASK_FEEDBACK,
+                HistoryEntryType.PRIMITIVE_FEEDBACK,
                 description=entry_text,
             )
         else:
@@ -812,8 +815,8 @@ class Brain:
                     prim_obj.primitive_id = primitive_id
                 self.primitive_in_execution = prim_obj
                 self.history.add(
-                    HistoryEntryType.TASK_ACTIVATED,
-                    description=f"Task '{task_name}' activated.",
+                    HistoryEntryType.PRIMITIVE_ACTIVATED,
+                    description=f"Primitive {task_name} activated",
                 )
             else:
                 self.primitive_in_execution = None
@@ -1045,7 +1048,7 @@ class Brain:
             )
             entry_text = f"'{primitive_name}': {feedback_message}"
             self.history.add(
-                HistoryEntryType.TASK_FEEDBACK,
+                HistoryEntryType.PRIMITIVE_FEEDBACK,
                 description=entry_text,
             )
         else:

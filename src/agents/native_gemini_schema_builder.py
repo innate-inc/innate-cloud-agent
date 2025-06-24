@@ -42,17 +42,16 @@ class BrainCompatibleVisionAgentOutput(BaseModel):
     """
     Output class that's directly compatible with brain.py expectations.
     This prevents type mismatch warnings during serialization.
+    Uses legacy field names to maintain compatibility.
     """
 
-    stop_current_primitive: bool
+    stop_current_task: bool
     observation: str
     thoughts: str
     new_goal: Optional[str] = None
     anticipation: Optional[str] = None
     to_tell_user: Optional[str] = None
-    next_primitive: Optional[Dict[str, Any]] = (
-        None  # Already in PrimitiveDefinition format
-    )
+    next_task: Optional[Dict[str, Any]] = None  # Already in PrimitiveDefinition format
 
 
 def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
@@ -206,11 +205,11 @@ def convert_to_brain_compatible_output(
 
     # Create a new object with the proper type schema
     return BrainCompatibleVisionAgentOutput(
-        stop_current_primitive=gemini_output.stop_current_primitive,
+        stop_current_task=gemini_output.stop_current_primitive,
         observation=gemini_output.observation,
         thoughts=gemini_output.thoughts,
         new_goal=gemini_output.new_goal,
         anticipation=gemini_output.anticipation,
         to_tell_user=gemini_output.to_tell_user,
-        next_primitive=next_primitive_dict,
+        next_task=next_primitive_dict,
     )
