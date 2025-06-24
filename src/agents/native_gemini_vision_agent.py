@@ -2,19 +2,17 @@ import os
 import json
 import base64
 import asyncio
-from typing import Optional, List, Dict, Any, Union, Literal
+from typing import Optional, List, Union
 from pathlib import Path
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
 
 from google import genai
 from google.genai import types
 
-from src.agents.types import MultimodalVisionAgentInput, PrimitiveDefinition
+from src.agents.types import MultimodalVisionAgentInput
 from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlClientError
 from src.agents.native_gemini_schema_builder import (
     create_gemini_schema,
-    create_response_model,
     VisionAgentOutput,
     convert_to_brain_compatible_output,
 )

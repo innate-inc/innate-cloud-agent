@@ -100,12 +100,15 @@ def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
             inputs_model = create_model(inputs_model_name)
 
         # Create primitive model for this primitive
-        primitive_model_name = f"Primitive{i+1}"
+        primitive_model_name = primitive.name
         primitive_model = create_model(
             primitive_model_name,
             name=(
                 Literal[primitive.name],
-                Field(..., description=f"Primitive: {primitive.guidelines}"),
+                Field(
+                    ...,
+                    description=f"Guidelines on primitive usage: {primitive.guidelines}",
+                ),
             ),
             inputs=(
                 inputs_model,
