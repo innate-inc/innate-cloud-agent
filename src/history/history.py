@@ -170,7 +170,6 @@ class History:
                         {
                             **entry_data_common,
                             "type": DisplayEntryType.SYSTEM_MESSAGE,
-                            # Show raw description if JSON fails
                             "message": entry.description,
                         }
                     )
