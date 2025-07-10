@@ -22,7 +22,7 @@ class ImageProcessor:
             payload (dict): Dictionary containing image data and metadata
 
         Returns:
-            tuple: (base64_img, depth_payload, robot_coords)
+            tuple: (base64_img, depth_payload, robot_coords, map_payload, additional_image_data, camera_info)
 
         Raises:
             ValueError: If required data is missing or malformed
@@ -60,6 +60,28 @@ class ImageProcessor:
                 "image_b64"
             ]
 
+        # Extract camera info from payload (required)
+        if "camera_info" not in payload:
+            raise ValueError("Missing required 'camera_info' in payload")
+
+        camera_info = payload["camera_info"]
+
+        # Validate required camera info fields
+        required_camera_fields = [
+            "horizontal_fov",
+            "vertical_fov",
+            "pitch_deg",
+            "x_cam",
+            "height_cam",
+        ]
+        missing_fields = [
+            field for field in required_camera_fields if field not in camera_info
+        ]
+        if missing_fields:
+            raise ValueError(
+                f"Camera info missing required fields: " f"{', '.join(missing_fields)}"
+            )
+
         # Validate required depth payload if present
         if depth_payload is not None:
             required_depth_fields = ["height", "width", "encoding", "data"]
@@ -95,6 +117,7 @@ class ImageProcessor:
             robot_coords,
             map_payload,
             additional_image_data,
+            camera_info,
         )
 
     def process_depth(self, depth_payload):

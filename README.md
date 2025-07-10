@@ -57,14 +57,14 @@ reset_msg = MessageIn(
 ```bash
 docker build \
   --platform=linux/amd64 \
-  -t us-central1-docker.pkg.dev/innate-agent/innate-agent-websocket-server/agent-ws-server-image:v1.0.1 \
+  -t us-central1-docker.pkg.dev/innate-agent/innate-agent-websocket-server/agent-ws-server-image:v1.1 \
   .
 ```
 
 ### Push the Docker image to Google Cloud Container Registry
 
 ```bash
-docker push us-central1-docker.pkg.dev/innate-agent/innate-agent-websocket-server/agent-ws-server-image:v1.0.1
+docker push us-central1-docker.pkg.dev/innate-agent/innate-agent-websocket-server/agent-ws-server-image:v1.1
 ```
 
 ### Deploy the Cloud Run service

@@ -15,7 +15,7 @@ ROBOT_PARAMS_SIM = {
     },
     "average_pos_cov_threshold": 0.05,
     "average_yaw_cov_threshold": 0.04,  # Could be lower?
-    "enable_visualizations": False,
+    "enable_visualizations": True,
 }
 
 ROBOT_PARAMS_MAURICE_OAK_D = {

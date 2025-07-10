@@ -196,6 +196,7 @@ class Brain:
             robot_coords,
             map_payload,
             additional_image_data,
+            camera_info,
         ) = self.image_processor.extract_image_data(message.payload)
 
         current_image_for_vlm: str
@@ -328,6 +329,7 @@ class Brain:
                     base64_img_extracted,
                     depth_payload,
                     map_payload,
+                    camera_info,
                 )
             )
             if has_canceled_task:
@@ -371,6 +373,7 @@ class Brain:
                     base64_img_extracted,
                     depth_payload,
                     map_payload,
+                    camera_info,
                 )
             )
             # We should also mark this primitive as activated and then completed

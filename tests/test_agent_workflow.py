@@ -107,6 +107,15 @@ async def basic_image_handling(websocket, image_path, image_type="JPEG"):
         "theta": 0.0,  # Robot is facing east (0 radians)
     }
 
+    # Create mock camera info
+    camera_info = {
+        "horizontal_fov": 128.0,
+        "vertical_fov": 80.0,
+        "pitch_deg": -10,
+        "x_cam": 0.0197,
+        "height_cam": 0.19663,
+    }
+
     # Send the image message with required depth, map, and robot_coords fields
     image_message = {
         "type": "image",
@@ -131,6 +140,7 @@ async def basic_image_handling(websocket, image_path, image_type="JPEG"):
                 "data": map_b64,
             },
             "robot_coords": robot_coords,
+            "camera_info": camera_info,
         },
     }
     await websocket.send(json.dumps(image_message))

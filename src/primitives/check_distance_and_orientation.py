@@ -103,6 +103,7 @@ class CheckDistanceAndOrientation(Primitive):
         depth_payload: dict,
         horizontal_fov: float,
         vertical_fov: float,
+        camera_info: dict,
     ):
         self.current_x = current_x
         self.current_y = current_y
@@ -111,9 +112,11 @@ class CheckDistanceAndOrientation(Primitive):
         self.depth_payload = depth_payload
         self.horizontal_fov = horizontal_fov
         self.vertical_fov = vertical_fov
-        self.pitch_deg = ROBOT_CAMERA_INFO["pitch_deg"]
-        self.x_cam = ROBOT_CAMERA_INFO["x_cam"]
-        self.height_cam = ROBOT_CAMERA_INFO["height_cam"]
+
+        # Camera info is now always required from the payload
+        self.pitch_deg = camera_info["pitch_deg"]
+        self.x_cam = camera_info["x_cam"]
+        self.height_cam = camera_info["height_cam"]
 
     async def execute(
         self,

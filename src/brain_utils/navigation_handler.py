@@ -36,7 +36,13 @@ class NavigationHandler:
         self.primitives_list = primitives_list
 
     async def handle_check_distance_and_orientation(
-        self, vision_output, robot_coords, base64_img, depth_payload, map_payload=None
+        self,
+        vision_output,
+        robot_coords,
+        base64_img,
+        depth_payload,
+        map_payload,
+        camera_info,
     ):
         has_canceled_task = False
         check_prim = next(
@@ -57,14 +63,19 @@ class NavigationHandler:
             has_canceled_task = True
             return vision_output, has_canceled_task
 
+        # Camera info is now always required from the payload
+        horizontal_fov = camera_info["horizontal_fov"]
+        vertical_fov = camera_info["vertical_fov"]
+
         check_prim.update_current_vars(
             current_x=robot_coords["x"],
             current_y=robot_coords["y"],
             current_yaw=robot_coords["theta"],
             image_b64=base64_img,
             depth_payload=depth_payload,
-            horizontal_fov=MAURICE_OAK_D_HORIZONTAL_FOV,
-            vertical_fov=MAURICE_OAK_D_VERTICAL_FOV,
+            horizontal_fov=horizontal_fov,
+            vertical_fov=vertical_fov,
+            camera_info=camera_info,
         )
 
         distance_meters = vision_output.next_task.inputs.get("distance_meters")
@@ -85,7 +96,13 @@ class NavigationHandler:
         return vision_output, has_canceled_task
 
     async def handle_navigate_in_sight(
-        self, vision_output, robot_coords, base64_img, depth_payload, map_payload=None
+        self,
+        vision_output,
+        robot_coords,
+        base64_img,
+        depth_payload,
+        map_payload,
+        camera_info,
     ):
         has_canceled_task = False
         nav_in_sight = next(
@@ -93,14 +110,19 @@ class NavigationHandler:
             None,
         )
 
+        # Camera info is now always required from the payload
+        horizontal_fov = camera_info["horizontal_fov"]
+        vertical_fov = camera_info["vertical_fov"]
+
         nav_in_sight.update_current_vars(
             current_x=robot_coords["x"],
             current_y=robot_coords["y"],
             current_yaw=robot_coords["theta"],
             image_b64=base64_img,
             depth_payload=depth_payload,
-            horizontal_fov=MAURICE_OAK_D_HORIZONTAL_FOV,
-            vertical_fov=MAURICE_OAK_D_VERTICAL_FOV,
+            horizontal_fov=horizontal_fov,
+            vertical_fov=vertical_fov,
+            camera_info=camera_info,
         )
 
         # Extract input parameters
