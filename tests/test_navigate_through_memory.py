@@ -13,7 +13,10 @@ import networkx as nx
 
 from src.brain import Brain
 from src.message_types import MessageIn, MessageInType
-from src.primitives.navigate_through_memory import PoseGraphMemory, NavigateThroughMemory
+from src.primitives.navigate_through_memory import (
+    PoseGraphMemory,
+    NavigateThroughMemory,
+)
 
 # Add the src directory to the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -64,7 +67,7 @@ class TestNavigateThroughMemory:
 
         # Override the _initialize method directly
         temp_dir = self.temp_dir  # Capture the temp_dir in a local variable
-        
+
         def patched_initialize(self):
             self.data_dir = temp_dir
             self.images_dir = os.path.join(temp_dir, "images")
@@ -76,7 +79,7 @@ class TestNavigateThroughMemory:
             self._user_graphs = {}
             # Initialize gemini_model to None for tests
             self.gemini_model = None
-            
+
         monkeypatch.setattr(PoseGraphMemory, "_initialize", patched_initialize)
 
         # Run the test
@@ -103,9 +106,7 @@ class TestNavigateThroughMemory:
         img_byte_arr = img_byte_arr.getvalue()
         return base64.b64encode(img_byte_arr).decode("utf-8")
 
-    async def add_image_to_pose_graph(
-        self, mock_brain, x=1.0, y=2.0, theta=3.14
-    ):
+    async def add_image_to_pose_graph(self, mock_brain, x=1.0, y=2.0, theta=3.14):
         """Helper method to add an image to the pose graph."""
         # Create a test image
         base64_img = self.create_test_image()
@@ -201,7 +202,7 @@ class TestNavigateThroughMemory:
         # Check the result
         assert success is True, "Navigation location finding failed"
         assert "Found location matching" in result, f"Unexpected result: {result}"
-        
+
         # Verify navigation command structure
         assert navigation_command is not None, "Navigation command should not be None"
         assert "x" in navigation_command, "Navigation command missing x coordinate"
@@ -236,7 +237,9 @@ class TestNavigateThroughMemory:
         # Check the result
         assert success is False, "Navigation should have failed"
         assert "Could not find a location" in result, f"Unexpected result: {result}"
-        assert navigation_command is None, "Navigation command should be None for failed navigation"
+        assert (
+            navigation_command is None
+        ), "Navigation command should be None for failed navigation"
 
     @pytest.mark.asyncio
     async def test_multiple_pose_images(self, mock_brain):
@@ -295,7 +298,7 @@ class TestNavigateThroughMemory:
         # Check the result
         assert success is True, "Navigation location finding failed"
         assert "Found location matching" in result, f"Unexpected result: {result}"
-        
+
         # Verify navigation command structure
         assert navigation_command is not None, "Navigation command should not be None"
         assert navigation_command["x"] == 3.0, "Incorrect x coordinate"
@@ -320,61 +323,76 @@ class TestNavigateThroughMemory:
         ), "NavigateThroughMemory primitive not found"
 
         # Get the edge_distance_threshold from the PoseGraphMemory instance
-        edge_distance_threshold = navigate_through_memory.pose_graph_memory.edge_distance_threshold
-        
+        edge_distance_threshold = (
+            navigate_through_memory.pose_graph_memory.edge_distance_threshold
+        )
+
         # Create two positions that are within the edge_distance_threshold
         # Position 1: (0, 0, 0) - at the origin, facing along the x-axis
         # Position 2: (0.5, 0, 0) - 0.5 units along the x-axis, also facing along the x-axis
         # The distance between them is 0.5, which is less than the edge_distance_threshold (0.8)
         position1 = (0.0, 0.0, 0.0)  # x, y, theta
         position2 = (0.5, 0.0, 0.0)  # x, y, theta - within threshold
-        
+
         # Add the first image
         await self.add_image_to_pose_graph(mock_brain, *position1)
-        
+
         # Add the second image
         await self.add_image_to_pose_graph(mock_brain, *position2)
-        
+
         # Get the user graph
-        user_graph = navigate_through_memory.pose_graph_memory.get_user_graph(mock_brain.connection_id)
-        
+        user_graph = navigate_through_memory.pose_graph_memory.get_user_graph(
+            mock_brain.connection_id
+        )
+
         # Check that both nodes were added
-        assert len(user_graph.nodes) == 2, "Both images should be added to the pose graph"
-        
+        assert (
+            len(user_graph.nodes) == 2
+        ), "Both images should be added to the pose graph"
+
         # Get the node IDs
         node_ids = list(user_graph.nodes)
-        
+
         # Directly call the _add_edges method to ensure edges are created
         # This is necessary because our test environment might not trigger the automatic edge creation
         navigate_through_memory.pose_graph_memory._add_edges(user_graph, node_ids[1])
-        
+
         # Check that edges were created between the nodes
         # There should be at least one edge (from node 1 to node 2 or vice versa)
-        assert len(user_graph.edges) > 0, "No edges were created between nodes within threshold"
-        
+        assert (
+            len(user_graph.edges) > 0
+        ), "No edges were created between nodes within threshold"
+
         # Check specifically for an edge from node 2 to node 1 (the most recent node to the previous one)
         # This is the most likely edge to be created based on the _add_edges logic
-        assert user_graph.has_edge(node_ids[1], node_ids[0]) or user_graph.has_edge(node_ids[0], node_ids[1]), \
-            "Expected edge between nodes not found"
+        assert user_graph.has_edge(node_ids[1], node_ids[0]) or user_graph.has_edge(
+            node_ids[0], node_ids[1]
+        ), "Expected edge between nodes not found"
 
     @pytest.mark.asyncio
     async def test_persistence_between_connections(self):
         """Test that pose graph memory persists between client connections."""
         # Create a unique connection ID for this test
         connection_id = "persistence_test_connection"
-        
+
         # Create first brain instance (simulating first connection)
         send_callback1 = MagicMock()
         brain1 = Brain(connection_id, send_callback1)
         brain1.handle_image = MagicMock()  # Mock handle_image to avoid processing
-        
+
         # Get the NavigateThroughMemory primitive from the first brain
         navigate_through_memory1 = next(
-            (p for p in brain1.local_primitives_list if p.name == "navigate_through_memory"),
-            None
+            (
+                p
+                for p in brain1.local_primitives_list
+                if p.name == "navigate_through_memory"
+            ),
+            None,
         )
-        assert navigate_through_memory1 is not None, "NavigateThroughMemory primitive not found in first brain"
-        
+        assert (
+            navigate_through_memory1 is not None
+        ), "NavigateThroughMemory primitive not found in first brain"
+
         # Add images to the pose graph with the first brain
         positions = [(1.0, 2.0, 0.0), (2.0, 3.0, 1.57)]
         for x, y, theta in positions:
@@ -383,7 +401,7 @@ class TestNavigateThroughMemory:
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format="JPEG")
             base64_img = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
-            
+
             # Create and process a pose_image message
             message = MessageIn(
                 type=MessageInType.POSE_IMAGE,
@@ -396,37 +414,53 @@ class TestNavigateThroughMemory:
                 },
             )
             await brain1.process_message(message)
-        
+
         # Verify images were added to the pose graph
-        user_graph1 = navigate_through_memory1.pose_graph_memory.get_user_graph(connection_id)
-        assert len(user_graph1.nodes) == 2, "Images were not added to the pose graph with first brain"
-        
+        user_graph1 = navigate_through_memory1.pose_graph_memory.get_user_graph(
+            connection_id
+        )
+        assert (
+            len(user_graph1.nodes) == 2
+        ), "Images were not added to the pose graph with first brain"
+
         # Simulate client disconnection by stopping the first brain
         await brain1.stop()
-        
+
         # Create second brain instance (simulating reconnection)
         send_callback2 = MagicMock()
         brain2 = Brain(connection_id, send_callback2)  # Use the same connection_id
         brain2.handle_image = MagicMock()  # Mock handle_image to avoid processing
-        
+
         # Get the NavigateThroughMemory primitive from the second brain
         navigate_through_memory2 = next(
-            (p for p in brain2.local_primitives_list if p.name == "navigate_through_memory"),
-            None
+            (
+                p
+                for p in brain2.local_primitives_list
+                if p.name == "navigate_through_memory"
+            ),
+            None,
         )
-        assert navigate_through_memory2 is not None, "NavigateThroughMemory primitive not found in second brain"
-        
+        assert (
+            navigate_through_memory2 is not None
+        ), "NavigateThroughMemory primitive not found in second brain"
+
         # Verify that the pose graph from the first connection is still available
-        user_graph2 = navigate_through_memory2.pose_graph_memory.get_user_graph(connection_id)
-        assert len(user_graph2.nodes) == 2, "Pose graph data was not persisted between connections"
-        
+        user_graph2 = navigate_through_memory2.pose_graph_memory.get_user_graph(
+            connection_id
+        )
+        assert (
+            len(user_graph2.nodes) == 2
+        ), "Pose graph data was not persisted between connections"
+
         # Add another image with the second brain
         new_position = (3.0, 4.0, 3.14)
-        img = Image.new("RGB", (100, 100), color="blue")  # Different color to distinguish
+        img = Image.new(
+            "RGB", (100, 100), color="blue"
+        )  # Different color to distinguish
         img_byte_arr = io.BytesIO()
         img.save(img_byte_arr, format="JPEG")
         base64_img = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
-        
+
         message = MessageIn(
             type=MessageInType.POSE_IMAGE,
             payload={
@@ -438,25 +472,29 @@ class TestNavigateThroughMemory:
             },
         )
         await brain2.process_message(message)
-        
+
         # Verify the new image was added to the existing pose graph
-        user_graph2 = navigate_through_memory2.pose_graph_memory.get_user_graph(connection_id)
-        assert len(user_graph2.nodes) == 3, "New image was not added to the persisted pose graph"
-        
+        user_graph2 = navigate_through_memory2.pose_graph_memory.get_user_graph(
+            connection_id
+        )
+        assert (
+            len(user_graph2.nodes) == 3
+        ), "New image was not added to the persisted pose graph"
+
         # Test navigation using the combined pose graph
         result, success, navigation_command = await navigate_through_memory2.execute(
             "Find the blue square", connection_id
         )
-        
+
         # Check the result
         assert success is True, "Navigation location finding failed"
         assert "Found location matching" in result, f"Unexpected result: {result}"
-        
+
         # Verify navigation command structure
         assert navigation_command is not None, "Navigation command should not be None"
         assert navigation_command["x"] == 3.0, "Incorrect x coordinate"
         assert navigation_command["y"] == 4.0, "Incorrect y coordinate"
         assert navigation_command["theta"] == 3.14, "Incorrect theta value"
-        
+
         # Clean up
         await brain2.stop()
