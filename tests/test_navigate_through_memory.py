@@ -77,8 +77,14 @@ class TestNavigateThroughMemory:
             self.edge_distance_threshold = 0.8
             self.edge_angle_threshold = np.radians(90)
             self._user_graphs = {}
-            # Initialize gemini_model to None for tests
-            self.gemini_model = None
+            # Initialize genai_client properly for tests
+            api_key = os.getenv("GEMINI_API_KEY")
+            if api_key:
+                from google import genai
+
+                self.genai_client = genai.Client(api_key=api_key)
+            else:
+                self.genai_client = None
 
         monkeypatch.setattr(PoseGraphMemory, "_initialize", patched_initialize)
 
@@ -97,19 +103,28 @@ class TestNavigateThroughMemory:
         brain.handle_image = MagicMock()
         return brain
 
-    def create_test_image(self):
+    def create_test_image(self, color="red"):
         """Create a simple test image and return its base64 encoding."""
-        # Create a small red square image
-        img = Image.new("RGB", (100, 100), color="red")
+        # Create a test image with a colored square on a white background
+        img = Image.new("RGB", (100, 100), color="white")
+        # Draw a colored square in the center
+        from PIL import ImageDraw
+
+        draw = ImageDraw.Draw(img)
+        # Draw a square from (25,25) to (75,75)
+        draw.rectangle([25, 25, 75, 75], fill=color)
+
         img_byte_arr = io.BytesIO()
         img.save(img_byte_arr, format="JPEG")
         img_byte_arr = img_byte_arr.getvalue()
         return base64.b64encode(img_byte_arr).decode("utf-8")
 
-    async def add_image_to_pose_graph(self, mock_brain, x=1.0, y=2.0, theta=3.14):
+    async def add_image_to_pose_graph(
+        self, mock_brain, x=1.0, y=2.0, theta=3.14, color="red"
+    ):
         """Helper method to add an image to the pose graph."""
         # Create a test image
-        base64_img = self.create_test_image()
+        base64_img = self.create_test_image(color)
 
         # Create a pose_image message with only the required fields
         # No user_token is needed as the Brain's connection_id will be used
@@ -236,7 +251,9 @@ class TestNavigateThroughMemory:
 
         # Check the result
         assert success is False, "Navigation should have failed"
-        assert "Could not find a location" in result, f"Unexpected result: {result}"
+        assert (
+            "No locations stored in memory yet" in result
+        ), f"Unexpected result: {result}"
         assert (
             navigation_command is None
         ), "Navigation command should be None for failed navigation"
@@ -268,8 +285,9 @@ class TestNavigateThroughMemory:
         assert len(user_graph.nodes) == 0, "Graph should be empty at the start"
 
         # Process multiple messages with a small delay between them to ensure different timestamps
+        colors = ["red", "blue", "green"]
         for i, (x, y, theta) in enumerate(positions):
-            await self.add_image_to_pose_graph(mock_brain, x, y, theta)
+            await self.add_image_to_pose_graph(mock_brain, x, y, theta, colors[i])
             # Add a small delay to ensure timestamps are different
             time.sleep(0.01)
 
@@ -290,9 +308,9 @@ class TestNavigateThroughMemory:
         # Check that edges were created between nodes
         assert len(user_graph.edges) > 0, "No edges were created between nodes"
 
-        # Test navigation to the most recent node
+        # Test navigation to the most recent node (green square)
         result, success, navigation_command = await navigate_through_memory.execute(
-            "Find the red square", mock_brain.connection_id
+            "Find the green square", mock_brain.connection_id
         )
 
         # Check the result
@@ -301,6 +319,10 @@ class TestNavigateThroughMemory:
 
         # Verify navigation command structure
         assert navigation_command is not None, "Navigation command should not be None"
+        assert "x" in navigation_command, "Navigation command missing x coordinate"
+        assert "y" in navigation_command, "Navigation command missing y coordinate"
+        assert "theta" in navigation_command, "Navigation command missing theta value"
+        # The green square should be at position (3.0, 4.0, 3.14) - the last one added
         assert navigation_command["x"] == 3.0, "Incorrect x coordinate"
         assert navigation_command["y"] == 4.0, "Incorrect y coordinate"
         assert navigation_command["theta"] == 3.14, "Incorrect theta value"
@@ -395,9 +417,15 @@ class TestNavigateThroughMemory:
 
         # Add images to the pose graph with the first brain
         positions = [(1.0, 2.0, 0.0), (2.0, 3.0, 1.57)]
-        for x, y, theta in positions:
-            # Create a test image
-            img = Image.new("RGB", (100, 100), color="red")
+        colors = ["red", "yellow"]
+        for i, (x, y, theta) in enumerate(positions):
+            # Create a test image with a colored square on white background
+            img = Image.new("RGB", (100, 100), color="white")
+            from PIL import ImageDraw
+
+            draw = ImageDraw.Draw(img)
+            draw.rectangle([25, 25, 75, 75], fill=colors[i])
+
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format="JPEG")
             base64_img = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
@@ -454,9 +482,13 @@ class TestNavigateThroughMemory:
 
         # Add another image with the second brain
         new_position = (3.0, 4.0, 3.14)
-        img = Image.new(
-            "RGB", (100, 100), color="blue"
-        )  # Different color to distinguish
+        # Create a test image with a blue square on white background
+        img = Image.new("RGB", (100, 100), color="white")
+        from PIL import ImageDraw
+
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([25, 25, 75, 75], fill="blue")
+
         img_byte_arr = io.BytesIO()
         img.save(img_byte_arr, format="JPEG")
         base64_img = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
@@ -492,6 +524,11 @@ class TestNavigateThroughMemory:
 
         # Verify navigation command structure
         assert navigation_command is not None, "Navigation command should not be None"
+        assert "x" in navigation_command, "Navigation command missing x coordinate"
+        assert "y" in navigation_command, "Navigation command missing y coordinate"
+        assert "theta" in navigation_command, "Navigation command missing theta value"
+
+        # The blue square should be at position (3.0, 4.0, 3.14) - the one we just added
         assert navigation_command["x"] == 3.0, "Incorrect x coordinate"
         assert navigation_command["y"] == 4.0, "Incorrect y coordinate"
         assert navigation_command["theta"] == 3.14, "Incorrect theta value"

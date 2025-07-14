@@ -32,7 +32,7 @@ IMAGES_DIR_NAME = "images"
 GRAPHS_DIR_NAME = "pose_graphs"
 GRAPH_FILE_EXTENSION = ".pkl"
 IMAGE_FILE_EXTENSION = ".jpg"
-TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
+TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S_%f"
 
 # Gemini API constants
 GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"

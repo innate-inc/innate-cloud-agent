@@ -201,14 +201,16 @@ class TestVLMNavigation:
 
         for i, description in enumerate(descriptions):
             # Find location by description
-            location = pose_graph_memory.find_location_by_description(
+            result = pose_graph_memory.find_location_by_description(
                 user_token, description
             )
 
             # Check if a location was found
             assert (
-                location is not None
+                result is not None and result[0] is not None
             ), f"No location found for description: {description}"
+
+            location, response_parsed = result
 
             # Print the found location for debugging
             print(f"Description: {description}")
