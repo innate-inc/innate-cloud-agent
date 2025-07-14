@@ -159,7 +159,6 @@ class NativeGeminiVisionAgent:
 
         try:
             self.client = genai.Client(api_key=api_key)
-            print("Native Gemini client initialized successfully.")
         except Exception as e:
             raise ValueError(f"Failed to initialize Gemini client: {e}")
 
