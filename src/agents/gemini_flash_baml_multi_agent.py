@@ -1,4 +1,8 @@
 from typing import Optional, List
+import base64
+import json
+from pathlib import Path
+from datetime import datetime
 from baml_py import Image
 from baml_py.errors import BamlValidationError, BamlClientError
 from src.baml_client import b
@@ -8,12 +12,107 @@ from src.baml_client.types import NewVisionAgentOutput
 from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlClientError
 import asyncio
 
+# Flag to control saving of debug data
+SAVE_DEBUG_DATA = True  # Set to False to disable
+DEBUG_DATA_DIR = Path("test_data/debug_agent_images")
 
 FLASH_EXECUTION_TIMEOUT = 5
 
 # Available Gemini agent variants
 # We will only use one variant for the multi-image agent initially
 # GeminiAgentVariant = Literal["gemini1", "gemini2", "gemini3", "gemini4"]
+
+
+def _save_base64_image(base64_img: str, filename: str) -> str:
+    """
+    Save a base64 encoded image to a file.
+
+    Args:
+        base64_img: Base64 encoded image string
+        filename: Name for the saved file (without extension)
+
+    Returns:
+        Path to the saved file
+    """
+    try:
+        # Create debug images directory if it doesn't exist
+        DEBUG_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Remove data URL prefix if present (e.g., "data:image/jpeg;base64,")
+        if base64_img.startswith("data:image"):
+            base64_img = base64_img.split(",")[1]
+
+        # Decode base64 data
+        image_data = base64.b64decode(base64_img)
+
+        # Try to determine file extension from image header
+        if image_data.startswith(b"\xff\xd8\xff"):
+            ext = ".jpg"
+        elif image_data.startswith(b"\x89PNG"):
+            ext = ".png"
+        elif image_data.startswith(b"GIF"):
+            ext = ".gif"
+        elif image_data.startswith(b"RIFF"):
+            ext = ".webp"
+        else:
+            ext = ".jpg"  # Default to jpg
+
+        # Create full file path
+        file_path = (
+            DEBUG_DATA_DIR
+            / f"{filename}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
+        )
+
+        # Write image data to file
+        with open(file_path, "wb") as f:
+            f.write(image_data)
+
+        print(f"Saved debug image to {file_path}")
+        return str(file_path)
+
+    except Exception as e:
+        print(f"Error saving debug image: {e}")
+        return ""
+
+
+def _save_context_data(context_data: dict, filename: str) -> str:
+    """
+    Save context data to a text file.
+
+    Args:
+        context_data: Dictionary containing context information
+        filename: Name for the saved file (without extension)
+
+    Returns:
+        Path to the saved file
+    """
+    try:
+        # Create debug data directory if it doesn't exist
+        DEBUG_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Create full file path
+        file_path = (
+            DEBUG_DATA_DIR
+            / f"{filename}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        )
+
+        # Write context data to file
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write("=== GEMINI AGENT CONTEXT DATA ===\n\n")
+            for key, value in context_data.items():
+                f.write(f"{key.upper()}:\n")
+                if isinstance(value, (list, dict)):
+                    f.write(json.dumps(value, indent=2, ensure_ascii=False))
+                else:
+                    f.write(str(value))
+                f.write("\n\n")
+
+        print(f"Saved context data to {file_path}")
+        return str(file_path)
+
+    except Exception as e:
+        print(f"Error saving context data: {e}")
+        return ""
 
 
 async def gemini_vision_agent_multimodal_history(
@@ -35,6 +134,19 @@ async def gemini_vision_agent_multimodal_history(
         MaxRetriesExceededException: When the maximum number of retries is exceeded.
         UnforeseenBamlClientError: When an unexpected BAML client error occurs.
     """
+    # Save debug data if enabled
+    if SAVE_DEBUG_DATA:
+        # Save main image
+        if vlm_inputs.base64_img:
+            _save_base64_image(vlm_inputs.base64_img, "main_image")
+
+        # Save additional images if present (before transformation)
+        if vlm_inputs.additional_image_data:
+            camera_type = vlm_inputs.additional_image_data.get("camera_type", "unknown")
+            image_b64 = vlm_inputs.additional_image_data.get("image_b64", "")
+            if image_b64:
+                _save_base64_image(image_b64, f"additional_{camera_type}")
+
     img = Image.from_base64("image/jpeg", vlm_inputs.base64_img)
     tb = create_type_builder(vlm_inputs.primitives_list)
     primitive_names = [prim.name for prim in vlm_inputs.primitives_list]
@@ -109,6 +221,32 @@ async def gemini_vision_agent_multimodal_history(
         if vlm_inputs.primitive_in_execution
         else ""
     )
+
+    # Save context data if debug is enabled
+    if SAVE_DEBUG_DATA:
+        context_data = {
+            "user_prompt_text": vlm_inputs.user_prompt_text,
+            "primitive_in_execution": (
+                vlm_inputs.primitive_in_execution.model_dump()
+                if vlm_inputs.primitive_in_execution
+                else None
+            ),
+            "robot_coords": vlm_inputs.robot_coords,
+            "directive": vlm_inputs.directive,
+            "running_primitive_guidelines": running_primitive_guidelines,
+            "primitives_list_string": primitives_list_string,
+            "additional_image_data_original": vlm_inputs.additional_image_data,
+            "context_multimodal_summary": [
+                (
+                    f"Image {i}"
+                    if isinstance(item, Image)
+                    else str(item)[:200] + "..." if len(str(item)) > 200 else str(item)
+                )
+                for i, item in enumerate(context_multimodal)
+            ],
+            "max_retries": max_retries,
+        }
+        _save_context_data(context_data, "context_data")
 
     try:
         response = await decreasesmax_retries_multi_context(

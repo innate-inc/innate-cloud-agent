@@ -12,6 +12,8 @@ from google.genai import types
 import json
 from PIL import Image
 from io import BytesIO
+from pydantic import BaseModel
+from enum import Enum
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 # Default values for PoseGraphMemory parameters
@@ -30,7 +32,7 @@ IMAGES_DIR_NAME = "images"
 GRAPHS_DIR_NAME = "pose_graphs"
 GRAPH_FILE_EXTENSION = ".pkl"
 IMAGE_FILE_EXTENSION = ".jpg"
-TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
+TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S_%f"
 
 # Gemini API constants
 GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
@@ -44,6 +46,20 @@ GEMINI_RESPONSE_MIME_TYPE = "application/json"
 MAX_IMAGE_DIMENSION = 800
 IMAGE_MODE_RGB = "RGB"
 IMAGE_FORMAT_JPEG = "JPEG"
+
+
+class LocationSearchReason(Enum):
+    FOUND_MATCHING_LOCATION = "FOUND_MATCHING_LOCATION"
+    NO_MATCHING_LOCATION = "NO_MATCHING_LOCATION"
+    MEMORY_EMPTY = "MEMORY_EMPTY"
+    OTHER = "OTHER"
+
+
+class LocationSearchResponse(BaseModel):
+    found_location: bool
+    frame_number: int  # 0 if no location found
+    reason: LocationSearchReason
+    explanation: str
 
 
 class PoseGraphMemory:
@@ -91,7 +107,7 @@ class PoseGraphMemory:
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
             self.genai_client = genai.Client(api_key=api_key)
-            
+
         else:
             self.genai_client = None
             print(
@@ -217,28 +233,30 @@ class PoseGraphMemory:
 
         if not graph.nodes:
             print(f"No locations found for user {user_token}")
-            return None
+            return None, None
 
         # If Gemini model is not available, fall back to most recent node
         if self.genai_client is None:
-            raise ValueError("Gemini model not available. Please set GEMINI_API_KEY in environment variables.")
+            raise ValueError(
+                "Gemini model not available. Please set GEMINI_API_KEY in environment variables."
+            )
 
         try:
             # Create a mapping from frame numbers to node IDs
             frame_to_node_id = {}
             message_parts = []
 
-            # Base prompt - improved to be more explicit
+            # Base prompt - updated to use new response format
             base_assistant_text = (
                 f"You are an AI assistant for a robot navigating through a space. "
                 f"Your goal is to help the robot find specific locations based on "
                 f"visual appearance. I will show you a series of images labeled as "
-                f"Frame 1, Frame 2, etc. Each image shows a different colored square. "
-                f"Then I will ask you to identify which frame best matches a color "
-                f"description. You must respond with a JSON object containing a "
-                f"'frame_number' key with the number of the best matching frame as an "
-                f'integer value. For example: {{"frame_number": 2}} if Frame 2 is the '
-                f"best match. This is critical for the robot's navigation."
+                f"Frame 1, Frame 2, etc. Each image shows a different view of the robot's memory. "
+                f"Then I will ask you to identify which frame best matches a location "
+                f"description. You must respond with a JSON object that indicates whether "
+                f"you found a matching location, which frame number (if any), the reason "
+                f"for your decision, and an explanation. If no matching location is found, "
+                f"set found_location to false and frame_number to 0."
             )
             message_parts.append(base_assistant_text)
 
@@ -269,10 +287,10 @@ class PoseGraphMemory:
                         with BytesIO() as buf:
                             img.save(buf, format=IMAGE_FORMAT_JPEG)
                             image_bytes = buf.getvalue()
-                        
+
                         image_part = types.Part.from_bytes(
                             data=image_bytes,
-                            mime_type='image/jpeg' # Use constant or 'image/jpeg'
+                            mime_type="image/jpeg",
                         )
                         message_parts.append(image_part)
                         message_parts.append(f"Frame {frame_num}.")
@@ -284,64 +302,66 @@ class PoseGraphMemory:
 
             print(f"Calling MVLA with {len(message_parts) // 2} images")
 
-            # Final question - improved to be more explicit
+            # Final question - updated to use new response format
             last_message = (
-                f"Based on these images, which frame best matches this description: "
-                f'"{description}"? Look carefully at the colors and visual elements in '
-                f"each frame. Pay special attention to the color of each square. "
-                f"Respond ONLY with a JSON object containing a 'frame_number' key "
-                f"with the number of the best matching frame as an integer value. "
-                f'For example: {{"frame_number": 2}} if Frame 2 is the best match.'
+                f"Based on these images, does any frame match this description: "
+                f'"{description}"? Look carefully at the visual elements in each frame. '
+                f"If you find a matching location, set found_location to true and provide "
+                f"the frame_number. If nothing matches the description, set found_location "
+                f"to false, frame_number to 0, and explain why no location fits. "
+                f"Be honest if nothing in the robot's memory matches what you're looking for."
             )
             message_parts.append(last_message)
 
-            # Call Gemini model
+            # Call Gemini model with structured response
             response = self.genai_client.models.generate_content(
                 contents=message_parts,
                 model=GEMINI_MODEL_NAME,
                 config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(thinking_budget=1024)
+                    thinking_config=types.ThinkingConfig(thinking_budget=1024),
+                    response_mime_type="application/json",
+                    response_schema=LocationSearchResponse,
                 ),
             )
 
-            # Parse the response
+            # Parse the structured response
             try:
-                response_text = response.text
-                response_json = json.loads(response_text)
-                frame_number = response_json.get("frame_number")
+                response_parsed = response.parsed
+                print(f"Location search response: {response_parsed}")
 
-                print(f"Frame number from response: {frame_number}")
-
-                if frame_number and frame_number in frame_to_node_id:
-                    node_id = frame_to_node_id[frame_number]
-                    node_data = graph.nodes[node_id]
-                    return (
-                        node_data["position"]["x"],
-                        node_data["position"]["y"],
-                        node_data["position"]["theta"],
-                    )
+                if response_parsed.found_location and response_parsed.frame_number > 0:
+                    frame_number = response_parsed.frame_number
+                    if frame_number in frame_to_node_id:
+                        node_id = frame_to_node_id[frame_number]
+                        node_data = graph.nodes[node_id]
+                        print(
+                            f"Found matching location at frame {frame_number}: {response_parsed.explanation}"
+                        )
+                        return (
+                            node_data["position"]["x"],
+                            node_data["position"]["y"],
+                            node_data["position"]["theta"],
+                        ), response_parsed
+                    else:
+                        print(f"Invalid frame number in VLM response: {frame_number}")
                 else:
-                    print(f"Invalid frame number in VLM response: {response_text}")
-            except (json.JSONDecodeError, KeyError) as e:
-                print(f"Error parsing VLM response: {e}. Response: {response.text}")
+                    print(f"No matching location found: {response_parsed.explanation}")
+                    return None, response_parsed
+
+            except Exception as e:
+                print(
+                    f"Error parsing structured VLM response: {e}. Response: {response}"
+                )
+                return None, None
 
         except Exception as e:
             print(f"Error using VLM for navigation: {e}")
             import traceback
 
             traceback.print_exc()
+            return None, None
 
-        # Fall back to most recent node if VLM fails
-        print("Falling back to most recent node.")
-        most_recent_node = max(
-            graph.nodes, key=lambda n: graph.nodes[n].get("timestamp", 0)
-        )
-        node_data = graph.nodes[most_recent_node]
-        return (
-            node_data["position"]["x"],
-            node_data["position"]["y"],
-            node_data["position"]["theta"],
-        )
+        return None, None
 
     def _save_image(self, user_token: str, image_data: str) -> str:
         """Save an image to disk and return the path."""
@@ -508,17 +528,36 @@ class NavigateThroughMemory(Primitive):
         Returns:
             Tuple of (result message, success boolean, navigation_command dict)
         """
-        # Find the location in the pose graph
-        location = self.pose_graph_memory.find_location_by_description(
-            user_token, description
-        )
-
-        if location is None:
+        # Check if user has any memory first
+        graph = self.pose_graph_memory.get_user_graph(user_token)
+        if not graph.nodes:
             return (
-                f"Could not find a location matching '{description}' in memory",
+                f"No locations stored in memory yet. The robot needs to explore and build up its memory first.",
                 False,
                 None,
             )
+
+        # Find the location in the pose graph
+        (location, response_parsed) = (
+            self.pose_graph_memory.find_location_by_description(user_token, description)
+        )
+
+        if location is None:
+            if response_parsed is not None:
+                return (
+                    (
+                        f"No location matching '{description}' was selected. "
+                        f"The reason is: {response_parsed.explanation}."
+                    ),
+                    False,
+                    None,
+                )
+            else:
+                return (
+                    f"An unexpected error occurred while searching for the location. ",
+                    False,
+                    None,
+                )
 
         x, y, theta = location
 
@@ -531,7 +570,7 @@ class NavigateThroughMemory(Primitive):
 
         return (
             f"Found location matching '{description}' at "
-            f"coordinates ({x}, {y}, {theta})",
+            f"coordinates ({x:.2f}, {y:.2f}, {theta:.2f})",
             True,
             navigation_command,
         )

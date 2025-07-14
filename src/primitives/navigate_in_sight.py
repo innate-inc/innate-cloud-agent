@@ -26,13 +26,16 @@ from src.utils import decode_map_payload
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 ROBOT_CAMERA_INFO = ROBOT_PARAMS_TO_USE["camera_info"]
+MIN_OBSTACLE_DISTANCE = ROBOT_PARAMS_TO_USE["min_obstacle_distance"]
+ENABLE_VISUALIZATIONS = ROBOT_PARAMS_TO_USE["enable_visualizations"]
 
 # Gemini API constants from navigate_through_memory.py
-GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+GEMINI_MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17"
 GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64
 GEMINI_MAX_OUTPUT_TOKENS = 8192
+THINKING_BUDGET = 512
 
 
 class PointSelectionReason(Enum):
@@ -104,6 +107,7 @@ class NavigateInSight(Primitive):
         depth_payload: dict,
         horizontal_fov: float,
         vertical_fov: float,
+        camera_info: dict,
     ):
         self.current_x = current_x
         self.current_y = current_y
@@ -112,9 +116,11 @@ class NavigateInSight(Primitive):
         self.depth_payload = depth_payload
         self.horizontal_fov = horizontal_fov
         self.vertical_fov = vertical_fov
-        self.pitch_deg = ROBOT_CAMERA_INFO["pitch_deg"]
-        self.x_cam = ROBOT_CAMERA_INFO["x_cam"]
-        self.height_cam = ROBOT_CAMERA_INFO["height_cam"]
+
+        # Camera info is now always required from the payload
+        self.pitch_deg = camera_info["pitch_deg"]
+        self.x_cam = camera_info["x_cam"]
+        self.height_cam = camera_info["height_cam"]
 
     def _decode_and_prepare_image(self):
         """
@@ -158,7 +164,7 @@ class NavigateInSight(Primitive):
             map_array,
             map_info,
             self.horizontal_fov,
-            min_obstacle_distance=0.20,
+            min_obstacle_distance=MIN_OBSTACLE_DISTANCE * 2,
             distances=[0.5, 1.0, 2.0],
             angles_deg=angles,
         )
@@ -254,20 +260,6 @@ class NavigateInSight(Primitive):
         """
         Create and save visualizations for navigation points.
         """
-        # Convert robot position from world coordinates to grid coordinates
-        robot_pixel_x, robot_pixel_y = world_to_grid_coordinates(
-            self.current_x, self.current_y, map_info
-        )
-        robot_pos = (robot_pixel_x, robot_pixel_y, self.current_yaw)
-
-        # Create map visualization with grid coordinates
-        map_vis = create_map_visualization(
-            map_array,
-            robot_pos,
-            grid_valid_points,
-            map_info,
-            invalid_points=grid_invalid_points,
-        )
 
         # Create a wrapper function for angle_distance_to_image_coordinates
         def convert_to_image_coords(angle, distance):
@@ -285,16 +277,34 @@ class NavigateInSight(Primitive):
                 },
             )
 
+        # Always create annotated image (needed for Gemini point selection)
         annotated_image = annotate_camera_view(
             cv_image,
             camera_valid_points,
             convert_to_image_coords,
         )
 
-        # Save visualizations
-        save_navigation_visualizations(
-            annotated_image, map_vis, timestamp, prefix="nav_in_sight"
-        )
+        # Only create and save additional visualizations if enabled
+        if ENABLE_VISUALIZATIONS:
+            # Convert robot position from world coordinates to grid coordinates
+            robot_pixel_x, robot_pixel_y = world_to_grid_coordinates(
+                self.current_x, self.current_y, map_info
+            )
+            robot_pos = (robot_pixel_x, robot_pixel_y, self.current_yaw)
+
+            # Create map visualization with grid coordinates
+            map_vis = create_map_visualization(
+                map_array,
+                robot_pos,
+                grid_valid_points,
+                map_info,
+                invalid_points=grid_invalid_points,
+            )
+
+            # Save visualizations
+            save_navigation_visualizations(
+                annotated_image, map_vis, timestamp, prefix="nav_in_sight"
+            )
 
         return annotated_image
 
@@ -310,7 +320,7 @@ class NavigateInSight(Primitive):
         if stop_in_front_of_target:
             additional_prompt = (
                 "Make sure you stop in front of the target, not after it or on the side of it! "
-                "If there is no point in front of the target, return that you found no point, "
+                "If there is no point between you and the target, return that you found no point, "
                 "set the point_id to 0, and give the reason you didn't pick a point is because you're already close enough."
                 "Do not pick a point too close to the target, as it might be too close to obstacles."
             )
@@ -368,7 +378,9 @@ If there's a need for clarification, explain in the explanation field.
                         top_p=GEMINI_TOP_P,
                         top_k=GEMINI_TOP_K,
                         max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-                        thinking_config=types.ThinkingConfig(thinking_budget=0),
+                        thinking_config=types.ThinkingConfig(
+                            thinking_budget=THINKING_BUDGET
+                        ),
                         response_mime_type="application/json",
                         response_schema=ResponseSchema,
                     ),
@@ -583,6 +595,16 @@ If there's a need for clarification, explain in the explanation field.
                 "Gemini returned NO_POINT_AVAILABLE, will retry with different angles..."
             )
             return None  # Signal to continue with retry
+        elif (
+            gemini_response
+            and gemini_response.reason == PointSelectionReason.ALREADY_CLOSE_ENOUGH
+        ):
+            print("Gemini returned ALREADY_CLOSE_ENOUGH, we can just stay here.")
+            return (
+                f"Already close enough to target: {gemini_response.explanation}",
+                True,
+                None,
+            )
 
         # Handle the point selection response
         result = self._handle_point_selection_response(

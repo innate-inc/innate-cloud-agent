@@ -18,7 +18,7 @@ from src.agents.types import PrimitiveDefinition
 from src.primitives.navigate_in_sight import NavigateInSight
 from src.primitives.navigate_through_memory import NavigateThroughMemory
 from src.primitives.turn_and_move import TurnAndMove
-from src.primitives.check_if_close_enough import CheckIfCloseEnough
+from src.primitives.check_distance_and_orientation import CheckDistanceAndOrientation
 
 from src.brain_utils.logger import BrainLogger
 from src.brain_utils.image_processor import ImageProcessor
@@ -74,7 +74,7 @@ class Brain:
             NavigateInSight(),
             NavigateThroughMemory(),
             TurnAndMove(),
-            CheckIfCloseEnough(),
+            # CheckDistanceAndOrientation(),
         ]  # These are the ones defined in the brain here, not registered with
         # the server by the user
         for p in self.local_primitives_list:
@@ -155,7 +155,7 @@ class Brain:
                 )
                 self.logger.info(
                     f"Processed image message in {time.time() - time_start} seconds, "
-                    f"sent task: {task_and_id}\n"
+                    f"sent {'stop and' if vision_output.stop_current_task else ''} task: {task_and_id}\n"
                 )
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)
@@ -196,6 +196,7 @@ class Brain:
             robot_coords,
             map_payload,
             additional_image_data,
+            camera_info,
         ) = self.image_processor.extract_image_data(message.payload)
 
         current_image_for_vlm: str
@@ -237,7 +238,7 @@ class Brain:
             history=self.history.get_as_multimodal_list(),
             robot_coords=robot_coords,
             directive=self.directive,
-            agent_type=VisionAgentType.GEMINI_FLASH_MULTI,
+            agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,
             gemini_variant=self.gemini_variant,
             additional_image_data=additional_image_data,
         )
@@ -328,6 +329,7 @@ class Brain:
                     base64_img_extracted,
                     depth_payload,
                     map_payload,
+                    camera_info,
                 )
             )
             if has_canceled_task:
@@ -339,41 +341,48 @@ class Brain:
             and vision_output.next_task.name == "navigate_through_memory"
         ):
             vision_output_to_write_in_history = vision_output.model_copy()
-            vision_output = (
+            vision_output, has_canceled_task = (
                 await self.navigation_handler.handle_navigate_through_memory(
                     vision_output, self.connection_id, map_payload
                 )
             )
+            if has_canceled_task:
+                vision_output_to_write_in_history = vision_output.model_copy()
 
         # Handle special case for turn_and_move
         if vision_output.next_task and vision_output.next_task.name == "turn_and_move":
             vision_output_to_write_in_history = vision_output.model_copy()
-            vision_output = await self.navigation_handler.handle_turn_and_move(
-                vision_output, robot_coords, map_payload
+            vision_output, has_canceled_task = (
+                await self.navigation_handler.handle_turn_and_move(
+                    vision_output, robot_coords, map_payload
+                )
             )
+            if has_canceled_task:
+                vision_output_to_write_in_history = vision_output.model_copy()
 
-        # Handle special case for check_if_close_enough
+        # Handle special case for check_distance_and_orientation
         if (
             vision_output.next_task
-            and vision_output.next_task.name == "check_if_close_enough"
+            and vision_output.next_task.name == "check_distance_and_orientation"
         ):
             vision_output_to_write_in_history = vision_output.model_copy()
             vision_output, has_canceled_task = (
-                await self.navigation_handler.handle_check_if_close_enough(
+                await self.navigation_handler.handle_check_distance_and_orientation(
                     vision_output,
                     robot_coords,
                     base64_img_extracted,
                     depth_payload,
                     map_payload,
+                    camera_info,
                 )
             )
             # We should also mark this primitive as activated and then completed
             self.history.add(
-                HistoryEntryType.TASK_ACTIVATED,
+                HistoryEntryType.PRIMITIVE_ACTIVATED,
                 description=f"Primitive {vision_output.next_task.name} activated",
-            )
+            ),
             self.history.add(
-                HistoryEntryType.TASK_COMPLETED,
+                HistoryEntryType.PRIMITIVE_COMPLETED,
                 description=f"Primitive {vision_output.next_task.name} completed",
             )
             vision_output.next_task = None
@@ -679,7 +688,7 @@ class Brain:
             )
             # Use system message type for completion
             self.history.add(
-                HistoryEntryType.TASK_COMPLETED,
+                HistoryEntryType.PRIMITIVE_COMPLETED,
                 description=f"Task '{self.primitive_in_execution.name}' completed.",
             )
             self.primitive_in_execution = None
@@ -704,10 +713,10 @@ class Brain:
             task_name = self.primitive_in_execution.name
             self.logger.info(f"Task '{task_name}' failed.")
 
-            # Use task_cancelled type for failed tasks
+            # Use primitive_cancelled type for failed primitives
             self.history.add(
-                HistoryEntryType.TASK_CANCELLED,
-                description=f"Task '{task_name}' failed.",
+                HistoryEntryType.PRIMITIVE_CANCELLED,
+                description=f"Primitive '{primitive_name}' failed.",
             )
             self.primitive_in_execution = None
         else:
@@ -732,8 +741,8 @@ class Brain:
             task_name = self.primitive_in_execution.name
             self.logger.info(f"Task '{task_name}' interrupted.")
             self.history.add(
-                HistoryEntryType.TASK_INTERRUPTED,
-                description=f"Task '{task_name}' interrupted.",
+                HistoryEntryType.PRIMITIVE_INTERRUPTED,
+                description=f"Primitive '{primitive_name}' interrupted.",
             )
             self.primitive_in_execution = None
         else:
@@ -754,7 +763,7 @@ class Brain:
             task_name = self.primitive_in_execution.name
             entry_text = f"'{task_name}': {feedback_text}"
             self.history.add(
-                HistoryEntryType.TASK_FEEDBACK,
+                HistoryEntryType.PRIMITIVE_FEEDBACK,
                 description=entry_text,
             )
         else:
@@ -806,8 +815,8 @@ class Brain:
                     prim_obj.primitive_id = primitive_id
                 self.primitive_in_execution = prim_obj
                 self.history.add(
-                    HistoryEntryType.TASK_ACTIVATED,
-                    description=f"Task '{task_name}' activated.",
+                    HistoryEntryType.PRIMITIVE_ACTIVATED,
+                    description=f"Primitive {task_name} activated",
                 )
             else:
                 self.primitive_in_execution = None
@@ -1039,7 +1048,7 @@ class Brain:
             )
             entry_text = f"'{primitive_name}': {feedback_message}"
             self.history.add(
-                HistoryEntryType.TASK_FEEDBACK,
+                HistoryEntryType.PRIMITIVE_FEEDBACK,
                 description=entry_text,
             )
         else:

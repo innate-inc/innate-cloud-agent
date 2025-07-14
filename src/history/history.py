@@ -16,16 +16,17 @@ def get_now():
 
 
 class History:
-    NUM_HISTORY_TO_SUMMARIZE = 60
+    NUM_HISTORY_TO_SUMMARIZE = 150
     # Number of entries to consider for get_as_multimodal_list
     # At 0.3-0.4Hz, this value at 5 usually keeps fresh the last 10 seconds of history, the rest is summarized
     # So to get at least 2mn of history at the same rate, we need 5 * 6 * 2 = 60
+    # For 5 minutes, we need 5 * 6 * 5 = 150
     MULTIMODAL_HISTORY_COUNT = (
         500  # We make it very large for now as we don't summarize yet.
     )
 
     def __init__(
-        self, max_recent_generic_images: int = 3, max_recent_pre_action_images: int = 3
+        self, max_recent_generic_images: int = 0, max_recent_pre_action_images: int = 0
     ):
         # Entries that have not yet been summarized.
         self.entries: List[HistoryEntry] = []
@@ -139,19 +140,19 @@ class History:
                                     "message": data["anticipation"],
                                 }
                             )
-                        if "next_task" in data and data["next_task"]:
-                            task = data["next_task"]
-                            task_name = task["name"]
-                            task_inputs = task["inputs"]
+                        if "next_primitive" in data and data["next_primitive"]:
+                            primitive = data["next_primitive"]
+                            primitive_name = primitive["name"]
+                            primitive_inputs = primitive["inputs"]
                             message_lines = [
-                                f"Next task decided: {task_name}",
-                                f"  Inputs: {task_inputs}",
+                                f"Next primitive decided: {primitive_name}",
+                                f"  Inputs: {primitive_inputs}",
                             ]
                             message = "\n".join(message_lines)
                             intermediate_display_entries.append(
                                 {
                                     **entry_data_common,
-                                    "type": DisplayEntryType.NEXT_TASK_DECIDED,
+                                    "type": DisplayEntryType.NEXT_PRIMITIVE_DECIDED,
                                     "message": message,
                                 }
                             )
@@ -169,7 +170,6 @@ class History:
                         {
                             **entry_data_common,
                             "type": DisplayEntryType.SYSTEM_MESSAGE,
-                            # Show raw description if JSON fails
                             "message": entry.description,
                         }
                     )
@@ -216,10 +216,10 @@ class History:
         for entry_dict in intermediate_entries:
             # Pass through types that should not be deduplicated
             if entry_dict["type"] in [
-                DisplayEntryType.TASK_ACTIVATED,
-                DisplayEntryType.TASK_INTERRUPTED,
-                DisplayEntryType.TASK_CANCELLED,
-                DisplayEntryType.TASK_COMPLETED,
+                DisplayEntryType.PRIMITIVE_ACTIVATED,
+                DisplayEntryType.PRIMITIVE_INTERRUPTED,
+                DisplayEntryType.PRIMITIVE_CANCELLED,
+                DisplayEntryType.PRIMITIVE_COMPLETED,
                 # System messages (incl. image placeholders) are not deduped
                 DisplayEntryType.SYSTEM_MESSAGE,
                 DisplayEntryType.AUDIO_IN,
@@ -276,22 +276,22 @@ class History:
             prefix = "Thoughts:"
         elif entry_display_type == DisplayEntryType.ANTICIPATION:
             prefix = "Anticipation:"
-        elif entry_display_type == DisplayEntryType.TASK_ACTIVATED:
-            prefix = "Task Activated:"
-        elif entry_display_type == DisplayEntryType.TASK_INTERRUPTED:
-            prefix = "Task Interrupted:"
-        elif entry_display_type == DisplayEntryType.TASK_CANCELLED:
-            prefix = "Task Cancelled:"
+        elif entry_display_type == DisplayEntryType.PRIMITIVE_ACTIVATED:
+            prefix = "Primitive Activated:"
+        elif entry_display_type == DisplayEntryType.PRIMITIVE_INTERRUPTED:
+            prefix = "Primitive Interrupted:"
+        elif entry_display_type == DisplayEntryType.PRIMITIVE_CANCELLED:
+            prefix = "Primitive Cancelled:"
         elif (
-            entry_display_type == DisplayEntryType.TASK_COMPLETED
+            entry_display_type == DisplayEntryType.PRIMITIVE_COMPLETED
         ):  # Added for completeness
-            prefix = "Task Completed:"
+            prefix = "Primitive Completed:"
         elif entry_display_type == DisplayEntryType.HISTORY_SUMMARY:
             prefix = "Summary:"
-        elif entry_display_type == DisplayEntryType.NEXT_TASK_DECIDED:
-            prefix = "Next Task Decided:"
+        elif entry_display_type == DisplayEntryType.NEXT_PRIMITIVE_DECIDED:
+            prefix = "Next Primitive Decided:"
             suffix_lines = [
-                " I am waiting for confirmation this task gets activated,",
+                " I am waiting for confirmation this primitive gets activated,",
                 " after which I should be aware that it is running until",
                 " cancelled, interrupted, or completed.",
             ]
@@ -459,7 +459,16 @@ class History:
                     )
                 )
             else:
-                # This is a text-based entry or placeholder for a non-selected image
+                # Skip image placeholders entirely - we don't want them in multimodal history
+                # Check if this is an image placeholder by looking at the formatted line content
+                formatted_line = item["formatted_line"]
+                if (
+                    "[Image data]" in formatted_line
+                    or "[Image Before Action]" in formatted_line
+                ):
+                    continue  # Skip image placeholders
+
+                # This is a text-based entry
                 current_text_lines_block.append(item["formatted_line"])
 
         if current_text_lines_block:

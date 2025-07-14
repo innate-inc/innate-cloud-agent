@@ -88,19 +88,19 @@ class HistorySummarizer:
                                     "message": data["anticipation"],
                                 }
                             )
-                        if "next_task" in data and data["next_task"]:
-                            task = data["next_task"]
-                            task_name = task["name"]
-                            task_inputs = task["inputs"]
+                        if "next_primitive" in data and data["next_primitive"]:
+                            primitive = data["next_primitive"]
+                            primitive_name = primitive["name"]
+                            primitive_inputs = primitive["inputs"]
                             message_lines = [
-                                f"Next task decided: {task_name}",
-                                f"  Inputs: {task_inputs}",
+                                f"Next primitive decided: {primitive_name}",
+                                f"  Inputs: {primitive_inputs}",
                             ]
                             message = "\n".join(message_lines)
                             intermediate_display_entries.append(
                                 {
                                     **entry_data_common,
-                                    "type": DisplayEntryType.NEXT_TASK_DECIDED,
+                                    "type": DisplayEntryType.NEXT_PRIMITIVE_DECIDED,
                                     "message": message,
                                 }
                             )
@@ -190,16 +190,16 @@ class HistorySummarizer:
                 prefix = "Thoughts:"
             elif entry_display_type == DisplayEntryType.ANTICIPATION:
                 prefix = "Anticipation:"
-            elif entry_display_type == DisplayEntryType.TASK_ACTIVATED:
-                prefix = "Task Activated:"
-            elif entry_display_type == DisplayEntryType.TASK_INTERRUPTED:
-                prefix = "Task Interrupted:"
-            elif entry_display_type == DisplayEntryType.TASK_CANCELLED:
-                prefix = "Task Cancelled:"
-            elif entry_display_type == DisplayEntryType.TASK_COMPLETED:
-                prefix = "Task Completed:"
-            elif entry_display_type == DisplayEntryType.NEXT_TASK_DECIDED:
-                prefix = "Next Task Decided:"
+            elif entry_display_type == DisplayEntryType.PRIMITIVE_ACTIVATED:
+                prefix = "Primitive Activated:"
+            elif entry_display_type == DisplayEntryType.PRIMITIVE_INTERRUPTED:
+                prefix = "Primitive Interrupted:"
+            elif entry_display_type == DisplayEntryType.PRIMITIVE_CANCELLED:
+                prefix = "Primitive Cancelled:"
+            elif entry_display_type == DisplayEntryType.PRIMITIVE_COMPLETED:
+                prefix = "Primitive Completed:"
+            elif entry_display_type == DisplayEntryType.NEXT_PRIMITIVE_DECIDED:
+                prefix = "Next Primitive Decided:"
             else:
                 # Fallback for any other DisplayEntryType that might be introduced
                 prefix = f"{entry_display_type.value.replace('_', ' ').capitalize()}:"

@@ -365,7 +365,6 @@ def sample_valid_navigation_points(
         )
 
     for angle_robot_rel in angles:
-        print(f"Angle: {angle_robot_rel}")
         for distance in distances:
             # Calculate world coordinates
             # angle_world_vector is the world angle of the vector from robot to point.

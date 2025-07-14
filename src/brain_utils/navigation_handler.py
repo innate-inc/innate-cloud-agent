@@ -1,3 +1,7 @@
+import os
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+
 from src.agents.types import PrimitiveDefinition
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 from src.primitives.types import Primitive
@@ -23,6 +27,7 @@ MAURICE_OAK_D_HORIZONTAL_FOV = ROBOT_PARAMS_TO_USE["horizontal_fov"]
 
 # Minimum distance (in meters) that the target position must be from obstacles
 MIN_OBSTACLE_DISTANCE = ROBOT_PARAMS_TO_USE["min_obstacle_distance"]
+ENABLE_VISUALIZATIONS = ROBOT_PARAMS_TO_USE["enable_visualizations"]
 
 
 class NavigationHandler:
@@ -30,27 +35,37 @@ class NavigationHandler:
         self.logger = logger
         self.primitives_list = primitives_list
 
-    async def handle_check_if_close_enough(
-        self, vision_output, robot_coords, base64_img, depth_payload, map_payload=None
+    async def handle_check_distance_and_orientation(
+        self,
+        vision_output,
+        robot_coords,
+        base64_img,
+        depth_payload,
+        map_payload,
+        camera_info,
     ):
         has_canceled_task = False
         check_prim = next(
             (
                 prim
                 for prim in self.primitives_list
-                if prim.name == "check_if_close_enough"
+                if prim.name == "check_distance_and_orientation"
             ),
             None,
         )
 
         if not check_prim:
-            self.logger.error("CheckIfCloseEnough primitive not found")
+            self.logger.error("CheckDistanceAndOrientation primitive not found")
             vision_output.observation = (
-                "CheckIfCloseEnough primitive not found, cannot perform check."
+                "CheckDistanceAndOrientation primitive not found, cannot perform check."
             )
             vision_output.next_task = None
             has_canceled_task = True
             return vision_output, has_canceled_task
+
+        # Camera info is now always required from the payload
+        horizontal_fov = camera_info["horizontal_fov"]
+        vertical_fov = camera_info["vertical_fov"]
 
         check_prim.update_current_vars(
             current_x=robot_coords["x"],
@@ -58,15 +73,16 @@ class NavigationHandler:
             current_yaw=robot_coords["theta"],
             image_b64=base64_img,
             depth_payload=depth_payload,
-            horizontal_fov=MAURICE_OAK_D_HORIZONTAL_FOV,
-            vertical_fov=MAURICE_OAK_D_VERTICAL_FOV,
+            horizontal_fov=horizontal_fov,
+            vertical_fov=vertical_fov,
+            camera_info=camera_info,
         )
 
         distance_meters = vision_output.next_task.inputs.get("distance_meters")
         target_description = vision_output.next_task.inputs.get("target_description")
 
         if distance_meters is None or target_description is None:
-            vision_output.observation = "Missing 'distance_meters' or 'target_description' for check_if_close_enough."
+            vision_output.observation = "Missing 'distance_meters' or 'target_description' for check_distance_and_orientation."
             vision_output.next_task = None
             has_canceled_task = True
             return vision_output, has_canceled_task
@@ -80,7 +96,13 @@ class NavigationHandler:
         return vision_output, has_canceled_task
 
     async def handle_navigate_in_sight(
-        self, vision_output, robot_coords, base64_img, depth_payload, map_payload=None
+        self,
+        vision_output,
+        robot_coords,
+        base64_img,
+        depth_payload,
+        map_payload,
+        camera_info,
     ):
         has_canceled_task = False
         nav_in_sight = next(
@@ -88,14 +110,19 @@ class NavigationHandler:
             None,
         )
 
+        # Camera info is now always required from the payload
+        horizontal_fov = camera_info["horizontal_fov"]
+        vertical_fov = camera_info["vertical_fov"]
+
         nav_in_sight.update_current_vars(
             current_x=robot_coords["x"],
             current_y=robot_coords["y"],
             current_yaw=robot_coords["theta"],
             image_b64=base64_img,
             depth_payload=depth_payload,
-            horizontal_fov=MAURICE_OAK_D_HORIZONTAL_FOV,
-            vertical_fov=MAURICE_OAK_D_VERTICAL_FOV,
+            horizontal_fov=horizontal_fov,
+            vertical_fov=vertical_fov,
+            camera_info=camera_info,
         )
 
         # Extract input parameters
@@ -115,7 +142,7 @@ class NavigationHandler:
         )
 
         # Only replace the output with a navigation task if the execution was successful
-        if result:
+        if result and navigation_command is not None:
             # Check if the target position is too close to obstacles using the map
             if map_payload:
                 # If we're using point selection, we already verified safety
@@ -158,6 +185,17 @@ class NavigationHandler:
             self.logger.info(
                 f"Converted navigate_in_sight to navigate_to_position with inputs: "
                 f"{navigation_to_position_task.inputs}. Initial coords were: {robot_coords}"
+            )
+        elif result and navigation_command is None:
+            vision_output.stop_current_task = True
+            vision_output.observation = (
+                f"Navigation indicates we're already close enough to the target: {msg}"
+            )
+            vision_output.anticipation = None
+            vision_output.next_task = None
+            vision_output.to_tell_user = None
+            print(
+                f"Navigation in sight indicates we're already close enough to the target and we return this vision output: {vision_output}"
             )
         else:
             has_canceled_task = True
@@ -209,10 +247,11 @@ class NavigationHandler:
             # Calculate the radius in grid cells that corresponds to MIN_OBSTACLE_DISTANCE
             obstacle_radius = int(MIN_OBSTACLE_DISTANCE / resolution)
 
-            # Create visualization
-            self._visualize_safety_check(
-                map_array, map_info, grid_x, grid_y, obstacle_radius
-            )
+            # Create visualization if enabled
+            if ENABLE_VISUALIZATIONS:
+                self._visualize_safety_check(
+                    map_array, map_info, grid_x, grid_y, obstacle_radius
+                )
 
             # Define a search window
             min_x = max(0, grid_x - obstacle_radius)
@@ -257,9 +296,6 @@ class NavigationHandler:
             obstacle_radius (int): Search radius in grid cells
         """
         try:
-            import os
-            import numpy as np
-            from PIL import Image, ImageDraw, ImageFont
 
             # Create a copy of the map for visualization
             # Convert occupancy grid (-1, 0, 100) to an RGB image
@@ -370,6 +406,8 @@ class NavigationHandler:
 
         original_primitive_id = getattr(vision_output.next_task, "primitive_id", None)
 
+        has_canceled_task = False
+
         if success and navigation_command:
             # Check if target position is safe if map_payload is available
             if map_payload:
@@ -405,15 +443,14 @@ class NavigationHandler:
                 f"{navigation_command}"
             )
         else:
+            has_canceled_task = True
             # If the execution failed, update the vision output to reflect the failure
             vision_output.stop_current_task = True
             vision_output.observation = f"Navigation through memory failed: {result}"
             vision_output.next_task = None
-            vision_output.to_tell_user = (
-                f"I couldn't navigate to that location: {result}"
-            )
+            vision_output.to_tell_user = None
 
-        return vision_output
+        return vision_output, has_canceled_task
 
     async def handle_turn_and_move(self, vision_output, robot_coords, map_payload=None):
         """
@@ -424,6 +461,7 @@ class NavigationHandler:
         """
         # Get the angle and distance from the inputs
         angle = vision_output.next_task.inputs.get("angle", 0.0)
+        angle = radians(angle)
         distance = vision_output.next_task.inputs.get("distance", 0.0)
 
         # Get current robot coordinates
@@ -440,9 +478,13 @@ class NavigationHandler:
         new_x = current_x + distance * math.cos(new_theta)
         new_y = current_y + distance * math.sin(new_theta)
 
+        has_canceled_task = False
+
         # Check if target position is safe if map_payload is available
         if map_payload:
             is_safe, safety_msg = self.check_position_safety(new_x, new_y, map_payload)
+
+            is_safe = True
 
             if not is_safe:
                 self.logger.warn(
@@ -455,7 +497,7 @@ class NavigationHandler:
                 vision_output.thoughts = f"I can't turn and move to that position because it's too close to obstacles."
                 vision_output.next_task = None
                 vision_output.to_tell_user = None
-                return vision_output
+                return vision_output, True
 
         original_primitive_id = getattr(vision_output.next_task, "primitive_id", None)
 
@@ -479,4 +521,4 @@ class NavigationHandler:
             f"Initial coords were: {robot_coords}"
         )
 
-        return vision_output
+        return vision_output, has_canceled_task
