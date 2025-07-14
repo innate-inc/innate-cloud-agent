@@ -770,7 +770,6 @@ def _save_base64_image(base64_img: str, filename: str) -> str:
         with open(file_path, "wb") as f:
             f.write(image_data)
 
-        print(f"Saved debug image to {file_path}")
         return str(file_path)
 
     except Exception as e:

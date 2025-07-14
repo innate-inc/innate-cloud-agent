@@ -60,7 +60,6 @@ def save_content_parts_html(
             # Write HTML footer
             f.write(_get_html_footer())
 
-        print(f"Saved content parts HTML to {file_path}")
         return str(file_path)
 
     except Exception as e:
