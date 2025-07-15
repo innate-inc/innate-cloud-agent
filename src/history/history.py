@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import os
 import json
+import math
 import threading
 
 from src.agents.types import MultimodalHistoryItem
@@ -335,7 +336,8 @@ class History:
         position_str = ""
         if "robot_position" in intermediate_entry_dict and intermediate_entry_dict["robot_position"]:
             pos = intermediate_entry_dict["robot_position"]
-            position_str = f" [pos: x={pos.x:.2f}, y={pos.y:.2f}, θ={pos.theta:.2f}]"
+            theta_deg = pos.theta * 180.0 / math.pi  # Convert radians to degrees
+            position_str = f" [pos: x={pos.x:.2f}, y={pos.y:.2f}, θ={theta_deg:.1f}°]"
 
         full_message = f"{message}{suffix}{position_str}"
         return f"{time_str:>{time_col}} | {prefix:<{prefix_col}} {full_message}"

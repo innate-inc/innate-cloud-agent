@@ -10,6 +10,7 @@ from math import atan, radians, tan, degrees
 import math
 from src.utils import decode_map_payload
 from src.brain_utils.clean_logger import clean_logger
+from src.brain_utils.unified_logger import unified_logger, LogLevel, LogSource
 
 
 SIM_VERTICAL_FOV = ROBOT_PARAMS_TO_USE["vertical_fov"]
@@ -485,6 +486,21 @@ class NavigationHandler:
             angle_degrees=angle_degrees,
             distance=distance,
             connection_id=connection_id,
+        )
+        
+        # Log to unified logger
+        unified_logger.info(
+            LogSource.PRIMITIVE,
+            "turn_and_move",
+            f"Executing turn_and_move: angle={angle_degrees}°, distance={distance}m",
+            data={
+                "angle_degrees": angle_degrees,
+                "angle_radians": angle,
+                "distance_meters": distance,
+                "current_position": {"x": current_x, "y": current_y, "theta": current_theta},
+                "target_position": {"x": new_x, "y": new_y, "theta": new_theta},
+            },
+            robot_position={"x": current_x, "y": current_y, "theta": current_theta},
         )
 
         has_canceled_task = False

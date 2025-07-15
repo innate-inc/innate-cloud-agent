@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import asyncio
+import math
 from typing import Optional, List, Union
 from pathlib import Path
 from datetime import datetime
@@ -20,7 +21,7 @@ from src.agents.debug_html_generator import save_content_parts_html
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 # Gemini API constants (matching BAML configuration)
-GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+GEMINI_MODEL_NAME = "gemini-2.5-pro"
 GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64
@@ -73,9 +74,8 @@ Only stop it if:
 
 <navigation_rules>
 - Navigation primitives allow you to get closer to your objective but a completion of a navigation primitive does not mean you're done. You might need to get closer or pursue the navigation objective.
-- A navigation primitive can indicate when it's close to being completed. When that is the case, if you think you need to navigate again, you should stop the current navigation primitive and start a new one.
 - You are provided with previous images of what you saw in <history_of_events>. Pay attention to them when pursuing several navigation primitives.
-- Each entry in your history includes your robot position (x, y coordinates and orientation θ in radians) at that moment. Use this spatial context to understand your movement patterns and make better navigation decisions.
+- Each entry in your history includes your robot position (x, y coordinates and orientation θ in degrees) at that moment. Use this spatial context to understand your movement patterns and make better navigation decisions.
 - Your horizontal field of view is {field_of_view}, keep that in mind when turning. Too big of a turn can make you lose sight of something important, but too small might just make you be very slow.
 </navigation_rules>
 
@@ -336,7 +336,9 @@ class NativeGeminiVisionAgent:
         robot_coordinates = ""
         if vlm_inputs.robot_coords:
             coords = vlm_inputs.robot_coords
-            robot_coordinates = f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={coords.get('theta')}"
+            theta_rad = coords.get('theta', 0.0)
+            theta_deg = theta_rad * 180.0 / math.pi  # Convert radians to degrees
+            robot_coordinates = f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={theta_deg:.1f}° (degrees)"
 
         # Prepare directive section
         directive_section = ""

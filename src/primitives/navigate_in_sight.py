@@ -491,11 +491,13 @@ If there's a need for clarification, explain in the explanation field.
                 unified_logger.log_gemini_request(
                     "navigate_in_sight",
                     user_prompt,
-                    image_data=str(len(img_bytes)) + " bytes",
+                    image_data=base64.b64encode(img_bytes).decode('utf-8'),
+                    robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
                 )
                 unified_logger.log_gemini_response(
                     "navigate_in_sight",
                     response_parsed.model_dump(mode='json'),
+                    robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
                 )
                 
                 # Log to clean logger
@@ -528,7 +530,7 @@ If there's a need for clarification, explain in the explanation field.
             return selected_point_id, None
 
     def _handle_point_selection_response(
-        self, selected_point_id, gemini_response, point_mapping
+        self, selected_point_id, gemini_response, point_mapping, target_description
     ):
         """
         Handle the point selection response and create navigation command.
@@ -552,11 +554,14 @@ If there's a need for clarification, explain in the explanation field.
             unified_logger.info(
                 LogSource.PRIMITIVE,
                 "navigate_in_sight",
-                f"Navigation point {selected_point_id} selected",
+                f"Navigation point {selected_point_id} selected for target: {target_description}",
                 data={
+                    "target_description": target_description,
                     "point_id": selected_point_id,
                     "navigation_command": navigation_command,
+                    "gemini_thoughts": getattr(gemini_response, 'explanation', None) if gemini_response else None,
                 },
+                robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
             )
             return (
                 f"Navigation to point {selected_point_id} initiated",
@@ -737,7 +742,7 @@ If there's a need for clarification, explain in the explanation field.
 
         # Handle the point selection response
         result = self._handle_point_selection_response(
-            selected_point_id, gemini_response, point_mapping
+            selected_point_id, gemini_response, point_mapping, target_description
         )
 
         if result is None and attempt == 0:
@@ -779,9 +784,11 @@ If there's a need for clarification, explain in the explanation field.
             "navigate_in_sight",
             f"Starting navigation to: {target_description}",
             data={
+                "target_description": target_description,
                 "current_position": {"x": self.current_x, "y": self.current_y},
                 "stop_in_front_of_target": stop_in_front_of_target,
             },
+            robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
         )
 
         # Decode the map payload
@@ -824,7 +831,8 @@ If there's a need for clarification, explain in the explanation field.
         unified_logger.error(
             LogSource.PRIMITIVE,
             "navigate_in_sight",
-            "Navigation failed after all attempts",
+            f"Navigation failed after all attempts for target: {target_description}",
+            robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
         )
         return (
             "Navigation failed after all attempts.",

@@ -1,4 +1,5 @@
 from src.primitives.types import Primitive
+from src.brain_utils.unified_logger import unified_logger, LogLevel, LogSource
 import math
 
 
@@ -21,6 +22,19 @@ class TurnAndMove(Primitive):
         # It will be converted to a navigate_to_position task in the Brain
         # Return the parameters for conversion
         
-        angle = math.radians(angle)
-        print(f"Turning and moving {angle} radians and {distance} meters")
-        return {"angle": angle, "distance": distance}, True
+        angle_rad = math.radians(angle)
+        
+        # Log to unified logger
+        unified_logger.info(
+            LogSource.PRIMITIVE,
+            "turn_and_move",
+            f"Executing turn_and_move: angle={angle}°, distance={distance}m",
+            data={
+                "angle_degrees": angle,
+                "angle_radians": angle_rad,
+                "distance_meters": distance,
+            },
+        )
+        
+        print(f"Turning and moving {angle_rad} radians and {distance} meters")
+        return {"angle": angle_rad, "distance": distance}, True

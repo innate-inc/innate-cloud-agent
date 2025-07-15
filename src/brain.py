@@ -154,6 +154,7 @@ class Brain:
                     "brain",
                     f"Processing message: {message_type}",
                     connection_id=self.connection_id,
+                    robot_position=self.current_robot_coords,
                 )
                 time_start = time.time()
 
@@ -184,6 +185,7 @@ class Brain:
                         "to_tell_user": vision_output.to_tell_user,
                     },
                     connection_id=self.connection_id,
+                    robot_position=self.current_robot_coords,
                 )
                 
                 # Log to clean logger with image
@@ -566,6 +568,7 @@ class Brain:
             "brain",
             f"User message received: {text}",
             connection_id=self.connection_id,
+            robot_position=self.current_robot_coords,
         )
         
         # Log to clean logger

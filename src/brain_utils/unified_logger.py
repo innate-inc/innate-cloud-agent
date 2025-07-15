@@ -7,6 +7,7 @@ from the main brain agent and all primitives in a single, unified HTML view.
 
 import json
 import time
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -40,6 +41,8 @@ class LogEntry:
     message: str
     data: Optional[Dict[str, Any]] = None
     connection_id: Optional[str] = None
+    robot_position: Optional[Dict[str, float]] = None  # x, y, theta
+    image_data: Optional[str] = None  # base64 encoded image data
 
 
 class UnifiedLogger:
@@ -69,8 +72,14 @@ class UnifiedLogger:
         message: str,
         data: Optional[Dict[str, Any]] = None,
         connection_id: Optional[str] = None,
+        robot_position: Optional[Dict[str, float]] = None,
+        image_data: Optional[str] = None,
     ):
         """Add a log entry to the unified log."""
+        # Filter out "processing message" logs
+        if "Processing message:" in message:
+            return
+            
         entry = LogEntry(
             timestamp=datetime.now().isoformat(),
             level=level,
@@ -79,6 +88,8 @@ class UnifiedLogger:
             message=message,
             data=data,
             connection_id=connection_id,
+            robot_position=robot_position,
+            image_data=image_data,
         )
 
         with self._lock:
@@ -111,12 +122,17 @@ class UnifiedLogger:
         prompt: str,
         image_data: Optional[str] = None,
         connection_id: Optional[str] = None,
+        robot_position: Optional[Dict[str, float]] = None,
     ):
         """Log a Gemini API request."""
         data = {"prompt": prompt}
         if image_data:
             data["has_image"] = True
-            data["image_size"] = len(image_data)
+            # Don't store the full image data in the data field, just metadata
+            if isinstance(image_data, str) and len(image_data) > 100:
+                data["image_size"] = f"{len(image_data)} characters"
+            else:
+                data["image_size"] = str(image_data)
         
         self.log(
             LogLevel.INFO,
@@ -125,6 +141,8 @@ class UnifiedLogger:
             f"Gemini API request sent",
             data=data,
             connection_id=connection_id,
+            robot_position=robot_position,
+            image_data=image_data if isinstance(image_data, str) and len(image_data) > 100 else None,
         )
 
     def log_gemini_response(
@@ -132,6 +150,7 @@ class UnifiedLogger:
         component: str,
         response: Dict[str, Any],
         connection_id: Optional[str] = None,
+        robot_position: Optional[Dict[str, float]] = None,
     ):
         """Log a Gemini API response."""
         self.log(
@@ -141,6 +160,7 @@ class UnifiedLogger:
             f"Gemini API response received",
             data=response,
             connection_id=connection_id,
+            robot_position=robot_position,
         )
 
     def _generate_html(self):
@@ -297,6 +317,32 @@ class UnifiedLogger:
             color: #6c757d;
             font-family: monospace;
         }}
+        .robot-position {{
+            font-size: 12px;
+            color: #007bff;
+            font-family: monospace;
+            background: #e3f2fd;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+        }}
+        .log-image {{
+            max-width: 300px;
+            max-height: 200px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin: 10px 0;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }}
+        .log-image:hover {{
+            transform: scale(1.05);
+        }}
+        .log-image img {{
+            max-width: 100%;
+            max-height: 100%;
+            display: block;
+        }}
         .auto-refresh {{
             position: fixed;
             top: 20px;
@@ -356,6 +402,22 @@ class UnifiedLogger:
         if entry.connection_id:
             connection_html = f'<span class="connection-id">Connection: {entry.connection_id}</span>'
 
+        robot_position_html = ""
+        if entry.robot_position:
+            x = entry.robot_position.get("x", 0.0)
+            y = entry.robot_position.get("y", 0.0)
+            theta_rad = entry.robot_position.get("theta", 0.0)
+            theta_deg = theta_rad * 180.0 / math.pi  # Convert radians to degrees
+            robot_position_html = f'<span class="robot-position">Robot: ({x:.2f}, {y:.2f}, θ={theta_deg:.1f}°)</span>'
+
+        image_html = ""
+        if entry.image_data:
+            image_html = f"""
+            <div class="log-image-container">
+                <img class="log-image" src="data:image/jpeg;base64,{self._escape_html(entry.image_data)}" alt="Log Image" onclick="window.open('data:image/jpeg;base64,{self._escape_html(entry.image_data)}', '_blank')">
+            </div>
+            """
+
         return f"""
         <div class="log-entry {entry.level.value}">
             <div class="log-header">
@@ -364,12 +426,14 @@ class UnifiedLogger:
                     <span class="log-source {entry.source.value}">{entry.source.value}</span>
                     <span class="log-component">{entry.component}</span>
                     {connection_html}
+                    {robot_position_html}
                 </div>
                 <div class="log-timestamp">{entry.timestamp}</div>
             </div>
             <div class="log-content">
                 <div class="log-message">{self._escape_html(entry.message)}</div>
                 {data_html}
+                {image_html}
             </div>
         </div>"""
 
