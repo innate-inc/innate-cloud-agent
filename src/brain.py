@@ -25,6 +25,8 @@ from src.brain_utils.image_processor import ImageProcessor
 from src.brain_utils.vision_service import VisionAgentType, VisionService
 from src.brain_utils.navigation_handler import NavigationHandler
 from src.brain_utils.memory_state_manager import MemoryStateManager
+from src.brain_utils.unified_logger import unified_logger, LogLevel, LogSource
+from src.brain_utils.clean_logger import clean_logger
 
 
 from src.constants_robots import ROBOT_PARAMS_TO_USE
@@ -46,7 +48,7 @@ class Brain:
         send_callback,
         enable_memory_commands: bool = False,
         max_recent_generic_images: int = 3,
-        max_recent_pre_action_images: int = 3,
+        max_recent_pre_action_images: int = 20,
     ):
         """
         connection_id: an identifier for this brain instance (for logging/debugging)
@@ -69,6 +71,12 @@ class Brain:
         self.enable_memory_commands = enable_memory_commands
         # Current Gemini agent variant to use
         self.gemini_variant = "gemini1"
+        
+        # Store current image for VLM for logging purposes
+        self.current_image_for_vlm = None
+        
+        # Store current robot coordinates for history tracking
+        self.current_robot_coords = None
 
         self.local_primitives_list = [
             NavigateInSight(),
@@ -141,6 +149,12 @@ class Brain:
 
             if message_type not in FREQUENT_MESSAGES_TO_NOT_LOG:
                 self.logger.info(f"Processing message: {message_type}")
+                unified_logger.info(
+                    LogSource.BRAIN,
+                    "brain",
+                    f"Processing message: {message_type}",
+                    connection_id=self.connection_id,
+                )
                 time_start = time.time()
 
             if message_type == MessageInType.IMAGE:
@@ -153,9 +167,33 @@ class Brain:
                     if vision_output.next_task
                     else "None"
                 )
+                processing_time = time.time() - time_start
                 self.logger.info(
-                    f"Processed image message in {time.time() - time_start} seconds, "
+                    f"Processed image message in {processing_time} seconds, "
                     f"sent {'stop and' if vision_output.stop_current_task else ''} task: {task_and_id}\n"
+                )
+                unified_logger.info(
+                    LogSource.BRAIN,
+                    "brain",
+                    f"Vision agent decision: {task_and_id}",
+                    data={
+                        "processing_time": processing_time,
+                        "stop_current_task": vision_output.stop_current_task,
+                        "observation": vision_output.observation,
+                        "thoughts": vision_output.thoughts,
+                        "to_tell_user": vision_output.to_tell_user,
+                    },
+                    connection_id=self.connection_id,
+                )
+                
+                # Log to clean logger with image
+                clean_logger.log_vision_decision(
+                    thoughts=vision_output.thoughts or "",
+                    observation=vision_output.observation or "",
+                    decision=task_and_id,
+                    anticipation=vision_output.anticipation or "",
+                    image_b64=self.current_image_for_vlm,
+                    connection_id=self.connection_id,
                 )
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)
@@ -249,11 +287,13 @@ class Brain:
                 self.history.add(
                     HistoryEntryType.IMAGE_PRE_ACTION,
                     description=current_image_for_vlm,
+                    robot_position=robot_coords,
                 )
             else:
                 self.history.add(
                     HistoryEntryType.GENERIC_IMAGE,
                     description=current_image_for_vlm,
+                    robot_position=robot_coords,
                 )
 
         if not vision_output:
@@ -274,11 +314,16 @@ class Brain:
             )
 
         # Validate the next task
-        vision_output.next_task = (
-            PrimitiveDefinition.model_validate(vision_output.next_task)
-            if vision_output.next_task
-            else None
-        )
+        if vision_output.next_task:
+            # If next_task is already a PrimitiveDefinition, keep it as is
+            if isinstance(vision_output.next_task, PrimitiveDefinition):
+                pass  # Already validated
+            # If next_task is a dict, validate it as a PrimitiveDefinition
+            elif isinstance(vision_output.next_task, dict):
+                vision_output.next_task = PrimitiveDefinition.model_validate(vision_output.next_task)
+            else:
+                # Handle other types if needed
+                vision_output.next_task = PrimitiveDefinition.model_validate(vision_output.next_task)
 
         # Look for discrepancies in the vision output
         # Could be a function later
@@ -309,6 +354,9 @@ class Brain:
             # Make sure next_task has a primitive_id
             if not vision_output.next_task.primitive_id:
                 vision_output.next_task.primitive_id = str(uuid.uuid4())
+
+        # Store the current image for VLM for logging purposes
+        self.current_image_for_vlm = current_image_for_vlm
 
         # Before replacing what we send to the client, we store it locally
         # as it will be used to write to the history.
@@ -354,7 +402,7 @@ class Brain:
             vision_output_to_write_in_history = vision_output.model_copy()
             vision_output, has_canceled_task = (
                 await self.navigation_handler.handle_turn_and_move(
-                    vision_output, robot_coords, map_payload
+                    vision_output, robot_coords, map_payload, self.connection_id
                 )
             )
             if has_canceled_task:
@@ -380,10 +428,12 @@ class Brain:
             self.history.add(
                 HistoryEntryType.PRIMITIVE_ACTIVATED,
                 description=f"Primitive {vision_output.next_task.name} activated",
+                robot_position=robot_coords,
             ),
             self.history.add(
                 HistoryEntryType.PRIMITIVE_COMPLETED,
                 description=f"Primitive {vision_output.next_task.name} completed",
+                robot_position=robot_coords,
             )
             vision_output.next_task = None
 
@@ -477,6 +527,7 @@ class Brain:
                 if vision_output_to_write_in_history
                 else json.dumps(vision_output.model_dump())
             ),
+            robot_position=self.current_robot_coords,
         )
 
         # Send the vision output to the client.
@@ -509,6 +560,19 @@ class Brain:
                           Valid versions: gemini1, gemini2, gemini3, gemini4
         """
         text = message.payload["text"]
+        
+        unified_logger.info(
+            LogSource.BRAIN,
+            "brain",
+            f"User message received: {text}",
+            connection_id=self.connection_id,
+        )
+        
+        # Log to clean logger
+        clean_logger.log_user_message(
+            message=text,
+            connection_id=self.connection_id,
+        )
 
         # Handle Gemini version switch command (always enabled)
         if text.startswith("!gemini"):
@@ -531,6 +595,7 @@ class Brain:
                     self.history.add(
                         HistoryEntryType.SYSTEM_MESSAGE,
                         description=response_text,
+                        robot_position=self.current_robot_coords,
                     )
 
                     await self.send_callback(
@@ -667,7 +732,7 @@ class Brain:
         self.latest_user_message = text
 
         # Record this chat message in the history.
-        self.history.add(HistoryEntryType.AUDIO_IN, description=text)
+        self.history.add(HistoryEntryType.AUDIO_IN, description=text, robot_position=self.current_robot_coords)
 
     async def handle_primitive_completed(self, message: MessageIn):
         """
@@ -690,6 +755,7 @@ class Brain:
             self.history.add(
                 HistoryEntryType.PRIMITIVE_COMPLETED,
                 description=f"Task '{self.primitive_in_execution.name}' completed.",
+                robot_position=self.current_robot_coords,
             )
             self.primitive_in_execution = None
         else:
@@ -717,6 +783,7 @@ class Brain:
             self.history.add(
                 HistoryEntryType.PRIMITIVE_CANCELLED,
                 description=f"Primitive '{primitive_name}' failed.",
+                robot_position=self.current_robot_coords,
             )
             self.primitive_in_execution = None
         else:
@@ -743,6 +810,7 @@ class Brain:
             self.history.add(
                 HistoryEntryType.PRIMITIVE_INTERRUPTED,
                 description=f"Primitive '{primitive_name}' interrupted.",
+                robot_position=self.current_robot_coords,
             )
             self.primitive_in_execution = None
         else:
@@ -765,6 +833,7 @@ class Brain:
             self.history.add(
                 HistoryEntryType.PRIMITIVE_FEEDBACK,
                 description=entry_text,
+                robot_position=self.current_robot_coords,
             )
         else:
             self.logger.warning(
@@ -817,6 +886,7 @@ class Brain:
                 self.history.add(
                     HistoryEntryType.PRIMITIVE_ACTIVATED,
                     description=f"Primitive {task_name} activated",
+                    robot_position=self.current_robot_coords,
                 )
             else:
                 self.primitive_in_execution = None
@@ -1005,7 +1075,9 @@ class Brain:
                     )
 
                 self.history.add(
-                    HistoryEntryType.SYSTEM_MESSAGE, description=history_message
+                    HistoryEntryType.SYSTEM_MESSAGE, 
+                    description=history_message,
+                    robot_position=self.current_robot_coords,
                 )
             except Exception as e:
                 self.logger.error(f"Error registering directive: {e}")
@@ -1050,6 +1122,7 @@ class Brain:
             self.history.add(
                 HistoryEntryType.PRIMITIVE_FEEDBACK,
                 description=entry_text,
+                robot_position=self.current_robot_coords,
             )
         else:
             self.logger.warning(

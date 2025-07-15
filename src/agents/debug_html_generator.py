@@ -8,13 +8,16 @@ of content parts sent to the Gemini API for debugging purposes.
 import os
 import json
 import base64
-from typing import List, Union
+from typing import List, Union, Optional
 from pathlib import Path
 from datetime import datetime
 
 
 def save_content_parts_html(
-    content_parts: List[Union[str, dict]], filename: str, debug_dir: Path
+    content_parts: List[Union[str, dict]],
+    filename: str,
+    debug_dir: Path,
+    response_data: Optional[dict] = None,
 ) -> str:
     """
     Save content parts to an HTML file for debugging, showing actual content as seen by the model.
@@ -57,6 +60,9 @@ def save_content_parts_html(
 
                 f.write(f"    </div>\n\n")
 
+            if response_data:
+                _write_response_part(f, response_data)
+
             # Write HTML footer
             f.write(_get_html_footer())
 
@@ -91,6 +97,14 @@ def _get_html_header() -> str:
             border-radius: 10px;
             margin-bottom: 20px;
             text-align: center;
+        }}
+        .header h1 {{
+            margin: 0;
+            font-size: 28px;
+        }}
+        .header p {{
+            margin: 5px 0 0;
+            font-size: 16px;
         }}
         .part {{
             background: white;
@@ -158,6 +172,9 @@ def _get_html_header() -> str:
             padding: 15px;
             border-radius: 5px;
             border-left: 4px solid #e53e3e;
+        }}
+        .response-header {{
+            background-color: #27ae60; /* A nice green for success */
         }}
     </style>
 </head>
@@ -252,6 +269,19 @@ def _write_dict_part(f, part: dict):
     f.write(f"                <pre>{escape_html(json_str)}</pre>\n")
     f.write(f"            </div>\n")
     f.write(f"        </div>\n")
+
+
+def _write_response_part(f, response_data: dict):
+    """Write a response part with JSON formatting."""
+    f.write('    <div class="part">\n')
+    f.write('        <div class="part-header response-header">✅ GEMINI RESPONSE</div>\n')
+    f.write(f'        <div class="part-content">\n')
+    f.write(f'            <div class="json-content">\n')
+    json_str = json.dumps(response_data, indent=2, ensure_ascii=False)
+    f.write(f"                <pre>{escape_html(json_str)}</pre>\n")
+    f.write(f"            </div>\n")
+    f.write(f"        </div>\n")
+    f.write(f"    </div>\n\n")
 
 
 def _write_unknown_part(f, part):

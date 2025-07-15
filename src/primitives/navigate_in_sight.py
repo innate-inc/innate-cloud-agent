@@ -8,6 +8,11 @@ from google.genai import types
 import os
 from pydantic import BaseModel
 from enum import Enum
+import json
+from pathlib import Path
+from src.agents.debug_html_generator import save_content_parts_html
+from src.brain_utils.unified_logger import unified_logger, LogLevel, LogSource
+from src.brain_utils.clean_logger import clean_logger
 
 # Import utility modules
 from src.primitives.visualization_utils import (
@@ -83,20 +88,51 @@ class NavigateInSight(Primitive):
 
     def guidelines(self):
         return (
-            "To use to navigate to an object or target in sight. Is a much better "
-            "primitive than navigate_to_position to use when it's to navigate to a "
-            "target in sight. Provide a target object description, such as 'in front of shelf', 'on table', "
+            "To use to navigate to an object or target in sight. ONLY WHEN THE TARGET IS IN SIGHT, otherwise use turn and move." 
+            "Provide a target object description, such as 'in front of shelf', 'towards table', "
             "'left of the chair', etc.\n\n"
             "Make sure you precise if it's on the target, or in front of it, or behind it, or to the left or right of it."
             "For example, if we want to pick up an object, we want to be in front of it, but not on it.\n\n"
             "If the goal is next to interact with the target, make sure you ask to stop in front of it.\n\n"
             "After using it, you can use it again to get closer or pursue navigation "
             "in sight if you deem it necessary. Can be very helpful to follow paths or "
-            "navigate to a target that is far."
+            "navigate to a target that is far. When using navigate_in_sight, to explore and navigate, do not use it to navigate to a precise target or you will end up stuck if its too close."
             "It is also naturally used in conjunction with the 'turn_and_move' "
             "primitive to turn and potentially look around if the target is not "
-            "immediately visible but you know it might be around."
+            "immediately visible but you know it might be around. NEVER USE VAGUE TARGETS LIKE :further into the corridor"
         )
+
+    def few_shot_examples(self):
+        """
+        Provide few-shot examples for navigate_in_sight usage.
+        """
+        return [
+            {
+                "image_path": "nav_in_sight_exploration.jpeg",
+                "situation": "Robot is exploring a living room and can see a TV in the distance. The goal is to navigate toward the TV to get a better view of it.",
+                "choice": {
+                    "primitive": "navigate_in_sight",
+                    "parameters": {
+                        "target_description": "towards the left of the wooden table",
+                        "stop_in_front_of_target": True
+                    }
+                },
+                "reasoning": "This is a good choice because 'towards the left of the wooden table' provides a clear intermediate navigation point that stays clear of obstacles while exploring the living room and getting closer to the TV. It avoids navigating directly to the TV which might be blocked, and instead uses a nearby landmark that's visible and accessible."
+            }
+        ]
+
+    def point_selection_few_shot_examples(self):
+        """
+        Provide few-shot examples for point selection within navigate_in_sight.
+        """
+        return [
+            {
+                "image_path": "nav_in_sight_front.jpeg",
+                "target_description": "towards the front of the red bike",
+                "selected_point": 7,
+                "reasoning": "Point 7 is the best choice because it gets the robot on a good trajectory towards the front of the red bike without getting too close. It provides a clear path that avoids obstacles while positioning the robot to approach the bike from the front as requested."
+            }
+        ]
 
     def update_current_vars(
         self,
@@ -165,7 +201,7 @@ class NavigateInSight(Primitive):
             map_info,
             self.horizontal_fov,
             min_obstacle_distance=MIN_OBSTACLE_DISTANCE * 2,
-            distances=[0.5, 1.0, 2.0],
+            distances=[0.5, 0.8, 1.5],
             angles_deg=angles,
         )
 
@@ -308,6 +344,26 @@ class NavigateInSight(Primitive):
 
         return annotated_image
 
+    def _prepare_point_selection_few_shot_examples(self):
+        """
+        Prepare few-shot examples content for point selection.
+        
+        Returns:
+            str: Formatted few-shot examples text for the prompt
+        """
+        examples = self.point_selection_few_shot_examples()
+        if not examples:
+            return ""
+            
+        few_shot_text = "\n**Examples of good point selection:**\n\n"
+        
+        for example in examples:
+            few_shot_text += f"Target: \"{example['target_description']}\"\n"
+            few_shot_text += f"Best point chosen: {example['selected_point']}\n"
+            few_shot_text += f"Why: {example['reasoning']}\n\n"
+            
+        return few_shot_text
+
     def _call_gemini_for_point_selection(
         self, target_description, stop_in_front_of_target, annotated_image
     ):
@@ -327,6 +383,9 @@ class NavigateInSight(Primitive):
         else:
             additional_prompt = ""
 
+        # Prepare few-shot examples text
+        few_shot_text = self._prepare_point_selection_few_shot_examples()
+
         # Create prompt for Gemini to select a navigation point
         user_prompt = f"""
 I need to navigate to: {target_description}
@@ -334,6 +393,8 @@ I need to navigate to: {target_description}
 The image shows several numbered green circles. Each circle represents a safe 
 location I can navigate to.
 Which numbered point should I navigate to based on the description?
+
+{few_shot_text}
 
 Please respond with the number of the best point (1, 2, 3, etc) if you found one.
 
@@ -366,8 +427,32 @@ If there's a need for clarification, explain in the explanation field.
                     mime_type="image/jpeg",
                 )
 
-                # Create content parts: user prompt and the image part
-                message_parts = [user_prompt, image_part]
+                # Start with the user prompt
+                message_parts = [user_prompt]
+                
+                # Add few-shot example images if available
+                few_shot_dir = Path(__file__).parent.parent.parent / "few_shot"
+                examples = self.point_selection_few_shot_examples()
+                
+                for example in examples:
+                    image_path = few_shot_dir / example['image_path']
+                    if image_path.exists():
+                        try:
+                            with open(image_path, 'rb') as f:
+                                example_image_bytes = f.read()
+                            
+                            example_image_part = types.Part.from_bytes(
+                                data=example_image_bytes,
+                                mime_type="image/jpeg",
+                            )
+                            message_parts.append(f"Example image for target '{example['target_description']}' (best choice was point {example['selected_point']}):")
+                            message_parts.append(example_image_part)
+                        except Exception as e:
+                            print(f"Error loading few-shot example image {image_path}: {e}")
+                
+                # Add the current image to analyze
+                message_parts.append("Now, analyze this current image and choose the best point:")
+                message_parts.append(image_part)
 
                 # Call Gemini model using the client
                 response = self.genai_client.models.generate_content(
@@ -386,6 +471,41 @@ If there's a need for clarification, explain in the explanation field.
                     ),
                 )
                 response_parsed = response.parsed
+
+                # Log the request and response for debugging
+                try:
+                    debug_dir = Path("debug_logs/navigate_in_sight")
+                    # Use Pydantic's JSON serialization mode to handle enums properly
+                    response_dict = response_parsed.model_dump(mode='json')
+                    
+                    save_content_parts_html(
+                        content_parts=message_parts,
+                        filename="gemini_request",
+                        debug_dir=debug_dir,
+                        response_data=response_dict,
+                    )
+                except Exception as e:
+                    print(f"Failed to write debug log for navigate_in_sight: {e}")
+
+                # Log to unified logger
+                unified_logger.log_gemini_request(
+                    "navigate_in_sight",
+                    user_prompt,
+                    image_data=str(len(img_bytes)) + " bytes",
+                )
+                unified_logger.log_gemini_response(
+                    "navigate_in_sight",
+                    response_parsed.model_dump(mode='json'),
+                )
+                
+                # Log to clean logger
+                clean_logger.log_navigate_decision(
+                    target=target_description,
+                    prompt=user_prompt,
+                    response=response_parsed.model_dump(mode='json'),
+                    selected_point=str(response_parsed.point_id),
+                    image_b64=base64.b64encode(img_bytes).decode('utf-8'),
+                )
 
                 print(f"Gemini response: {response_parsed}")
 
@@ -428,6 +548,15 @@ If there's a need for clarification, explain in the explanation field.
 
             print(
                 f"Selected navigation point {selected_point_id}: {navigation_command}"
+            )
+            unified_logger.info(
+                LogSource.PRIMITIVE,
+                "navigate_in_sight",
+                f"Navigation point {selected_point_id} selected",
+                data={
+                    "point_id": selected_point_id,
+                    "navigation_command": navigation_command,
+                },
             )
             return (
                 f"Navigation to point {selected_point_id} initiated",
@@ -644,6 +773,16 @@ If there's a need for clarification, explain in the explanation field.
         print(
             f"NavigateInSight: Starting navigation from ({self.current_x}, {self.current_y})"
         )
+        
+        unified_logger.info(
+            LogSource.PRIMITIVE,
+            "navigate_in_sight",
+            f"Starting navigation to: {target_description}",
+            data={
+                "current_position": {"x": self.current_x, "y": self.current_y},
+                "stop_in_front_of_target": stop_in_front_of_target,
+            },
+        )
 
         # Decode the map payload
         try:
@@ -682,6 +821,11 @@ If there's a need for clarification, explain in the explanation field.
                 return result
 
         # This should not be reached, but just in case
+        unified_logger.error(
+            LogSource.PRIMITIVE,
+            "navigate_in_sight",
+            "Navigation failed after all attempts",
+        )
         return (
             "Navigation failed after all attempts.",
             False,

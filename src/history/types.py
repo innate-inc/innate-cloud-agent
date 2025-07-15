@@ -1,6 +1,7 @@
 from enum import Enum
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Optional, Dict, Any
 
 
 class HistoryEntryType(Enum):
@@ -33,7 +34,15 @@ class DisplayEntryType(Enum):
     PRIMITIVE_FEEDBACK = "primitive_feedback"
 
 
+class RobotPosition(BaseModel):
+    """Robot position and orientation data."""
+    x: float
+    y: float
+    theta: float  # orientation in radians
+
+
 class HistoryEntry(BaseModel):
     timestamp: datetime
     type: HistoryEntryType
     description: str
+    robot_position: Optional[RobotPosition] = None

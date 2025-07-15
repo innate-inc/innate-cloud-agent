@@ -25,7 +25,7 @@ GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64
 GEMINI_MAX_OUTPUT_TOKENS = 8192
-THINKING_BUDGET = 0  # Matching BAML config
+THINKING_BUDGET = 1000  # Matching BAML config
 EXECUTION_TIMEOUT = 5  # seconds
 
 # Debug settings
@@ -75,6 +75,7 @@ Only stop it if:
 - Navigation primitives allow you to get closer to your objective but a completion of a navigation primitive does not mean you're done. You might need to get closer or pursue the navigation objective.
 - A navigation primitive can indicate when it's close to being completed. When that is the case, if you think you need to navigate again, you should stop the current navigation primitive and start a new one.
 - You are provided with previous images of what you saw in <history_of_events>. Pay attention to them when pursuing several navigation primitives.
+- Each entry in your history includes your robot position (x, y coordinates and orientation θ in radians) at that moment. Use this spatial context to understand your movement patterns and make better navigation decisions.
 - Your horizontal field of view is {field_of_view}, keep that in mind when turning. Too big of a turn can make you lose sight of something important, but too small might just make you be very slow.
 </navigation_rules>
 
@@ -91,6 +92,8 @@ The fields observation, thoughts, anticipation are here to help you keep track o
 Unless precised by the directive or user, decision-making should be done fast especially when pursuing a navigation objective.
 </speed_rules>
 </operational_guidelines>
+
+{few_shot_examples}
 
 <current_context>
 <history_of_events>
@@ -208,6 +211,11 @@ class NativeGeminiVisionAgent:
                 formatted_text = section["content"].format(**template_vars["text_vars"])
                 if formatted_text.strip():  # Only add non-empty text
                     content_parts.append(formatted_text)
+
+            elif section["type"] == "few_shot_examples":
+                # Add few-shot examples content
+                if template_vars["few_shot_examples_parts"]:
+                    content_parts.extend(template_vars["few_shot_examples_parts"])
 
             elif section["type"] == "multimodal_history":
                 # Add multimodal history content
@@ -347,6 +355,9 @@ class NativeGeminiVisionAgent:
         primitive_names = [prim.name for prim in vlm_inputs.primitives_list]
         available_primitives = ", ".join(primitive_names)
 
+        # Prepare few-shot examples
+        few_shot_examples_parts = self._prepare_few_shot_examples(vlm_inputs.primitives_list)
+
         return {
             "text_vars": {
                 "user_input": user_input,
@@ -364,7 +375,78 @@ class NativeGeminiVisionAgent:
             "multimodal_history_parts": multimodal_history_parts,
             "main_camera_image_part": main_camera_image_part,
             "additional_camera_parts": additional_camera_parts,
+            "few_shot_examples_parts": few_shot_examples_parts,
         }
+
+    def _prepare_few_shot_examples(self, primitives_list) -> List[Union[str, dict]]:
+        """
+        Prepare few-shot examples from primitives that have them.
+        
+        Args:
+            primitives_list: List of primitive definitions
+            
+        Returns:
+            List of content parts for few-shot examples
+        """
+        few_shot_parts = []
+        
+        # Check if we have any few-shot examples
+        has_examples = False
+        for primitive in primitives_list:
+            if hasattr(primitive, 'few_shot_examples') and primitive.few_shot_examples():
+                has_examples = True
+                break
+        
+        if not has_examples:
+            return few_shot_parts
+            
+        # Add few-shot examples section header
+        few_shot_parts.append("""<few_shot_examples>
+Here are some examples of good primitive choices in similar situations:
+
+""")
+        
+        # Get the few_shot directory path
+        few_shot_dir = Path(__file__).parent.parent.parent / "few_shot"
+        
+        # Process each primitive's few-shot examples
+        for primitive in primitives_list:
+            if hasattr(primitive, 'few_shot_examples') and primitive.few_shot_examples():
+                examples = primitive.few_shot_examples()
+                
+                for example in examples:
+                    # Add example description
+                    few_shot_parts.append(f"**Example for {primitive.name}:**")
+                    few_shot_parts.append(f"Situation: {example['situation']}")
+                    
+                    # Load and add the example image
+                    image_path = few_shot_dir / example['image_path']
+                    if image_path.exists():
+                        try:
+                            with open(image_path, 'rb') as f:
+                                image_bytes = f.read()
+                            
+                            image_part = types.Part.from_bytes(
+                                data=image_bytes,
+                                mime_type="image/jpeg",
+                            )
+                            few_shot_parts.append("Example image:")
+                            few_shot_parts.append(image_part)
+                        except Exception as e:
+                            print(f"Error loading few-shot example image {image_path}: {e}")
+                            few_shot_parts.append(f"[Could not load example image: {example['image_path']}]")
+                    else:
+                        few_shot_parts.append(f"[Example image not found: {example['image_path']}]")
+                    
+                    # Add the choice and reasoning
+                    choice = example['choice']
+                    few_shot_parts.append(f"Good choice: {choice['primitive']} with parameters: {choice['parameters']}")
+                    few_shot_parts.append(f"Why this was good: {example['reasoning']}")
+                    few_shot_parts.append("")  # Empty line for spacing
+        
+        few_shot_parts.append("</few_shot_examples>")
+        
+        return few_shot_parts
 
     def _split_template_by_multimodal_placeholders(self, template: str) -> List[dict]:
         """
@@ -381,6 +463,7 @@ class NativeGeminiVisionAgent:
 
         # Define multimodal placeholders and their markers
         multimodal_markers = [
+            ("{few_shot_examples}", "few_shot_examples"),
             ("{multimodal_history}", "multimodal_history"),
             ("{main_camera_image}", "main_camera_image"),
             ("{additional_camera_image}", "additional_camera_image"),

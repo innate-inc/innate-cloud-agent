@@ -9,6 +9,7 @@ from typing import List
 from math import atan, radians, tan, degrees
 import math
 from src.utils import decode_map_payload
+from src.brain_utils.clean_logger import clean_logger
 
 
 SIM_VERTICAL_FOV = ROBOT_PARAMS_TO_USE["vertical_fov"]
@@ -452,7 +453,7 @@ class NavigationHandler:
 
         return vision_output, has_canceled_task
 
-    async def handle_turn_and_move(self, vision_output, robot_coords, map_payload=None):
+    async def handle_turn_and_move(self, vision_output, robot_coords, map_payload=None, connection_id=None):
         """
         Handle the turn_and_move primitive by converting it to a navigate_to_position task.
 
@@ -461,6 +462,7 @@ class NavigationHandler:
         """
         # Get the angle and distance from the inputs
         angle = vision_output.next_task.inputs.get("angle", 0.0)
+        angle_degrees = angle  # Store original degrees for logging
         angle = radians(angle)
         distance = vision_output.next_task.inputs.get("distance", 0.0)
 
@@ -477,6 +479,13 @@ class NavigationHandler:
         #                     y = current_y + distance * sin(new_theta)
         new_x = current_x + distance * math.cos(new_theta)
         new_y = current_y + distance * math.sin(new_theta)
+
+        # Log the turn and move action
+        clean_logger.log_turn_and_move(
+            angle_degrees=angle_degrees,
+            distance=distance,
+            connection_id=connection_id,
+        )
 
         has_canceled_task = False
 

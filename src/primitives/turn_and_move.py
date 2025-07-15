@@ -9,16 +9,18 @@ class TurnAndMove(Primitive):
 
     def guidelines(self):
         return (
-            "Use when you need to turn and then move forward. Provide: "
-            + "1. angle: The angle to turn IN DEGREES (positive is counterclockwise, negative is clockwise)"
-            + "2. distance: The distance to move forward after turning (in meters)."
-            + "This is only to use when asked by the user, if you want to move to something you see in the image, use navigate_in_sight instead."
+            "Use when you need to turn and/or move forward. Provide: "
+            + "1. angle (optional): The angle to turn IN DEGREES (positive is counterclockwise, negative is clockwise). Defaults to 0 (no turn)."
+            + "2. distance (optional): The distance to move forward after turning (in meters). Defaults to 0 (no movement)."
+            + "This is a good primitive to explore, look around, and navigate precisely. Avoid big angles."
+            +"When arriving at a new location, you might want to turn 60 degrees to the right, then 120 degrees to the left to look to your right and to your left to explore. "
         )
 
-    async def execute(self, angle: float, distance: float):
+    async def execute(self, angle: float = 0.0, distance: float = 0.0):
         # This primitive doesn't actually execute the movement itself
         # It will be converted to a navigate_to_position task in the Brain
         # Return the parameters for conversion
+        
         angle = math.radians(angle)
         print(f"Turning and moving {angle} radians and {distance} meters")
         return {"angle": angle, "distance": distance}, True

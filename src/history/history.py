@@ -1,13 +1,13 @@
 from enum import Enum
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import os
 import json
 import threading
 
 from src.agents.types import MultimodalHistoryItem
-from src.history.types import HistoryEntryType, DisplayEntryType, HistoryEntry
+from src.history.types import HistoryEntryType, DisplayEntryType, HistoryEntry, RobotPosition
 from src.history.summarizer import HistorySummarizer
 
 
@@ -60,11 +60,30 @@ class History:
         self,
         entry_type: HistoryEntryType,
         description: str,
+        robot_position: Optional[Dict[str, float]] = None,
     ):
+        """
+        Add a new entry to the history.
+        
+        Args:
+            entry_type: The type of history entry
+            description: The description/content of the entry
+            robot_position: Optional robot position dict with keys 'x', 'y', 'theta'
+        """
+        # Convert robot_position dict to RobotPosition object if provided
+        position_obj = None
+        if robot_position:
+            position_obj = RobotPosition(
+                x=robot_position.get("x", 0.0),
+                y=robot_position.get("y", 0.0),
+                theta=robot_position.get("theta", 0.0),
+            )
+        
         entry = HistoryEntry(
             timestamp=get_now(),
             type=entry_type,
             description=description,
+            robot_position=position_obj,
         )
         self.entries.append(entry)
         self.non_summarized_entries.append(entry)
@@ -110,6 +129,7 @@ class History:
                 "source_index": i,
                 "original_raw_type": entry.type,
                 "original_raw_description": entry.description,
+                "robot_position": entry.robot_position,
             }
 
             if entry.type == HistoryEntryType.VISION_AGENT_OUTPUT:
@@ -311,7 +331,13 @@ class History:
             hours = secs // 3600
             time_str = f"{hours}h ago"
 
-        full_message = f"{message}{suffix}"
+        # Add position information if available
+        position_str = ""
+        if "robot_position" in intermediate_entry_dict and intermediate_entry_dict["robot_position"]:
+            pos = intermediate_entry_dict["robot_position"]
+            position_str = f" [pos: x={pos.x:.2f}, y={pos.y:.2f}, θ={pos.theta:.2f}]"
+
+        full_message = f"{message}{suffix}{position_str}"
         return f"{time_str:>{time_col}} | {prefix:<{prefix_col}} {full_message}"
 
     def _prepare_unified_display_items(
