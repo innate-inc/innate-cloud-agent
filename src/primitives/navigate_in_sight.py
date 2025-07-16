@@ -89,37 +89,38 @@ class NavigateInSight(Primitive):
     def guidelines(self):
         return (
             "To use to navigate to an object or target in sight. ONLY WHEN THE TARGET IS IN SIGHT, otherwise use turn and move." 
-            "Provide a target object description, such as 'in front of shelf', 'towards table', "
-            "'left of the chair', etc.\n\n"
-            "Make sure you precise if it's on the target, or in front of it, or behind it, or to the left or right of it."
-            "For example, if we want to pick up an object, we want to be in front of it, but not on it.\n\n"
-            "If the goal is next to interact with the target, make sure you ask to stop in front of it.\n\n"
+            "Provide a spatial_indicator that MUST be one of: 'Right of the', 'Left of the', 'front of the', 'towards the', 'under the' "
+            "and a target object description.\n\n"
+            "The spatial_indicator specifies the spatial relationship you want with the target object. "
+            "For example, if we want to pick up an object, we want to be 'front of the' it, but not 'towards the' it.\n\n"
+            "If the goal is to interact with the target, make sure you use 'front of the' as the spatial indicator.\n\n"
             "After using it, you can use it again to get closer or pursue navigation "
             "in sight if you deem it necessary. Can be very helpful to follow paths or "
             "navigate to a target that is far. When using navigate_in_sight, to explore and navigate, do not use it to navigate to a precise target or you will end up stuck if its too close."
             "It is also naturally used in conjunction with the 'turn_and_move' "
             "primitive to turn and potentially look around if the target is not "
-            "immediately visible but you know it might be around. NEVER USE VAGUE TARGETS LIKE :further into the corridor"
+            "immediately visible but you know it might be around. NEVER USE VAGUE TARGETS LIKE: further into the corridor"
+            "**IMPORTANT** Always remember that when using this primitive, you are describing where you want to move to another agent that does not have your context and thought, and that can only see the current image, so be as descriptive and clear as possible about the target object based on the image, or it might make the wrong decision."        
         )
 
-    def few_shot_examples(self):
-        """
-        Provide few-shot examples for navigate_in_sight usage.
-        """
-        return [
-            {
-                "image_path": "nav_in_sight_exploration.jpeg",
-                "situation": "Robot is exploring a living room and can see a TV in the distance. The goal is to navigate toward the TV to get a better view of it.",
-                "choice": {
-                    "primitive": "navigate_in_sight",
-                    "parameters": {
-                        "target_description": "towards the left of the wooden table",
-                        "stop_in_front_of_target": True
-                    }
-                },
-                "reasoning": "This is a good choice because 'towards the left of the wooden table' provides a clear intermediate navigation point that stays clear of obstacles while exploring the living room and getting closer to the TV. It avoids navigating directly to the TV which might be blocked, and instead uses a nearby landmark that's visible and accessible."
-            }
-        ]
+    # def few_shot_examples(self):
+    #     """
+    #     Provide few-shot examples for navigate_in_sight usage.
+    #     """
+    #     return [
+    #         {
+    #             "image_path": "nav_in_sight_exploration.jpeg",
+    #             "situation": "Robot is exploring a living room and can see a TV in the distance. The goal is to navigate toward the TV to get a better view of it.",
+    #             "choice": {
+    #                 "primitive": "navigate_in_sight",
+    #                 "parameters": {
+    #                     "spatial_indicator": "Left of the",
+    #                     "target": "wooden table"
+    #                 }
+    #             },
+    #             "reasoning": "This is a good choice because 'Left of the wooden table' provides a clear intermediate navigation point that stays clear of obstacles while exploring the living room and getting closer to the TV. It avoids navigating directly to the TV which might be blocked, and instead uses a nearby landmark that's visible and accessible."
+    #         }
+    #     ]
 
     def point_selection_few_shot_examples(self):
         """
@@ -128,7 +129,7 @@ class NavigateInSight(Primitive):
         return [
             {
                 "image_path": "nav_in_sight_front.jpeg",
-                "target_description": "towards the front of the red bike",
+                "target_description": "front of the red bike",
                 "selected_point": 7,
                 "reasoning": "Point 7 is the best choice because it gets the robot on a good trajectory towards the front of the red bike without getting too close. It provides a clear path that avoids obstacles while positioning the robot to approach the bike from the front as requested."
             }
@@ -760,21 +761,51 @@ If there's a need for clarification, explain in the explanation field.
 
     async def execute(
         self,
-        target_description: str = None,
-        stop_in_front_of_target: bool = True,
+        spatial_indicator: str = None,
+        target: str = None,
         map_payload: dict = None,
     ):
         """
         Execute the navigate_in_sight primitive using point selection.
 
         Args:
-            target_description (str, optional): Description of where to navigate
-            stop_in_front_of_target (bool, optional): Whether to stop in front of the target
+            spatial_indicator (str, optional): Spatial relationship (e.g., 'Right of the', 'Left of the', 'front of the', 'towards the', 'under the')
+            target (str, optional): Description of the target object
             map_payload (dict, optional): Map payload from the robot
 
         Returns:
             tuple: (message, success, navigation_command)
         """
+        
+        # Validate spatial_indicator
+        valid_spatial_indicators = ["Right of the", "Left of the", "front of the", "towards the", "under the"]
+        if spatial_indicator not in valid_spatial_indicators:
+            error_msg = f"Invalid spatial_indicator '{spatial_indicator}'. Must be one of: {', '.join(valid_spatial_indicators)}"
+            unified_logger.error(
+                LogSource.PRIMITIVE,
+                "navigate_in_sight",
+                error_msg,
+                robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
+            )
+            return error_msg, False, None
+            
+        # Validate target
+        if not target or not target.strip():
+            error_msg = "Target description cannot be empty"
+            unified_logger.error(
+                LogSource.PRIMITIVE,
+                "navigate_in_sight",
+                error_msg,
+                robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
+            )
+            return error_msg, False, None
+            
+        # Combine spatial_indicator and target into target_description
+        target_description = f"{spatial_indicator} {target}"
+        
+        # Determine stop_in_front_of_target based on spatial_indicator
+        stop_in_front_of_target = spatial_indicator == "front of the"
+        
         print(
             f"NavigateInSight: Starting navigation from ({self.current_x}, {self.current_y})"
         )
@@ -784,6 +815,8 @@ If there's a need for clarification, explain in the explanation field.
             "navigate_in_sight",
             f"Starting navigation to: {target_description}",
             data={
+                "target": target,
+                "spatial_indicator": spatial_indicator,
                 "target_description": target_description,
                 "current_position": {"x": self.current_x, "y": self.current_y},
                 "stop_in_front_of_target": stop_in_front_of_target,

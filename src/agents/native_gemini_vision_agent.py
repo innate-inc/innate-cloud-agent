@@ -22,8 +22,8 @@ from src.agents.debug_html_generator import save_content_parts_html
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 # Gemini API constants (matching BAML configuration)
-GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
-GEMINI_TEMPERATURE = 0
+GEMINI_MODEL_NAME = "gemini-2.5-flash"
+GEMINI_TEMPERATURE = 0.5
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64
 GEMINI_MAX_OUTPUT_TOKENS = 8192
@@ -42,16 +42,7 @@ USER_PROMPT_TEMPLATE = """
 <history_of_events>
 {multimodal_history}
 </history_of_events>
-
-<main_camera_image>!
-{main_camera_image}
-</main_camera_image>
-
-<user_input>
-{user_input}
-</user_input>
-
-<primitive_in_execution>
+ I saw a room with a table and a pink wall to my right after passing the doorway (when my theta was around -30 degrees), and my cu
 {primitive_in_execution}
 </primitive_in_execution>
 

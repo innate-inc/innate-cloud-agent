@@ -515,6 +515,7 @@ class NavigateThroughMemory(Primitive):
             "Provide a text description of the location, and the robot will search "
             "its memory for matching places and navigate there. "
             "Only to use to navigate long distances to a location you are sure is in the memory."
+            "NOTE: This primitive is automatically converted to navigate_to_position by the brain - this is normal behavior."
         )
 
     async def execute(self, description: str, user_token: str):

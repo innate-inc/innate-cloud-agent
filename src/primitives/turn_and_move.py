@@ -11,10 +11,8 @@ class TurnAndMove(Primitive):
     def guidelines(self):
         return (
             "Use when you need to turn and/or move forward. Provide: "
-            + "1. angle (optional): The angle to turn IN DEGREES (positive is counterclockwise, negative is clockwise). Defaults to 0 (no turn)."
+            + "1. angle (optional): The angle to turn IN DEGREES. **IMPORTANT** positive is counterclockwise, negative is clockwise. Defaults to 0 (no turn)."
             + "2. distance (optional): The distance to move forward after turning (in meters). Defaults to 0 (no movement)."
-            + "This is a good primitive to explore, look around, and navigate precisely. Avoid big angles."
-            +"When arriving at a new location, you might want to turn 60 degrees to the right, then 120 degrees to the left to look to your right and to your left to explore. "
         )
 
     async def execute(self, angle: float = 0.0, distance: float = 0.0):

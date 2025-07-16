@@ -127,19 +127,49 @@ class NavigationHandler:
             camera_info=camera_info,
         )
 
-        # Extract input parameters
-        target_object = vision_output.next_task.inputs.get("target_object")
-        target_description = vision_output.next_task.inputs.get(
-            "target_description", target_object
-        )
-        stop_in_front_of_target = vision_output.next_task.inputs.get(
-            "stop_in_front_of_target", False
-        )
+        # Extract input parameters - updated for new spatial_indicator + target structure
+        spatial_indicator = vision_output.next_task.inputs.get("spatial_indicator")
+        target = vision_output.next_task.inputs.get("target")
+        
+        # Fallback support for old parameter structure (for backwards compatibility)
+        if not spatial_indicator or not target:
+            # Try to extract from old format if present
+            target_object = vision_output.next_task.inputs.get("target_object")
+            target_description = vision_output.next_task.inputs.get(
+                "target_description", target_object
+            )
+            stop_in_front_of_target = vision_output.next_task.inputs.get(
+                "stop_in_front_of_target", False
+            )
+            
+            if target_description:
+                # Try to parse old target_description into spatial_indicator and target
+                # This is a simple fallback - ideally all calls should use new format
+                self.logger.warn(f"Using legacy parameter format for navigate_in_sight: {target_description}")
+                
+                # Default to "towards the" if we can't parse spatial indicator
+                spatial_indicator = "towards the"
+                target = target_description
+                
+                # Try to detect if target_description already contains spatial indicator
+                for indicator in ["Right of the", "Left of the", "front of the", "towards the", "under the"]:
+                    if target_description.startswith(indicator):
+                        spatial_indicator = indicator
+                        target = target_description[len(indicator):].strip()
+                        break
 
-        # Execute the primitive with the appropriate parameters
+        # Validate that we have the required parameters
+        if not spatial_indicator or not target:
+            self.logger.error(f"Missing required parameters for navigate_in_sight: spatial_indicator='{spatial_indicator}', target='{target}'")
+            vision_output.stop_current_task = True
+            vision_output.observation = "Navigation failed: missing spatial indicator or target"
+            vision_output.next_task = None
+            return vision_output, True
+
+        # Execute the primitive with the new parameters
         msg, result, navigation_command = await nav_in_sight.execute(
-            stop_in_front_of_target=stop_in_front_of_target,
-            target_description=target_description,
+            spatial_indicator=spatial_indicator,
+            target=target,
             map_payload=map_payload,
         )
 
