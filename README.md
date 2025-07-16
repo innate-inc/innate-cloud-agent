@@ -22,6 +22,12 @@ docker compose -f docker-compose.benchmark.yml build
 docker compose -f docker-compose.benchmark.yml up
 ```
 
+
+to get logs in terminal
+```bash
+docker logs -f innate-cloud-agent-websocket-server-1
+```
+
 ### Memory State Management
 
 Cloud Agent includes a memory state management feature that allows saving and loading brain states. This feature is:

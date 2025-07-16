@@ -2,6 +2,8 @@ import os
 import json
 import base64
 import asyncio
+import math
+import importlib.resources
 from typing import Optional, List, Union
 from pathlib import Path
 from datetime import datetime
@@ -16,7 +18,6 @@ from src.agents.native_gemini_schema_builder import (
     VisionAgentOutput,
     convert_to_brain_compatible_output,
 )
-from src.agents.debug_html_generator import save_content_parts_html
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 # Gemini API constants (matching BAML configuration)
@@ -31,79 +32,15 @@ EXECUTION_TIMEOUT = 5  # seconds
 # Debug settings
 SAVE_DEBUG_DATA = True
 DEBUG_DATA_DIR = Path("test_data/debug_native_gemini_html")
+SYSTEM_PROMPT_FILENAME = "system_prompt.md"
 
-# Template for the main prompt
-VISION_AGENT_PROMPT_TEMPLATE = """<system_role>
-You are a robot navigating and executing primitives in a home.
 
-You are following a directive (defined in <directive>) that guides your actions, and you can pick primitives to execute to achieve your goal.
-
-You have to decide what to do right now based on the current image you see (in <main_camera_image>), the history of your actions and observations (in <history_of_events>), and the current primitive that is being executed (in <primitive_in_execution>).
-
-You are also being provided with what the user most recently said (in <user_input>).
-</system_role>
-
-<operational_guidelines>
-<choosing_next_primitive>
-**IF NO PRIMITIVE IS RUNNING:**
-- Look at your directive and what you see in the image
-- Choose the primitive that makes the most progress toward your goal
-- If the user just gave you a command, prioritize that
-- You don't have to start a new primitive if you think you should stay idle
-</choosing_next_primitive>
-
-<stopping_running_primitives>
-**IF A PRIMITIVE IS CURRENTLY RUNNING:**
-Only stop it if:
-- The user explicitly told you to stop it.
-- Your directive clearly requires stopping it.
-- You clearly can assess the primitive has completed its goal.
-- You clearly can assess that something is wrong and you need to stop it.
-
-**DO NOT STOP** running primitives for any other reason. When in doubt, let it continue.
-</stopping_running_primitives>
-
-<communication>
-**TALK TO THE USER** when:
-- They just spoke to you and expect a response
-- You're in a situation where the directive requires you to communicate with the user
-
-**WAIT** if you just spoke to them seconds ago and they might still be responding. The history of events indicates if you're still talking. Do not talk over yourself!
-</communication>
-
-<navigation_rules>
-- Navigation primitives allow you to get closer to your objective but a completion of a navigation primitive does not mean you're done. You might need to get closer or pursue the navigation objective.
-- A navigation primitive can indicate when it's close to being completed. When that is the case, if you think you need to navigate again, you should stop the current navigation primitive and start a new one.
-- You are provided with previous images of what you saw in <history_of_events>. Pay attention to them when pursuing several navigation primitives.
-- Your horizontal field of view is {field_of_view}, keep that in mind when turning. Too big of a turn can make you lose sight of something important, but too small might just make you be very slow.
-</navigation_rules>
-
-<awareness_rules>
-- Pay attention if your <history_of_events> indicates you are stuck or repeating the same actions without progress. If that is the case, try to change your approach.
-- If you seem stuck for more than 30 seconds, this where you should start acting and changing actions or plan.
-</awareness_rules>
-
-<planning_rules>
-The fields observation, thoughts, anticipation are here to help you keep track of a bigger plan to achieve your directive. You can use them to plan your next actions, but you can also completely change your plan if you think you should.
-</planning_rules>
-
-<speed_rules>
-Unless precised by the directive or user, decision-making should be done fast especially when pursuing a navigation objective.
-</speed_rules>
-</operational_guidelines>
-
+# Template for the user message
+USER_PROMPT_TEMPLATE = """
 <current_context>
 <history_of_events>
 {multimodal_history}
 </history_of_events>
-
-<main_camera_image>
-{main_camera_image}
-</main_camera_image>
-
-<user_input>
-{user_input}
-</user_input>
 
 <primitive_in_execution>
 {primitive_in_execution}
@@ -123,65 +60,89 @@ Unless precised by the directive or user, decision-making should be done fast es
 
 {additional_camera_image}
 </current_context>
-
-<available_primitives>
-You can only use one of the following primitives: {available_primitives}.
-</available_primitives>
-
-<response_requirements>
-Use the following fields in your response:
-
-- "observation": Describe what you see in the image as an internal thought
-- "thoughts": Think about what you should do (or not do) based on the observation and context
-- "stop_current_primitive": Decide whether to stop the current primitive
-- "anticipation": Consider what might happen next and leave mental notes for future reference
-- "to_tell_user": Communicate something to the user (if needed)
-- "next_primitive": Specify which primitive to execute next (if any)
-</response_requirements>
 """
 
 
 class NativeGeminiVisionAgent:
     """
     Native Google Gemini implementation replacing BAML-based vision agent.
+    This version uses a system prompt and user message structure.
     """
 
-    def __init__(self):
+    def __init__(self, primitives_list: List):
         """Initialize the native Gemini client."""
-        self.client = None
-        self._initialize_client()
+        self.model = None
+        self._initialize_client(primitives_list)
 
-    def _initialize_client(self):
+    def _initialize_client(self, primitives_list: List):
         """Initialize the Google Gemini client."""
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable is required")
 
         try:
+            # Use the Client-based approach like other files in the codebase
             self.client = genai.Client(api_key=api_key)
-            print("Native Gemini client initialized successfully.")
+            # Store system instruction for later use
+            self.system_instruction = self._prepare_system_instruction(primitives_list)
+            print("Native Gemini client with system prompt initialized successfully.")
         except Exception as e:
             raise ValueError(f"Failed to initialize Gemini client: {e}")
 
-    def _prepare_multimodal_content(
+    def _prepare_system_instruction(
+        self, primitives_list: List
+    ) -> List[Union[str, dict]]:
+        """
+        Load and prepare the system instruction content, including few-shot examples.
+        """
+        # Load the base system prompt template
+        try:
+            with importlib.resources.files("src.agents").joinpath(
+                SYSTEM_PROMPT_FILENAME
+            ).open("r", encoding="utf-8") as f:
+                prompt_template = f.read()
+        except Exception as e:
+            raise RuntimeError(f"Failed to load system prompt template: {e}")
+
+        # Prepare template variables
+        primitive_names = [prim.name for prim in primitives_list]
+        available_primitives = ", ".join(primitive_names)
+        field_of_view = ROBOT_PARAMS_TO_USE["horizontal_fov"]
+
+        # Split the template to insert few-shot examples
+        template_parts = prompt_template.split("{few_shot_examples}")
+        text_before_examples = template_parts[0]
+        text_after_examples = template_parts[1] if len(template_parts) > 1 else ""
+
+        # Format text parts
+        text_before_examples = text_before_examples.format(
+            field_of_view=field_of_view
+        )
+        text_after_examples = text_after_examples.format(
+            available_primitives=available_primitives
+        )
+
+        # Prepare few-shot examples
+        few_shot_examples_parts = self._prepare_few_shot_examples(primitives_list)
+
+        # Combine all parts
+        system_instruction_parts = []
+        if text_before_examples.strip():
+            system_instruction_parts.append(text_before_examples)
+
+        if few_shot_examples_parts:
+            system_instruction_parts.extend(few_shot_examples_parts)
+
+        if text_after_examples.strip():
+            system_instruction_parts.append(text_after_examples)
+
+        return system_instruction_parts
+
+    def _prepare_user_message_content(
         self, vlm_inputs: MultimodalVisionAgentInput
     ) -> List[Union[str, dict]]:
         """
-        Prepare multimodal content for Gemini API call using integrated template formatting.
-
-        Args:
-            vlm_inputs: Input data containing images and text
-
-        Returns:
-            List of content parts for Gemini API
-        """
-        return self._format_multimodal_template(vlm_inputs)
-
-    def _format_multimodal_template(
-        self, vlm_inputs: MultimodalVisionAgentInput
-    ) -> List[Union[str, dict]]:
-        """
-        Format the multimodal template with integrated image and text content.
+        Prepare multimodal content for the user message in a Gemini API call.
 
         This function handles special placeholders in the template and returns
         a list of content parts that preserves the order and context.
@@ -190,7 +151,7 @@ class NativeGeminiVisionAgent:
             vlm_inputs: Input data
 
         Returns:
-            List of content parts for Gemini API
+            List of content parts for the user message
         """
         content_parts = []
 
@@ -199,7 +160,7 @@ class NativeGeminiVisionAgent:
 
         # Split the template into sections and process each part
         template_sections = self._split_template_by_multimodal_placeholders(
-            VISION_AGENT_PROMPT_TEMPLATE
+            USER_PROMPT_TEMPLATE
         )
 
         for section in template_sections:
@@ -328,7 +289,9 @@ class NativeGeminiVisionAgent:
         robot_coordinates = ""
         if vlm_inputs.robot_coords:
             coords = vlm_inputs.robot_coords
-            robot_coordinates = f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={coords.get('theta')}"
+            theta_rad = coords.get('theta', 0.0)
+            theta_deg = theta_rad * 180.0 / math.pi  # Convert radians to degrees
+            robot_coordinates = f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={theta_deg:.1f}° (degrees)"
 
         # Prepare directive section
         directive_section = ""
@@ -347,6 +310,9 @@ class NativeGeminiVisionAgent:
         primitive_names = [prim.name for prim in vlm_inputs.primitives_list]
         available_primitives = ", ".join(primitive_names)
 
+        # Prepare few-shot examples
+        few_shot_examples_parts = self._prepare_few_shot_examples(vlm_inputs.primitives_list)
+
         return {
             "text_vars": {
                 "user_input": user_input,
@@ -354,17 +320,87 @@ class NativeGeminiVisionAgent:
                 "robot_position": robot_coordinates,
                 "directive": directive_section,
                 "current_primitive_guidelines": primitive_guidelines,
-                "available_primitives": available_primitives,
+                # Note: available_primitives and fov moved to system prompt
                 # Note: multimodal placeholders are handled separately
                 "multimodal_history": history_of_events,  # Fallback text version
                 "main_camera_image": "[Image will be displayed here]",  # Placeholder text
                 "additional_camera_image": "",  # Placeholder text
-                "field_of_view": ROBOT_PARAMS_TO_USE["horizontal_fov"],
             },
             "multimodal_history_parts": multimodal_history_parts,
             "main_camera_image_part": main_camera_image_part,
             "additional_camera_parts": additional_camera_parts,
+            # Note: few-shot examples moved to system prompt
         }
+
+    def _prepare_few_shot_examples(self, primitives_list) -> List[Union[str, dict]]:
+        """
+        Prepare few-shot examples from primitives that have them.
+        
+        Args:
+            primitives_list: List of primitive definitions
+            
+        Returns:
+            List of content parts for few-shot examples
+        """
+        few_shot_parts = []
+        
+        # Check if we have any few-shot examples
+        has_examples = False
+        for primitive in primitives_list:
+            if hasattr(primitive, 'few_shot_examples') and primitive.few_shot_examples():
+                has_examples = True
+                break
+        
+        if not has_examples:
+            return few_shot_parts
+            
+        # Add few-shot examples section header
+        few_shot_parts.append("""<few_shot_examples>
+Here are some examples of good primitive choices in similar situations:
+
+""")
+        
+        # Get the few_shot directory path
+        few_shot_dir = Path(__file__).parent.parent.parent / "few_shot"
+        
+        # Process each primitive's few-shot examples
+        for primitive in primitives_list:
+            if hasattr(primitive, 'few_shot_examples') and primitive.few_shot_examples():
+                examples = primitive.few_shot_examples()
+                
+                for example in examples:
+                    # Add example description
+                    few_shot_parts.append(f"**Example for {primitive.name}:**")
+                    few_shot_parts.append(f"Situation: {example['situation']}")
+                    
+                    # Load and add the example image
+                    image_path = few_shot_dir / example['image_path']
+                    if image_path.exists():
+                        try:
+                            with open(image_path, 'rb') as f:
+                                image_bytes = f.read()
+                            
+                            image_part = types.Part.from_bytes(
+                                data=image_bytes,
+                                mime_type="image/jpeg",
+                            )
+                            few_shot_parts.append("Example image:")
+                            few_shot_parts.append(image_part)
+                        except Exception as e:
+                            print(f"Error loading few-shot example image {image_path}: {e}")
+                            few_shot_parts.append(f"[Could not load example image: {example['image_path']}]")
+                    else:
+                        few_shot_parts.append(f"[Example image not found: {example['image_path']}]")
+                    
+                    # Add the choice and reasoning
+                    choice = example['choice']
+                    few_shot_parts.append(f"Good choice: {choice['primitive']} with parameters: {choice['parameters']}")
+                    few_shot_parts.append(f"Why this was good: {example['reasoning']}")
+                    few_shot_parts.append("")  # Empty line for spacing
+        
+        few_shot_parts.append("</few_shot_examples>")
+        
+        return few_shot_parts
 
     def _split_template_by_multimodal_placeholders(self, template: str) -> List[dict]:
         """
@@ -381,6 +417,7 @@ class NativeGeminiVisionAgent:
 
         # Define multimodal placeholders and their markers
         multimodal_markers = [
+            # Note: few_shot_examples is now in the system prompt
             ("{multimodal_history}", "multimodal_history"),
             ("{main_camera_image}", "main_camera_image"),
             ("{additional_camera_image}", "additional_camera_image"),
@@ -429,8 +466,13 @@ class NativeGeminiVisionAgent:
         Returns:
             Parsed response from Gemini
         """
-        # Prepare multimodal content
-        content_parts = self._prepare_multimodal_content(vlm_inputs)
+        # Prepare user message content
+        user_message_parts = self._prepare_user_message_content(vlm_inputs)
+        
+        # Prepend system instruction to the user message
+        content_parts = []
+        content_parts.extend(self.system_instruction)
+        content_parts.extend(user_message_parts)
 
         # Create response schema (Pydantic model)
         response_schema = create_gemini_schema(vlm_inputs.primitives_list)
@@ -446,11 +488,6 @@ class NativeGeminiVisionAgent:
             response_schema=response_schema,
         )
 
-        # SAVE TO FILE
-        if SAVE_DEBUG_DATA:
-            save_content_parts_html(
-                content_parts, "gemini_content_parts", DEBUG_DATA_DIR
-            )
 
         # Use asyncio.to_thread to run the synchronous call in a thread
         response = await asyncio.to_thread(
@@ -509,7 +546,7 @@ async def native_gemini_vision_agent_multimodal_history(
                 _save_base64_image(image_b64, f"additional_{camera_type}")
 
     # Initialize the agent
-    agent = NativeGeminiVisionAgent()
+    agent = NativeGeminiVisionAgent(vlm_inputs.primitives_list)
 
     try:
         # Call with retry logic

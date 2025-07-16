@@ -300,11 +300,12 @@ class ImageProcessor:
             except IOError:
                 font = ImageFont.load_default()
 
+            theta_deg = robot_coords['theta'] * 180.0 / math.pi  # Convert radians to degrees
             metadata_text = (
                 f"Resolution: {resolution:.3f}m/pixel, "
                 f"Size: {map_info['width']}x{map_info['height']}, "
                 f"Robot: ({robot_coords['x']:.2f}, {robot_coords['y']:.2f}, "
-                f"{robot_coords['theta']:.2f})"
+                f"{theta_deg:.1f}°)"
             )
 
             draw.text((10, 10), metadata_text, font=font, fill=(255, 0, 0))

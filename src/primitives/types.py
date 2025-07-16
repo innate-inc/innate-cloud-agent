@@ -1,5 +1,6 @@
 # %%
 from abc import ABC, abstractmethod
+from typing import List, Dict, Any, Optional
 
 
 class Primitive(ABC):
@@ -39,6 +40,21 @@ class Primitive(ABC):
         Subclasses may override this method if guidelines are available.
         """
         return None
+
+    def few_shot_examples(self) -> List[Dict[str, Any]]:
+        """
+        Optionally provide few-shot examples for this primitive.
+        
+        Each example should be a dictionary with:
+        - 'image_path': Path to the example image (relative to few_shot directory)
+        - 'situation': Description of the situation
+        - 'choice': The primitive choice and parameters that were made
+        - 'reasoning': Why this choice was good
+        
+        Returns:
+            List of few-shot example dictionaries
+        """
+        return []
 
     def set_feedback_callback(self, callback):
         """Sets the feedback callback function."""

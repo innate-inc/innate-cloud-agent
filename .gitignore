@@ -20,3 +20,6 @@ depth_maps/
 *.webp
 
 memory_states/
+test_data/
+debug_logs/
+multimodal_history.json

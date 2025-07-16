@@ -8,6 +8,9 @@ from google.genai import types
 import os
 from pydantic import BaseModel
 from enum import Enum
+import json
+from pathlib import Path
+from src.brain_utils.unified_logger import unified_logger, LogLevel, LogSource
 
 # Import utility modules
 from src.primitives.visualization_utils import (
@@ -83,20 +86,52 @@ class NavigateInSight(Primitive):
 
     def guidelines(self):
         return (
-            "To use to navigate to an object or target in sight. Is a much better "
-            "primitive than navigate_to_position to use when it's to navigate to a "
-            "target in sight. Provide a target object description, such as 'in front of shelf', 'on table', "
-            "'left of the chair', etc.\n\n"
-            "Make sure you precise if it's on the target, or in front of it, or behind it, or to the left or right of it."
-            "For example, if we want to pick up an object, we want to be in front of it, but not on it.\n\n"
-            "If the goal is next to interact with the target, make sure you ask to stop in front of it.\n\n"
+            "To use to navigate to an object or target in sight. ONLY WHEN THE TARGET IS IN SIGHT, otherwise use turn and move." 
+            "Provide a spatial_indicator that MUST be one of: 'Right of the', 'Left of the', 'front of the', 'towards the', 'under the' "
+            "and a target object description.\n\n"
+            "The spatial_indicator specifies the spatial relationship you want with the target object. "
+            "For example, if we want to pick up an object, we want to be 'front of the' it, but not 'towards the' it.\n\n"
+            "If the goal is to interact with the target, make sure you use 'front of the' as the spatial indicator.\n\n"
             "After using it, you can use it again to get closer or pursue navigation "
             "in sight if you deem it necessary. Can be very helpful to follow paths or "
-            "navigate to a target that is far."
+            "navigate to a target that is far. When using navigate_in_sight, to explore and navigate, do not use it to navigate to a precise target or you will end up stuck if its too close."
             "It is also naturally used in conjunction with the 'turn_and_move' "
             "primitive to turn and potentially look around if the target is not "
-            "immediately visible but you know it might be around."
+            "immediately visible but you know it might be around. NEVER USE VAGUE TARGETS LIKE: further into the corridor"
+            "**IMPORTANT** Always remember that when using this primitive, you are describing where you want to move to another agent that does not have your context and thought, and that can only see the current image, so be as descriptive and clear as possible about the target object based on the image, or it might make the wrong decision."        
         )
+
+    # def few_shot_examples(self):
+    #     """
+    #     Provide few-shot examples for navigate_in_sight usage.
+    #     """
+    #     return [
+    #         {
+    #             "image_path": "nav_in_sight_exploration.jpeg",
+    #             "situation": "Robot is exploring a living room and can see a TV in the distance. The goal is to navigate toward the TV to get a better view of it.",
+    #             "choice": {
+    #                 "primitive": "navigate_in_sight",
+    #                 "parameters": {
+    #                     "spatial_indicator": "Left of the",
+    #                     "target": "wooden table"
+    #                 }
+    #             },
+    #             "reasoning": "This is a good choice because 'Left of the wooden table' provides a clear intermediate navigation point that stays clear of obstacles while exploring the living room and getting closer to the TV. It avoids navigating directly to the TV which might be blocked, and instead uses a nearby landmark that's visible and accessible."
+    #         }
+    #     ]
+
+    def point_selection_few_shot_examples(self):
+        """
+        Provide few-shot examples for point selection within navigate_in_sight.
+        """
+        return [
+            {
+                "image_path": "nav_in_sight_front.jpeg",
+                "target_description": "front of the red bike",
+                "selected_point": 7,
+                "reasoning": "Point 7 is the best choice because it gets the robot on a good trajectory towards the front of the red bike without getting too close. It provides a clear path that avoids obstacles while positioning the robot to approach the bike from the front as requested."
+            }
+        ]
 
     def update_current_vars(
         self,
@@ -165,7 +200,7 @@ class NavigateInSight(Primitive):
             map_info,
             self.horizontal_fov,
             min_obstacle_distance=MIN_OBSTACLE_DISTANCE * 2,
-            distances=[0.5, 1.0, 2.0],
+            distances=[0.5, 0.8, 1.5],
             angles_deg=angles,
         )
 
@@ -308,6 +343,26 @@ class NavigateInSight(Primitive):
 
         return annotated_image
 
+    def _prepare_point_selection_few_shot_examples(self):
+        """
+        Prepare few-shot examples content for point selection.
+        
+        Returns:
+            str: Formatted few-shot examples text for the prompt
+        """
+        examples = self.point_selection_few_shot_examples()
+        if not examples:
+            return ""
+            
+        few_shot_text = "\n**Examples of good point selection:**\n\n"
+        
+        for example in examples:
+            few_shot_text += f"Target: \"{example['target_description']}\"\n"
+            few_shot_text += f"Best point chosen: {example['selected_point']}\n"
+            few_shot_text += f"Why: {example['reasoning']}\n\n"
+            
+        return few_shot_text
+
     def _call_gemini_for_point_selection(
         self, target_description, stop_in_front_of_target, annotated_image
     ):
@@ -327,6 +382,9 @@ class NavigateInSight(Primitive):
         else:
             additional_prompt = ""
 
+        # Prepare few-shot examples text
+        few_shot_text = self._prepare_point_selection_few_shot_examples()
+
         # Create prompt for Gemini to select a navigation point
         user_prompt = f"""
 I need to navigate to: {target_description}
@@ -334,6 +392,8 @@ I need to navigate to: {target_description}
 The image shows several numbered green circles. Each circle represents a safe 
 location I can navigate to.
 Which numbered point should I navigate to based on the description?
+
+{few_shot_text}
 
 Please respond with the number of the best point (1, 2, 3, etc) if you found one.
 
@@ -366,8 +426,32 @@ If there's a need for clarification, explain in the explanation field.
                     mime_type="image/jpeg",
                 )
 
-                # Create content parts: user prompt and the image part
-                message_parts = [user_prompt, image_part]
+                # Start with the user prompt
+                message_parts = [user_prompt]
+                
+                # Add few-shot example images if available
+                few_shot_dir = Path(__file__).parent.parent.parent / "few_shot"
+                examples = self.point_selection_few_shot_examples()
+                
+                for example in examples:
+                    image_path = few_shot_dir / example['image_path']
+                    if image_path.exists():
+                        try:
+                            with open(image_path, 'rb') as f:
+                                example_image_bytes = f.read()
+                            
+                            example_image_part = types.Part.from_bytes(
+                                data=example_image_bytes,
+                                mime_type="image/jpeg",
+                            )
+                            message_parts.append(f"Example image for target '{example['target_description']}' (best choice was point {example['selected_point']}):")
+                            message_parts.append(example_image_part)
+                        except Exception as e:
+                            print(f"Error loading few-shot example image {image_path}: {e}")
+                
+                # Add the current image to analyze
+                message_parts.append("Now, analyze this current image and choose the best point:")
+                message_parts.append(image_part)
 
                 # Call Gemini model using the client
                 response = self.genai_client.models.generate_content(
@@ -386,6 +470,21 @@ If there's a need for clarification, explain in the explanation field.
                     ),
                 )
                 response_parsed = response.parsed
+
+
+
+                # Log to unified logger
+                unified_logger.log_gemini_request(
+                    "navigate_in_sight",
+                    user_prompt,
+                    image_data=base64.b64encode(img_bytes).decode('utf-8'),
+                    robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
+                )
+                unified_logger.log_gemini_response(
+                    "navigate_in_sight",
+                    response_parsed.model_dump(mode='json'),
+                    robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
+                )
 
                 print(f"Gemini response: {response_parsed}")
 
@@ -408,7 +507,7 @@ If there's a need for clarification, explain in the explanation field.
             return selected_point_id, None
 
     def _handle_point_selection_response(
-        self, selected_point_id, gemini_response, point_mapping
+        self, selected_point_id, gemini_response, point_mapping, target_description
     ):
         """
         Handle the point selection response and create navigation command.
@@ -428,6 +527,18 @@ If there's a need for clarification, explain in the explanation field.
 
             print(
                 f"Selected navigation point {selected_point_id}: {navigation_command}"
+            )
+            unified_logger.info(
+                LogSource.PRIMITIVE,
+                "navigate_in_sight",
+                f"Navigation point {selected_point_id} selected for target: {target_description}",
+                data={
+                    "target_description": target_description,
+                    "point_id": selected_point_id,
+                    "navigation_command": navigation_command,
+                    "gemini_thoughts": getattr(gemini_response, 'explanation', None) if gemini_response else None,
+                },
+                robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
             )
             return (
                 f"Navigation to point {selected_point_id} initiated",
@@ -608,7 +719,7 @@ If there's a need for clarification, explain in the explanation field.
 
         # Handle the point selection response
         result = self._handle_point_selection_response(
-            selected_point_id, gemini_response, point_mapping
+            selected_point_id, gemini_response, point_mapping, target_description
         )
 
         if result is None and attempt == 0:
@@ -626,23 +737,67 @@ If there's a need for clarification, explain in the explanation field.
 
     async def execute(
         self,
-        target_description: str = None,
-        stop_in_front_of_target: bool = True,
+        spatial_indicator: str = None,
+        target: str = None,
         map_payload: dict = None,
     ):
         """
         Execute the navigate_in_sight primitive using point selection.
 
         Args:
-            target_description (str, optional): Description of where to navigate
-            stop_in_front_of_target (bool, optional): Whether to stop in front of the target
+            spatial_indicator (str, optional): Spatial relationship (e.g., 'Right of the', 'Left of the', 'front of the', 'towards the', 'under the')
+            target (str, optional): Description of the target object
             map_payload (dict, optional): Map payload from the robot
 
         Returns:
             tuple: (message, success, navigation_command)
         """
+        
+        # Validate spatial_indicator
+        valid_spatial_indicators = ["Right of the", "Left of the", "front of the", "towards the", "under the"]
+        if spatial_indicator not in valid_spatial_indicators:
+            error_msg = f"Invalid spatial_indicator '{spatial_indicator}'. Must be one of: {', '.join(valid_spatial_indicators)}"
+            unified_logger.error(
+                LogSource.PRIMITIVE,
+                "navigate_in_sight",
+                error_msg,
+                robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
+            )
+            return error_msg, False, None
+            
+        # Validate target
+        if not target or not target.strip():
+            error_msg = "Target description cannot be empty"
+            unified_logger.error(
+                LogSource.PRIMITIVE,
+                "navigate_in_sight",
+                error_msg,
+                robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
+            )
+            return error_msg, False, None
+            
+        # Combine spatial_indicator and target into target_description
+        target_description = f"{spatial_indicator} {target}"
+        
+        # Determine stop_in_front_of_target based on spatial_indicator
+        stop_in_front_of_target = spatial_indicator == "front of the"
+        
         print(
             f"NavigateInSight: Starting navigation from ({self.current_x}, {self.current_y})"
+        )
+        
+        unified_logger.info(
+            LogSource.PRIMITIVE,
+            "navigate_in_sight",
+            f"Starting navigation to: {target_description}",
+            data={
+                "target": target,
+                "spatial_indicator": spatial_indicator,
+                "target_description": target_description,
+                "current_position": {"x": self.current_x, "y": self.current_y},
+                "stop_in_front_of_target": stop_in_front_of_target,
+            },
+            robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
         )
 
         # Decode the map payload
@@ -682,6 +837,12 @@ If there's a need for clarification, explain in the explanation field.
                 return result
 
         # This should not be reached, but just in case
+        unified_logger.error(
+            LogSource.PRIMITIVE,
+            "navigate_in_sight",
+            f"Navigation failed after all attempts for target: {target_description}",
+            robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
+        )
         return (
             "Navigation failed after all attempts.",
             False,
