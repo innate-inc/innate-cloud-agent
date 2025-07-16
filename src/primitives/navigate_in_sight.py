@@ -471,15 +471,7 @@ If there's a need for clarification, explain in the explanation field.
                 )
                 response_parsed = response.parsed
 
-                # Log the request and response for debugging
-                try:
-                    debug_dir = Path("debug_logs/navigate_in_sight")
-                    # Use Pydantic's JSON serialization mode to handle enums properly
-                    response_dict = response_parsed.model_dump(mode='json')
-                    
 
-                except Exception as e:
-                    print(f"Failed to write debug log for navigate_in_sight: {e}")
 
                 # Log to unified logger
                 unified_logger.log_gemini_request(

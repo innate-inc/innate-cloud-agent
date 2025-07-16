@@ -21,12 +21,12 @@ from src.agents.native_gemini_schema_builder import (
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 # Gemini API constants (matching BAML configuration)
-GEMINI_MODEL_NAME = "gemini-2.5-flash"
-GEMINI_TEMPERATURE = 0.5
+GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64
 GEMINI_MAX_OUTPUT_TOKENS = 8192
-THINKING_BUDGET = 1000  # Matching BAML config
+THINKING_BUDGET = 0  # Matching BAML config
 EXECUTION_TIMEOUT = 5  # seconds
 
 # Debug settings
@@ -41,7 +41,8 @@ USER_PROMPT_TEMPLATE = """
 <history_of_events>
 {multimodal_history}
 </history_of_events>
- I saw a room with a table and a pink wall to my right after passing the doorway (when my theta was around -30 degrees), and my cu
+
+<primitive_in_execution>
 {primitive_in_execution}
 </primitive_in_execution>
 

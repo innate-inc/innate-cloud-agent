@@ -46,8 +46,8 @@ class Brain:
         connection_id: str,
         send_callback,
         enable_memory_commands: bool = False,
-        max_recent_generic_images: int = 0,
-        max_recent_pre_action_images: int = 3,
+        max_recent_generic_images: int = 2,
+        max_recent_pre_action_images: int = 5,
     ):
         """
         connection_id: an identifier for this brain instance (for logging/debugging)
