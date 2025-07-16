@@ -10,9 +10,7 @@ from pydantic import BaseModel
 from enum import Enum
 import json
 from pathlib import Path
-from src.agents.debug_html_generator import save_content_parts_html
 from src.brain_utils.unified_logger import unified_logger, LogLevel, LogSource
-from src.brain_utils.clean_logger import clean_logger
 
 # Import utility modules
 from src.primitives.visualization_utils import (
@@ -479,12 +477,7 @@ If there's a need for clarification, explain in the explanation field.
                     # Use Pydantic's JSON serialization mode to handle enums properly
                     response_dict = response_parsed.model_dump(mode='json')
                     
-                    save_content_parts_html(
-                        content_parts=message_parts,
-                        filename="gemini_request",
-                        debug_dir=debug_dir,
-                        response_data=response_dict,
-                    )
+
                 except Exception as e:
                     print(f"Failed to write debug log for navigate_in_sight: {e}")
 
@@ -499,15 +492,6 @@ If there's a need for clarification, explain in the explanation field.
                     "navigate_in_sight",
                     response_parsed.model_dump(mode='json'),
                     robot_position={"x": self.current_x, "y": self.current_y, "theta": 0.0},
-                )
-                
-                # Log to clean logger
-                clean_logger.log_navigate_decision(
-                    target=target_description,
-                    prompt=user_prompt,
-                    response=response_parsed.model_dump(mode='json'),
-                    selected_point=str(response_parsed.point_id),
-                    image_b64=base64.b64encode(img_bytes).decode('utf-8'),
                 )
 
                 print(f"Gemini response: {response_parsed}")

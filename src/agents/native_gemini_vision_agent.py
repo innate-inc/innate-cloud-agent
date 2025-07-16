@@ -18,7 +18,6 @@ from src.agents.native_gemini_schema_builder import (
     VisionAgentOutput,
     convert_to_brain_compatible_output,
 )
-from src.agents.debug_html_generator import save_content_parts_html
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 # Gemini API constants (matching BAML configuration)
@@ -488,11 +487,6 @@ Here are some examples of good primitive choices in similar situations:
             response_schema=response_schema,
         )
 
-        # SAVE TO FILE
-        if SAVE_DEBUG_DATA:
-            save_content_parts_html(
-                content_parts, "gemini_content_parts", DEBUG_DATA_DIR
-            )
 
         # Use asyncio.to_thread to run the synchronous call in a thread
         response = await asyncio.to_thread(

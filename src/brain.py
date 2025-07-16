@@ -26,7 +26,6 @@ from src.brain_utils.vision_service import VisionAgentType, VisionService
 from src.brain_utils.navigation_handler import NavigationHandler
 from src.brain_utils.memory_state_manager import MemoryStateManager
 from src.brain_utils.unified_logger import unified_logger, LogLevel, LogSource
-from src.brain_utils.clean_logger import clean_logger
 
 
 from src.constants_robots import ROBOT_PARAMS_TO_USE
@@ -188,15 +187,7 @@ class Brain:
                     robot_position=self.current_robot_coords,
                 )
                 
-                # Log to clean logger with image
-                clean_logger.log_vision_decision(
-                    thoughts=vision_output.thoughts or "",
-                    observation=vision_output.observation or "",
-                    decision=task_and_id,
-                    anticipation=vision_output.anticipation or "",
-                    image_b64=self.current_image_for_vlm,
-                    connection_id=self.connection_id,
-                )
+               
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)
             elif message_type == MessageInType.CHAT_IN:
@@ -569,12 +560,6 @@ class Brain:
             f"User message received: {text}",
             connection_id=self.connection_id,
             robot_position=self.current_robot_coords,
-        )
-        
-        # Log to clean logger
-        clean_logger.log_user_message(
-            message=text,
-            connection_id=self.connection_id,
         )
 
         # Handle Gemini version switch command (always enabled)
