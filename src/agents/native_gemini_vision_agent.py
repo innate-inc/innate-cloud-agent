@@ -162,7 +162,7 @@ class NativeGeminiVisionAgent:
 
         # Split the template into sections and process each part
         template_sections = self._split_template_by_multimodal_placeholders(
-            VISION_AGENT_PROMPT_TEMPLATE
+            USER_PROMPT_TEMPLATE
         )
 
         for section in template_sections:
@@ -334,7 +334,6 @@ class NativeGeminiVisionAgent:
                 "multimodal_history": history_of_events,  # Fallback text version
                 "main_camera_image": "[Image will be displayed here]",  # Placeholder text
                 "additional_camera_image": "",  # Placeholder text
-                "field_of_view": ROBOT_PARAMS_TO_USE["horizontal_fov"],
             },
             "multimodal_history_parts": multimodal_history_parts,
             "main_camera_image_part": main_camera_image_part,
@@ -407,6 +406,12 @@ class NativeGeminiVisionAgent:
         # Prepare multimodal content
         content_parts = self._prepare_multimodal_content(vlm_inputs)
 
+        # Prepare system instruction
+        system_prompt = get_system_prompt()
+        formatted_system_instruction = system_prompt.format(
+            field_of_view=ROBOT_PARAMS_TO_USE["horizontal_fov"]
+        )
+
         # Create response schema (Pydantic model)
         response_schema = create_gemini_schema(vlm_inputs.primitives_list)
 
@@ -433,6 +438,7 @@ class NativeGeminiVisionAgent:
             model=GEMINI_MODEL_NAME,
             contents=content_parts,
             config=generation_config,
+            system_instruction=formatted_system_instruction,
         )
 
         # Parse the response and convert to brain-compatible format

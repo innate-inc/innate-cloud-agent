@@ -33,6 +33,7 @@ To enable memory state management when running locally:
 ```bash
 python run_server.py --enable-memory-commands
 ```
+gcloud compute ssh --zone "us-central1-c" "benchmark-agent-instance" --project "innate-agent" --ssh-flag="-X"
 
 #### Memory Commands (when enabled)
 
