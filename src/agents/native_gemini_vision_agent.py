@@ -111,7 +111,6 @@ class NativeGeminiVisionAgent:
 
     def __init__(self):
         """Initialize the native Gemini client."""
-        self.client = None
         self._initialize_client()
 
     def _initialize_client(self):
@@ -121,7 +120,7 @@ class NativeGeminiVisionAgent:
             raise ValueError("GEMINI_API_KEY environment variable is required")
 
         try:
-            self.client = genai.Client(api_key=api_key)
+            genai.configure(api_key=api_key)
             print("Native Gemini client initialized successfully.")
         except Exception as e:
             raise ValueError(f"Failed to initialize Gemini client: {e}")
@@ -431,14 +430,18 @@ class NativeGeminiVisionAgent:
             save_content_parts_html(
                 content_parts, "gemini_content_parts", DEBUG_DATA_DIR
             )
+        
+        # Create a GenerativeModel instance
+        model = genai.GenerativeModel(
+            model_name=GEMINI_MODEL_NAME,
+            system_instruction=formatted_system_instruction,
+        )
 
         # Use asyncio.to_thread to run the synchronous call in a thread
         response = await asyncio.to_thread(
-            self.client.models.generate_content,
-            model=GEMINI_MODEL_NAME,
+            model.generate_content,
             contents=content_parts,
-            config=generation_config,
-            system_instruction=formatted_system_instruction,
+            generation_config=generation_config,
         )
 
         # Parse the response and convert to brain-compatible format
