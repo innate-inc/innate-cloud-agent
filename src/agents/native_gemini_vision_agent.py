@@ -291,7 +291,19 @@ class NativeGeminiVisionAgent:
         robot_coordinates = ""
         if vlm_inputs.robot_coords:
             coords = vlm_inputs.robot_coords
-            robot_coordinates = f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={coords.get('theta')}"
+            def _round_or_none(val):
+                try:
+                    return round(float(val), 2)
+                except (TypeError, ValueError):
+                    return val
+            x = _round_or_none(coords.get('x'))
+            y = _round_or_none(coords.get('y'))
+            z = _round_or_none(coords.get('z'))
+            theta = _round_or_none(coords.get('theta'))
+            robot_coordinates = (
+                f"Your coordinates if useful to know are: "
+                f"x={x}, y={y}, z={z}, theta={theta}"
+            )
 
         # Prepare directive section
         directive_section = ""
