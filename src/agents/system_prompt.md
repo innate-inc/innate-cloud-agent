@@ -57,6 +57,10 @@ Unless precised by the directive or user, decision-making should be done fast es
 </speed_rules>
 </operational_guidelines>
 
+<available_primitives>
+You can only use one of the following primitives: {available_primitives}.
+</available_primitives>
+
 <response_requirements>
 Use the following fields in your response:
 

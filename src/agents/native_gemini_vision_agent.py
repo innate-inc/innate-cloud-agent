@@ -32,8 +32,11 @@ EXECUTION_TIMEOUT = 5  # seconds
 SAVE_DEBUG_DATA = True
 DEBUG_DATA_DIR = Path("test_data/debug_native_gemini_html")
 
-# Template for the user prompt (context-specific content)
-USER_PROMPT_TEMPLATE = """<current_context>
+# System prompt file path
+SYSTEM_PROMPT_FILE = Path(__file__).parent / "system_prompt.md"
+
+# Template for the user context (without system instructions)
+USER_CONTEXT_TEMPLATE = """<current_context>
 <history_of_events>
 {multimodal_history}
 </history_of_events>
@@ -63,45 +66,7 @@ USER_PROMPT_TEMPLATE = """<current_context>
 </current_primitive_guidelines>
 
 {additional_camera_image}
-</current_context>
-
-<available_primitives>
-You can only use one of the following primitives: {available_primitives}.
-</available_primitives>
-"""
-
-
-def load_system_prompt() -> str:
-    """
-    Load the system prompt from the markdown file.
-    
-    Returns:
-        String containing the system prompt
-    """
-    try:
-        system_prompt_path = Path(__file__).parent / "system_prompt.md"
-        with open(system_prompt_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except Exception as e:
-        print(f"Error loading system prompt: {e}")
-        raise ValueError(f"Failed to load system prompt from file: {e}")
-
-
-# Cache the system prompt to avoid repeated file reads
-_SYSTEM_PROMPT = None
-
-
-def get_system_prompt() -> str:
-    """
-    Get the cached system prompt, loading it if necessary.
-    
-    Returns:
-        String containing the system prompt
-    """
-    global _SYSTEM_PROMPT
-    if _SYSTEM_PROMPT is None:
-        _SYSTEM_PROMPT = load_system_prompt()
-    return _SYSTEM_PROMPT
+</current_context>"""
 
 
 class NativeGeminiVisionAgent:
@@ -111,7 +76,10 @@ class NativeGeminiVisionAgent:
 
     def __init__(self):
         """Initialize the native Gemini client."""
+        self.client = None
+        self.system_prompt = None
         self._initialize_client()
+        self._load_system_prompt()
 
     def _initialize_client(self):
         """Initialize the Google Gemini client."""
@@ -120,10 +88,36 @@ class NativeGeminiVisionAgent:
             raise ValueError("GEMINI_API_KEY environment variable is required")
 
         try:
-            genai.configure(api_key=api_key)
+            self.client = genai.Client(api_key=api_key)
             print("Native Gemini client initialized successfully.")
         except Exception as e:
             raise ValueError(f"Failed to initialize Gemini client: {e}")
+
+    def _load_system_prompt(self):
+        """Load the system prompt from the markdown file."""
+        try:
+            with open(SYSTEM_PROMPT_FILE, 'r', encoding='utf-8') as f:
+                self.system_prompt = f.read()
+            print("System prompt loaded successfully.")
+        except Exception as e:
+            raise ValueError(f"Failed to load system prompt from {SYSTEM_PROMPT_FILE}: {e}")
+
+    def _format_system_prompt(self, vlm_inputs: MultimodalVisionAgentInput) -> str:
+        """Format the system prompt with dynamic values."""
+        if not self.system_prompt:
+            raise ValueError("System prompt not loaded")
+        
+        # Prepare available primitives
+        primitive_names = [prim.name for prim in vlm_inputs.primitives_list]
+        available_primitives = ", ".join(primitive_names)
+        
+        # Format system prompt with dynamic values
+        formatted_system_prompt = self.system_prompt.format(
+            available_primitives=available_primitives,
+            field_of_view=ROBOT_PARAMS_TO_USE["horizontal_fov"]
+        )
+        
+        return formatted_system_prompt
 
     def _prepare_multimodal_content(
         self, vlm_inputs: MultimodalVisionAgentInput
@@ -161,7 +155,7 @@ class NativeGeminiVisionAgent:
 
         # Split the template into sections and process each part
         template_sections = self._split_template_by_multimodal_placeholders(
-            USER_PROMPT_TEMPLATE
+            USER_CONTEXT_TEMPLATE
         )
 
         for section in template_sections:
@@ -290,19 +284,7 @@ class NativeGeminiVisionAgent:
         robot_coordinates = ""
         if vlm_inputs.robot_coords:
             coords = vlm_inputs.robot_coords
-            def _round_or_none(val):
-                try:
-                    return round(float(val), 2)
-                except (TypeError, ValueError):
-                    return val
-            x = _round_or_none(coords.get('x'))
-            y = _round_or_none(coords.get('y'))
-            z = _round_or_none(coords.get('z'))
-            theta = _round_or_none(coords.get('theta'))
-            robot_coordinates = (
-                f"Your coordinates if useful to know are: "
-                f"x={x}, y={y}, z={z}, theta={theta}"
-            )
+            robot_coordinates = f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={coords.get('theta')}"
 
         # Prepare directive section
         directive_section = ""
@@ -333,6 +315,7 @@ class NativeGeminiVisionAgent:
                 "multimodal_history": history_of_events,  # Fallback text version
                 "main_camera_image": "[Image will be displayed here]",  # Placeholder text
                 "additional_camera_image": "",  # Placeholder text
+                "field_of_view": ROBOT_PARAMS_TO_USE["horizontal_fov"],
             },
             "multimodal_history_parts": multimodal_history_parts,
             "main_camera_image_part": main_camera_image_part,
@@ -402,20 +385,18 @@ class NativeGeminiVisionAgent:
         Returns:
             Parsed response from Gemini
         """
-        # Prepare multimodal content
+        # Prepare multimodal content (user context only)
         content_parts = self._prepare_multimodal_content(vlm_inputs)
 
-        # Prepare system instruction
-        system_prompt = get_system_prompt()
-        formatted_system_instruction = system_prompt.format(
-            field_of_view=ROBOT_PARAMS_TO_USE["horizontal_fov"]
-        )
+        # Format system prompt with dynamic values
+        formatted_system_prompt = self._format_system_prompt(vlm_inputs)
 
         # Create response schema (Pydantic model)
         response_schema = create_gemini_schema(vlm_inputs.primitives_list)
 
-        # Make the API call using the new genai.Client API
+        # Make the API call using the new genai.Client API with system instruction
         generation_config = types.GenerateContentConfig(
+            system_instruction=formatted_system_prompt,
             temperature=GEMINI_TEMPERATURE,
             top_p=GEMINI_TOP_P,
             top_k=GEMINI_TOP_K,
@@ -430,18 +411,13 @@ class NativeGeminiVisionAgent:
             save_content_parts_html(
                 content_parts, "gemini_content_parts", DEBUG_DATA_DIR
             )
-        
-        # Create a GenerativeModel instance
-        model = genai.GenerativeModel(
-            model_name=GEMINI_MODEL_NAME,
-            system_instruction=formatted_system_instruction,
-        )
 
         # Use asyncio.to_thread to run the synchronous call in a thread
         response = await asyncio.to_thread(
-            model.generate_content,
+            self.client.models.generate_content,
+            model=GEMINI_MODEL_NAME,
             contents=content_parts,
-            generation_config=generation_config,
+            config=generation_config,
         )
 
         # Parse the response and convert to brain-compatible format
