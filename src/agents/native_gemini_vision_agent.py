@@ -284,7 +284,9 @@ class NativeGeminiVisionAgent:
         robot_coordinates = ""
         if vlm_inputs.robot_coords:
             coords = vlm_inputs.robot_coords
-            robot_coordinates = f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={coords.get('theta')}"
+            theta_rad = coords.get('theta', 0.0)
+            theta_deg = theta_rad * 180.0 / math.pi  # Convert radians to degrees
+            robot_coordinates = f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={theta_deg:.1f}° (degrees)"
 
         # Prepare directive section
         directive_section = ""

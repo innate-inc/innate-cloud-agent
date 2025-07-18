@@ -1,6 +1,7 @@
 from enum import Enum
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Optional, Dict, Any
 
 
 class HistoryEntryType(Enum):
@@ -37,3 +38,4 @@ class HistoryEntry(BaseModel):
     timestamp: datetime
     type: HistoryEntryType
     description: str
+    robot_coords: Optional[Dict[str, Any]] = None  # Optional robot coordinates

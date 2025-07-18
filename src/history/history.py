@@ -1,10 +1,11 @@
 from enum import Enum
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import os
 import json
 import threading
+import math
 
 from src.agents.types import MultimodalHistoryItem
 from src.history.types import HistoryEntryType, DisplayEntryType, HistoryEntry
@@ -60,11 +61,13 @@ class History:
         self,
         entry_type: HistoryEntryType,
         description: str,
+        robot_coords: Optional[Dict[str, Any]] = None,
     ):
         entry = HistoryEntry(
             timestamp=get_now(),
             type=entry_type,
             description=description,
+            robot_coords=robot_coords,
         )
         self.entries.append(entry)
         self.non_summarized_entries.append(entry)
@@ -364,15 +367,30 @@ class History:
             ) and source_idx in selected_image_source_indices
 
             if is_selected_for_multimodal_image_role:
-                # Create and add the "This is what I was seeing." text item first
+                # Get the original entry to access robot coordinates
+                original_entry = entries_to_process[source_idx]
+                
+                # Create coordinate information for pre-action images
+                prefix_message = "This is what I was seeing."
+                if (original_raw_type == HistoryEntryType.IMAGE_PRE_ACTION and 
+                    original_entry.robot_coords):
+                    coords = original_entry.robot_coords
+                    x = coords.get('x', 0.0)
+                    y = coords.get('y', 0.0)
+                    theta = coords.get('theta', 0.0)
+                    # Convert theta from radians to degrees for display
+                    theta_deg = theta * 180.0 / math.pi
+                    prefix_message = f"This is what I was seeing at position (x={x:.2f}, y={y:.2f}, θ={theta_deg:.1f}°)."
+                
+                # Create and add the prefix text item
                 prefix_text_intermediate_entry = {
                     "timestamp": d_entry["timestamp"],  # Use image's timestamp
                     "type": DisplayEntryType.SYSTEM_MESSAGE,
-                    "message": "This is what I was seeing.",
+                    "message": prefix_message,
                     # Pass through other fields; safer for formatter.
                     "source_index": d_entry["source_index"],
                     "original_raw_type": DisplayEntryType.SYSTEM_MESSAGE,  # Arbitrary
-                    "original_raw_description": "This is what you were seeing.",
+                    "original_raw_description": prefix_message,
                 }
                 prefix_formatted_line = self._format_intermediate_entry_to_string(
                     prefix_text_intermediate_entry, now
