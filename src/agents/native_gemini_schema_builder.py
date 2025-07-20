@@ -96,8 +96,14 @@ def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
         if input_fields:
             inputs_model = create_model(inputs_model_name, **input_fields)
         else:
-            # For primitives with no inputs, create empty model
-            inputs_model = create_model(inputs_model_name)
+            # For primitives with no inputs, create model with dummy field to avoid empty object schema
+            inputs_model = create_model(
+                inputs_model_name,
+                dummy=(
+                    str,
+                    Field("", description="No inputs required for this primitive"),
+                ),
+            )
 
         # Create primitive model for this primitive
         primitive_model_name = primitive.name
@@ -197,6 +203,9 @@ def convert_to_brain_compatible_output(
                     for k, v in gemini_output.next_primitive.inputs.__dict__.items()
                     if not k.startswith("_")
                 }
+
+            # Filter out dummy field used for empty input primitives
+            inputs_dict = {k: v for k, v in inputs_dict.items() if k != "dummy"}
 
         # Create a PrimitiveDefinition-compatible dictionary
         next_primitive_dict = {
