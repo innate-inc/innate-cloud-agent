@@ -423,7 +423,8 @@ class NavigationHandler:
                         f"I can't navigate to that position because it's too close to obstacles. "
                         f"{safety_msg}"
                     )
-                    return vision_output
+                    has_canceled_task = True
+                    return vision_output, has_canceled_task
 
             # Replace the output with a navigate_to_position primitive
             navigation_to_position_task = PrimitiveDefinition(
