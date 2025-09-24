@@ -43,8 +43,10 @@ class ImageProcessor:
 
         # Validate required map payload
         if "map" not in payload:
-            raise ValueError("Missing required 'map' in payload")
-        map_payload = payload["map"]
+            self.logger.warn("Missing required 'map' in payload")
+            map_payload = None
+        else:
+            map_payload = payload["map"]
 
         # Depth payload is now optional
         depth_payload = payload.get("depth")
