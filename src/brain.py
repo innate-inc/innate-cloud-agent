@@ -3,6 +3,7 @@ import json
 import time
 from typing import Dict, Optional
 import uuid
+import traceback
 
 
 from src.baml_client.partial_types import VisionAgentOutput
@@ -68,7 +69,7 @@ class Brain:
         # Whether memory state commands are enabled
         self.enable_memory_commands = enable_memory_commands
         # Current Gemini agent variant to use
-        self.gemini_variant = "gemini1"
+        self.gemini_variant = "gemini-flash"
 
         self.local_primitives_list = [
             NavigateInSight(),
@@ -179,8 +180,6 @@ class Brain:
                 await self.handle_unknown(message)
 
         except Exception as e:
-            import traceback
-
             self.logger.error(
                 f"Error processing message: {e}\n{traceback.format_exc()}"
             )
@@ -506,7 +505,7 @@ class Brain:
 
         Other commands (always enabled):
         - !gemini VERSION: Switches the Gemini version used by the vision agent
-                          Valid versions: gemini1, gemini2, gemini3, gemini4
+                          Valid versions: gemini-flash, gemini-flash-lite, gemini-er
         """
         text = message.payload["text"]
 
@@ -515,7 +514,7 @@ class Brain:
             parts = text.split(maxsplit=1)
             if len(parts) > 1:
                 requested_variant = parts[1].strip().lower()
-                valid_variants = ["gemini1", "gemini2", "gemini3", "gemini4"]
+                valid_variants = ["gemini-flash", "gemini-flash-lite", "gemini-er"]
 
                 if requested_variant in valid_variants:
                     old_variant = self.gemini_variant
@@ -549,7 +548,7 @@ class Brain:
                 response_text = (
                     f"Current Gemini variant: '{self.gemini_variant}'\n"
                     f"To change, use: !gemini VERSION\n"
-                    f"Valid versions: gemini1, gemini2, gemini3, gemini4"
+                    f"Valid versions: gemini-flash, gemini-flash-lite, gemini-er"
                 )
                 await self.send_callback(
                     MessageOut(type="chat_out", payload={"text": response_text})
@@ -908,8 +907,8 @@ class Brain:
         self.primitive_in_execution = None
 
         # Reset Gemini variant to default
-        self.gemini_variant = "gemini1"
-        self.logger.info("Reset Gemini variant to default (gemini1)")
+        self.gemini_variant = "gemini-flash"
+        self.logger.info("Reset Gemini variant to default (gemini-flash)")
 
         # Reset pose graph memory for this connection
         navigate_through_memory = next(

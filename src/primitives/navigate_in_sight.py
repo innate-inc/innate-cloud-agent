@@ -30,12 +30,12 @@ MIN_OBSTACLE_DISTANCE = ROBOT_PARAMS_TO_USE["min_obstacle_distance"]
 ENABLE_VISUALIZATIONS = ROBOT_PARAMS_TO_USE["enable_visualizations"]
 
 # Gemini API constants from navigate_through_memory.py
-GEMINI_MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17"
+GEMINI_MODEL_NAME = "gemini-robotics-er-1.5-preview"
 GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64
 GEMINI_MAX_OUTPUT_TOKENS = 8192
-THINKING_BUDGET = 512
+THINKING_BUDGET = 0
 
 
 class PointSelectionReason(Enum):

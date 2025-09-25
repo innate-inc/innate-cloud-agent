@@ -33,6 +33,9 @@ class VisionAgentType(str, Enum):
     GEMINI_FLASH = "gemini_flash"
     GEMINI_FLASH_MULTI = "gemini_flash_multi"
     NATIVE_GEMINI_MULTI = "native_gemini_multi"
+    NATIVE_GEMINI_FLASH = "native_gemini_flash"
+    NATIVE_GEMINI_FLASH_LITE = "native_gemini_flash_lite"
+    NATIVE_GEMINI_ER = "native_gemini_er"
 
 
 class VisionService:
@@ -49,7 +52,7 @@ class VisionService:
         robot_coords,
         directive=None,
         agent_type: VisionAgentType = VisionAgentType.NATIVE_GEMINI_MULTI,
-        gemini_variant: str = "gemini1",
+        gemini_variant: str = "gemini-flash",
         additional_image_data: dict = {},
     ) -> Union[VisionAgentOutput]:
         """
@@ -64,9 +67,10 @@ class VisionService:
             robot_coords: A dictionary with the robot's coordinates.
             directive: A directive to steer the vision language model.
             agent_type: The type of agent to use. Options: "gemini_flash_multi" (BAML-based),
-                "native_gemini_multi" (native Google Gemini implementation)
-            gemini_variant: The variant of Gemini agent to use if agent_type is
-                GEMINI_FLASH. Options: "gemini1", "gemini2", "gemini3", "gemini4"
+                "native_gemini_multi" (native Google Gemini implementation),
+                "native_gemini_flash" (native Gemini Flash), "native_gemini_flash_lite" (native Gemini Flash Lite),
+                "native_gemini_er" (native Gemini ER)
+            gemini_variant: The variant of Gemini agent to use. Options: "gemini-flash", "gemini-flash-lite", "gemini-er"
 
         Returns:
             A VisionAgentOutput object.
@@ -133,7 +137,12 @@ class VisionService:
                             f"Error during VLM I/O serialization: {ser_exc}, Input: {vlm_inputs}, Completion: {completion}"
                         )
                 return completion
-            elif agent_type == VisionAgentType.NATIVE_GEMINI_MULTI:
+            elif agent_type in [
+                VisionAgentType.NATIVE_GEMINI_MULTI,
+                VisionAgentType.NATIVE_GEMINI_FLASH,
+                VisionAgentType.NATIVE_GEMINI_FLASH_LITE,
+                VisionAgentType.NATIVE_GEMINI_ER,
+            ]:
                 vlm_inputs = MultimodalVisionAgentInput(
                     base64_img=base64_img,
                     user_prompt_text=user_prompt_text,
@@ -145,7 +154,7 @@ class VisionService:
                     additional_image_data=additional_image_data,
                 )
                 completion = await native_gemini_vision_agent_multimodal_history(
-                    vlm_inputs
+                    vlm_inputs, gemini_variant=gemini_variant
                 )
 
                 if SERIALIZE_VLM_IO:

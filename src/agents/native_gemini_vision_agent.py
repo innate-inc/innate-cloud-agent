@@ -20,7 +20,9 @@ from src.agents.debug_html_generator import save_content_parts_html
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 # Gemini API constants (matching BAML configuration)
-GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+GEMINI_MODEL_NAME = "gemini-flash-latest"
+GEMINI_FLASH_LITE_MODEL_NAME = "gemini-flash-lite-latest"
+GEMINI_ER_MODEL_NAME = "gemini-robotics-er-1.5-preview"
 GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64
@@ -31,6 +33,26 @@ EXECUTION_TIMEOUT = 5  # seconds
 # Debug settings
 SAVE_DEBUG_DATA = True
 DEBUG_DATA_DIR = Path("test_data/debug_native_gemini_html")
+
+
+# Template for the main prompt
+def get_model_name_for_variant(gemini_variant: str) -> str:
+    """
+    Determine the model name based on the gemini variant.
+    
+    Args:
+        gemini_variant: The variant to use ("gemini-flash", "gemini-flash-lite", or "gemini-er")
+        
+    Returns:
+        The appropriate model name
+    """
+    if gemini_variant == "gemini-er":
+        return GEMINI_ER_MODEL_NAME
+    elif gemini_variant == "gemini-flash-lite":
+        return GEMINI_FLASH_LITE_MODEL_NAME
+    else:  # Default to gemini-flash for "gemini-flash" or any other value
+        return GEMINI_MODEL_NAME
+
 
 # Template for the main prompt
 VISION_AGENT_PROMPT_TEMPLATE = """<system_role>
@@ -146,9 +168,10 @@ class NativeGeminiVisionAgent:
     Native Google Gemini implementation replacing BAML-based vision agent.
     """
 
-    def __init__(self):
+    def __init__(self, model_name: str = GEMINI_MODEL_NAME):
         """Initialize the native Gemini client."""
         self.client = None
+        self.model_name = model_name
         self._initialize_client()
 
     def _initialize_client(self):
@@ -454,7 +477,7 @@ class NativeGeminiVisionAgent:
         # Use asyncio.to_thread to run the synchronous call in a thread
         response = await asyncio.to_thread(
             self.client.models.generate_content,
-            model=GEMINI_MODEL_NAME,
+            model=self.model_name,
             contents=content_parts,
             config=generation_config,
         )
@@ -477,6 +500,7 @@ class NativeGeminiVisionAgent:
 
 async def native_gemini_vision_agent_multimodal_history(
     vlm_inputs: MultimodalVisionAgentInput,
+    gemini_variant: str = "gemini-flash",
 ) -> Optional[VisionAgentOutput]:
     """
     Native Gemini implementation of the multimodal vision agent.
@@ -507,8 +531,11 @@ async def native_gemini_vision_agent_multimodal_history(
             if image_b64:
                 _save_base64_image(image_b64, f"additional_{camera_type}")
 
-    # Initialize the agent
-    agent = NativeGeminiVisionAgent()
+    # Determine the model name based on the variant
+    model_name = get_model_name_for_variant(gemini_variant)
+
+    # Initialize the agent with the appropriate model
+    agent = NativeGeminiVisionAgent(model_name=model_name)
 
     try:
         # Call with retry logic
