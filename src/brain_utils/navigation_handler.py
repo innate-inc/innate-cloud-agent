@@ -126,18 +126,13 @@ class NavigationHandler:
         )
 
         # Extract input parameters
-        target_object = vision_output.next_task.inputs.get("target_object")
-        target_description = vision_output.next_task.inputs.get(
-            "target_description", target_object
-        )
-        stop_in_front_of_target = vision_output.next_task.inputs.get(
-            "stop_in_front_of_target", False
-        )
+        spatial_indicator = vision_output.next_task.inputs.get("spatial_indicator")
+        target = vision_output.next_task.inputs.get("target")
 
         # Execute the primitive with the appropriate parameters
         msg, result, navigation_command = await nav_in_sight.execute(
-            stop_in_front_of_target=stop_in_front_of_target,
-            target_description=target_description,
+            spatial_indicator=spatial_indicator,
+            target=target,
             map_payload=map_payload,
         )
 
@@ -428,7 +423,8 @@ class NavigationHandler:
                         f"I can't navigate to that position because it's too close to obstacles. "
                         f"{safety_msg}"
                     )
-                    return vision_output
+                    has_canceled_task = True
+                    return vision_output, has_canceled_task
 
             # Replace the output with a navigate_to_position primitive
             navigation_to_position_task = PrimitiveDefinition(

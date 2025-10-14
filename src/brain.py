@@ -45,8 +45,8 @@ class Brain:
         connection_id: str,
         send_callback,
         enable_memory_commands: bool = False,
-        max_recent_generic_images: int = 3,
-        max_recent_pre_action_images: int = 3,
+        max_recent_generic_images: int = 1,
+        max_recent_pre_action_images: int = 5,
     ):
         """
         connection_id: an identifier for this brain instance (for logging/debugging)
@@ -249,6 +249,7 @@ class Brain:
                 self.history.add(
                     HistoryEntryType.IMAGE_PRE_ACTION,
                     description=current_image_for_vlm,
+                    robot_coords=robot_coords,
                 )
             else:
                 self.history.add(

@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import asyncio
+import math
 from typing import Optional, List, Union
 from pathlib import Path
 from datetime import datetime
@@ -32,67 +33,11 @@ EXECUTION_TIMEOUT = 5  # seconds
 SAVE_DEBUG_DATA = True
 DEBUG_DATA_DIR = Path("test_data/debug_native_gemini_html")
 
-# Template for the main prompt
-VISION_AGENT_PROMPT_TEMPLATE = """<system_role>
-You are a robot navigating and executing primitives in a home.
+# System prompt file path
+SYSTEM_PROMPT_FILE = Path(__file__).parent / "system_prompt.md"
 
-You are following a directive (defined in <directive>) that guides your actions, and you can pick primitives to execute to achieve your goal.
-
-You have to decide what to do right now based on the current image you see (in <main_camera_image>), the history of your actions and observations (in <history_of_events>), and the current primitive that is being executed (in <primitive_in_execution>).
-
-You are also being provided with what the user most recently said (in <user_input>).
-</system_role>
-
-<operational_guidelines>
-<choosing_next_primitive>
-**IF NO PRIMITIVE IS RUNNING:**
-- Look at your directive and what you see in the image
-- Choose the primitive that makes the most progress toward your goal
-- If the user just gave you a command, prioritize that
-- You don't have to start a new primitive if you think you should stay idle
-</choosing_next_primitive>
-
-<stopping_running_primitives>
-**IF A PRIMITIVE IS CURRENTLY RUNNING:**
-Only stop it if:
-- The user explicitly told you to stop it.
-- Your directive clearly requires stopping it.
-- You clearly can assess the primitive has completed its goal.
-- You clearly can assess that something is wrong and you need to stop it.
-
-**DO NOT STOP** running primitives for any other reason. When in doubt, let it continue.
-</stopping_running_primitives>
-
-<communication>
-**TALK TO THE USER** when:
-- They just spoke to you and expect a response
-- You're in a situation where the directive requires you to communicate with the user
-
-**WAIT** if you just spoke to them seconds ago and they might still be responding. The history of events indicates if you're still talking. Do not talk over yourself!
-</communication>
-
-<navigation_rules>
-- Navigation primitives allow you to get closer to your objective but a completion of a navigation primitive does not mean you're done. You might need to get closer or pursue the navigation objective.
-- A navigation primitive can indicate when it's close to being completed. When that is the case, if you think you need to navigate again, you should stop the current navigation primitive and start a new one.
-- You are provided with previous images of what you saw in <history_of_events>. Pay attention to them when pursuing several navigation primitives.
-- Your horizontal field of view is {field_of_view}, keep that in mind when turning. Too big of a turn can make you lose sight of something important, but too small might just make you be very slow.
-</navigation_rules>
-
-<awareness_rules>
-- Pay attention if your <history_of_events> indicates you are stuck or repeating the same actions without progress. If that is the case, try to change your approach.
-- If you seem stuck for more than 30 seconds, this where you should start acting and changing actions or plan.
-</awareness_rules>
-
-<planning_rules>
-The fields observation, thoughts, anticipation are here to help you keep track of a bigger plan to achieve your directive. You can use them to plan your next actions, but you can also completely change your plan if you think you should.
-</planning_rules>
-
-<speed_rules>
-Unless precised by the directive or user, decision-making should be done fast especially when pursuing a navigation objective.
-</speed_rules>
-</operational_guidelines>
-
-<current_context>
+# Template for the user context (without system instructions)
+USER_CONTEXT_TEMPLATE = """<current_context>
 <history_of_events>
 {multimodal_history}
 </history_of_events>
@@ -122,23 +67,7 @@ Unless precised by the directive or user, decision-making should be done fast es
 </current_primitive_guidelines>
 
 {additional_camera_image}
-</current_context>
-
-<available_primitives>
-You can only use one of the following primitives: {available_primitives}.
-</available_primitives>
-
-<response_requirements>
-Use the following fields in your response:
-
-- "observation": Describe what you see in the image as an internal thought
-- "thoughts": Think about what you should do (or not do) based on the observation and context
-- "stop_current_primitive": Decide whether to stop the current primitive
-- "anticipation": Consider what might happen next and leave mental notes for future reference
-- "to_tell_user": Communicate something to the user (if needed)
-- "next_primitive": Specify which primitive to execute next (if any)
-</response_requirements>
-"""
+</current_context>"""
 
 
 class NativeGeminiVisionAgent:
@@ -149,7 +78,9 @@ class NativeGeminiVisionAgent:
     def __init__(self):
         """Initialize the native Gemini client."""
         self.client = None
+        self.system_prompt = None
         self._initialize_client()
+        self._load_system_prompt()
 
     def _initialize_client(self):
         """Initialize the Google Gemini client."""
@@ -161,6 +92,32 @@ class NativeGeminiVisionAgent:
             self.client = genai.Client(api_key=api_key)
         except Exception as e:
             raise ValueError(f"Failed to initialize Gemini client: {e}")
+
+    def _load_system_prompt(self):
+        """Load the system prompt from the markdown file."""
+        try:
+            with open(SYSTEM_PROMPT_FILE, 'r', encoding='utf-8') as f:
+                self.system_prompt = f.read()
+            print("System prompt loaded successfully.")
+        except Exception as e:
+            raise ValueError(f"Failed to load system prompt from {SYSTEM_PROMPT_FILE}: {e}")
+
+    def _format_system_prompt(self, vlm_inputs: MultimodalVisionAgentInput) -> str:
+        """Format the system prompt with dynamic values."""
+        if not self.system_prompt:
+            raise ValueError("System prompt not loaded")
+        
+        # Prepare available primitives
+        primitive_names = [prim.name for prim in vlm_inputs.primitives_list]
+        available_primitives = ", ".join(primitive_names)
+        
+        # Format system prompt with dynamic values
+        formatted_system_prompt = self.system_prompt.format(
+            available_primitives=available_primitives,
+            field_of_view=ROBOT_PARAMS_TO_USE["horizontal_fov"]
+        )
+        
+        return formatted_system_prompt
 
     def _prepare_multimodal_content(
         self, vlm_inputs: MultimodalVisionAgentInput
@@ -198,7 +155,7 @@ class NativeGeminiVisionAgent:
 
         # Split the template into sections and process each part
         template_sections = self._split_template_by_multimodal_placeholders(
-            VISION_AGENT_PROMPT_TEMPLATE
+            USER_CONTEXT_TEMPLATE
         )
 
         for section in template_sections:
@@ -327,7 +284,9 @@ class NativeGeminiVisionAgent:
         robot_coordinates = ""
         if vlm_inputs.robot_coords:
             coords = vlm_inputs.robot_coords
-            robot_coordinates = f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={coords.get('theta')}"
+            theta_rad = coords.get('theta', 0.0)
+            theta_deg = theta_rad * 180.0 / math.pi  # Convert radians to degrees
+            robot_coordinates = f"Your coordinates if useful to know are: x={coords.get('x')}, y={coords.get('y')}, z={coords.get('z')}, theta={theta_deg:.1f}° (degrees)"
 
         # Prepare directive section
         directive_section = ""
@@ -428,14 +387,18 @@ class NativeGeminiVisionAgent:
         Returns:
             Parsed response from Gemini
         """
-        # Prepare multimodal content
+        # Prepare multimodal content (user context only)
         content_parts = self._prepare_multimodal_content(vlm_inputs)
+
+        # Format system prompt with dynamic values
+        formatted_system_prompt = self._format_system_prompt(vlm_inputs)
 
         # Create response schema (Pydantic model)
         response_schema = create_gemini_schema(vlm_inputs.primitives_list)
 
-        # Make the API call using the new genai.Client API
+        # Make the API call using the new genai.Client API with system instruction
         generation_config = types.GenerateContentConfig(
+            system_instruction=formatted_system_prompt,
             temperature=GEMINI_TEMPERATURE,
             top_p=GEMINI_TOP_P,
             top_k=GEMINI_TOP_K,
