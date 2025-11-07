@@ -97,7 +97,7 @@ class Brain:
         )
 
         # Initialize token usage logger
-        self.token_logger = BigQueryTokenLogger("logs/token_usage.csv")
+        self.token_logger = BigQueryTokenLogger()
 
         # Initialize logger and helper modules
         self.logger = BrainLogger(connection_id)
