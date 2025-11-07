@@ -5,7 +5,7 @@ from typing import Dict, Optional
 import uuid
 import traceback
 
-from src.utils.token_logger import TokenLogger
+from src.logging.token_logger import BigQueryTokenLogger
 
 
 from src.baml_client.partial_types import VisionAgentOutput
@@ -97,7 +97,7 @@ class Brain:
         )
 
         # Initialize token usage logger
-        self.token_logger = TokenLogger("logs/token_usage.csv")
+        self.token_logger = BigQueryTokenLogger("logs/token_usage.csv")
 
         # Initialize logger and helper modules
         self.logger = BrainLogger(connection_id)
@@ -162,30 +162,34 @@ class Brain:
                 time_elapsed = time.time() - time_start
                 total_tokens = None
                 tokens_per_sec = None
-                
-                if (vision_output.input_tokens is not None and 
-                    vision_output.output_tokens is not None):
-                    total_tokens = vision_output.input_tokens + vision_output.output_tokens
+
+                if (
+                    vision_output.input_tokens is not None
+                    and vision_output.output_tokens is not None
+                ):
+                    total_tokens = (
+                        vision_output.input_tokens + vision_output.output_tokens
+                    )
                     if time_elapsed > 0:
                         tokens_per_sec = total_tokens / time_elapsed
-                
+
                 token_info = ""
                 if total_tokens is not None:
                     token_info = f", tokens: {total_tokens}"
                     if tokens_per_sec is not None:
                         token_info += f" ({tokens_per_sec:.1f} tokens/sec)"
-                
+
                 self.logger.info(
                     f"Processed image message in {time_elapsed:.2f} seconds{token_info}, "
                     f"sent {'stop and' if vision_output.stop_current_task else ''} task: {task_and_id}\n"
                 )
-                
+
                 # Log token usage to CSV
                 self.token_logger.log_usage(
                     model_name=self.gemini_variant,
                     processing_time_seconds=time_elapsed,
                     input_tokens=vision_output.input_tokens,
-                    output_tokens=vision_output.output_tokens
+                    output_tokens=vision_output.output_tokens,
                 )
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)

@@ -6,6 +6,7 @@ import logging
 from google.cloud import bigquery
 from google.api_core import exceptions
 
+
 class BigQueryTokenLogger:
     """
     Logs token usage metrics to a Google BigQuery table.
@@ -18,14 +19,14 @@ class BigQueryTokenLogger:
         """
         project_id = os.getenv("BIGQUERY_PROJECT_ID")
         dataset_id = os.getenv("BIGQUERY_DATASET_ID")
-        table_id = os.getenv("BIGQUERY_TABLE_ID")
+        table_id = "token_metrics"  # Hardcoded table name
 
         self.logger = logging.getLogger(__name__)
 
-        if not all([project_id, dataset_id, table_id]):
+        if not all([project_id, dataset_id]):
             self.logger.warning(
                 "One or more BigQuery environment variables (BIGQUERY_PROJECT_ID, "
-                "BIGQUERY_DATASET_ID, BIGQUERY_TABLE_ID) are not set. "
+                "BIGQUERY_DATASET_ID) are not set. "
                 "BigQuery logger will be disabled."
             )
             self.client = None
@@ -36,7 +37,9 @@ class BigQueryTokenLogger:
             self.table_id = f"{project_id}.{dataset_id}.{table_id}"
             self._ensure_dataset_and_table_exist(dataset_id, table_id)
         except Exception as e:
-            self.logger.error(f"Failed to initialize BigQuery client: {e}. Disabling logger.")
+            self.logger.error(
+                f"Failed to initialize BigQuery client: {e}. Disabling logger."
+            )
             self.client = None
 
     def _ensure_dataset_and_table_exist(self, dataset_id: str, table_id: str):
@@ -63,9 +66,7 @@ class BigQueryTokenLogger:
             bigquery.SchemaField("model_name", "STRING", mode="NULLABLE"),
             bigquery.SchemaField("processing_time_seconds", "FLOAT", mode="NULLABLE"),
             bigquery.SchemaField("input_tokens", "INTEGER", mode="NULLABLE"),
-            bigquery.SchemaField(
-                "output_tokens", "INTEGER", mode="NULLABLE"
-            ),
+            bigquery.SchemaField("output_tokens", "INTEGER", mode="NULLABLE"),
             bigquery.SchemaField("total_tokens", "INTEGER", mode="NULLABLE"),
             bigquery.SchemaField("tokens_per_second", "FLOAT", mode="NULLABLE"),
         ]
@@ -121,4 +122,3 @@ class BigQueryTokenLogger:
         errors = self.client.insert_rows_json(self.table_id, [row_to_insert])
         if errors:
             self.logger.error(f"Encountered errors while inserting rows: {errors}")
-

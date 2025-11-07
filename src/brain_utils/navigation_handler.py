@@ -8,7 +8,7 @@ from src.primitives.types import Primitive
 from typing import List
 from math import atan, radians, tan, degrees
 import math
-from src.utils import decode_map_payload
+from src.brain_utils.payload_decoders import decode_map_payload
 
 
 SIM_VERTICAL_FOV = ROBOT_PARAMS_TO_USE["vertical_fov"]
