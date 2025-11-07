@@ -486,9 +486,22 @@ class NativeGeminiVisionAgent:
         try:
             parsed_response = response.parsed
 
+            # Extract token usage from response metadata
+            usage = response.usage_metadata
+            input_tokens = usage.prompt_token_count
+            output_tokens = usage.candidates_token_count
+
+            # Convert parsed response to dict and add token info
+            response_dict = parsed_response.model_dump()
+            response_dict['input_tokens'] = input_tokens
+            response_dict['output_tokens'] = output_tokens
+
+            # Create a new VisionAgentOutput instance with token data
+            output_with_tokens = type(parsed_response)(**response_dict)
+
             # Convert to brain-compatible output to prevent type mismatch warnings
             brain_compatible_output = convert_to_brain_compatible_output(
-                parsed_response
+                output_with_tokens
             )
 
             return brain_compatible_output
