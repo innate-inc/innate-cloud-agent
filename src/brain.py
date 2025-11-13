@@ -6,6 +6,7 @@ import uuid
 import traceback
 
 from src.logging.token_logger import BigQueryTokenLogger
+from src.logging.directive_logger import BigQueryDirectiveLogger
 
 
 from src.baml_client.partial_types import VisionAgentOutput
@@ -98,6 +99,7 @@ class Brain:
 
         # Initialize token usage logger
         self.token_logger = BigQueryTokenLogger()
+        self.directive_logger = BigQueryDirectiveLogger()
 
         # Initialize logger and helper modules
         self.logger = BrainLogger(connection_id)
@@ -1027,6 +1029,14 @@ class Brain:
                 self.directive = new_directive
                 directive_registered = True
                 self.logger.info(f"Registered directive: {new_directive}")
+
+                # Log the directive change to BigQuery
+                user_token = message.payload.get("user_token")
+                self.directive_logger.log_directive_change(
+                    directive_name=new_directive,
+                    client_id=self.connection_id,
+                    user_token=user_token,
+                )
 
                 # Record the directive change in history
                 if old_directive is None:
