@@ -5,8 +5,7 @@ from typing import Dict, Optional
 import uuid
 import traceback
 
-from src.logging.token_logger import BigQueryTokenLogger
-from src.logging.directive_logger import BigQueryDirectiveLogger
+from src.logging.bigquery_logger import BigQueryLogger
 
 
 from src.baml_client.partial_types import VisionAgentOutput
@@ -97,9 +96,8 @@ class Brain:
             max_recent_pre_action_images=max_recent_pre_action_images,
         )
 
-        # Initialize token usage logger
-        self.token_logger = BigQueryTokenLogger()
-        self.directive_logger = BigQueryDirectiveLogger()
+        # Initialize BigQuery logger
+        self.bq_logger = BigQueryLogger()
 
         # Initialize logger and helper modules
         self.logger = BrainLogger(connection_id)
@@ -186,13 +184,24 @@ class Brain:
                     f"sent {'stop and' if vision_output.stop_current_task else ''} task: {task_and_id}\n"
                 )
 
-                # Log token usage to CSV
-                self.token_logger.log_usage(
-                    model_name=self.gemini_variant,
-                    processing_time_seconds=time_elapsed,
-                    input_tokens=vision_output.input_tokens,
-                    output_tokens=vision_output.output_tokens,
-                )
+                # Log token usage to BigQuery
+                total_tokens = None
+                tokens_per_second = None
+                if vision_output.input_tokens is not None and vision_output.output_tokens is not None:
+                    total_tokens = vision_output.input_tokens + vision_output.output_tokens
+                    if time_elapsed > 0:
+                        tokens_per_second = total_tokens / time_elapsed
+
+                token_data = {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "model_name": self.gemini_variant,
+                    "processing_time_seconds": time_elapsed,
+                    "input_tokens": vision_output.input_tokens,
+                    "output_tokens": vision_output.output_tokens,
+                    "total_tokens": total_tokens,
+                    "tokens_per_second": tokens_per_second,
+                }
+                self.bq_logger.log("token_metrics", token_data)
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)
             elif message_type == MessageInType.CHAT_IN:
@@ -1032,11 +1041,13 @@ class Brain:
 
                 # Log the directive change to BigQuery
                 user_token = message.payload.get("user_token")
-                self.directive_logger.log_directive_change(
-                    directive_name=new_directive,
-                    client_id=self.connection_id,
-                    user_token=user_token,
-                )
+                directive_data = {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "directive_name": new_directive,
+                    "client_id": self.connection_id,
+                    "user_token": user_token,
+                }
+                self.bq_logger.log("directive_changes", directive_data)
 
                 # Record the directive change in history
                 if old_directive is None:
