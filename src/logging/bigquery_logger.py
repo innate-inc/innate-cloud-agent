@@ -25,12 +25,12 @@ class BigQueryLogger:
                 cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, logger: logging.Logger):
+    def __init__(self):
         with self._lock:
             if hasattr(self, "_initialized") and self._initialized:
                 return
 
-            self.logger = logger
+            self.logger = logging.getLogger(__name__)
             self.project_id = os.getenv("BIGQUERY_PROJECT_ID")
             self.dataset_id = os.getenv("BIGQUERY_DATASET_ID")
             self._ensured_tables = set()
@@ -40,16 +40,18 @@ class BigQueryLogger:
                     bigquery.SchemaField("timestamp", "TIMESTAMP", mode="REQUIRED"),
                     bigquery.SchemaField("model_name", "STRING", mode="NULLABLE"),
                     bigquery.SchemaField(
-                        "processing_time_seconds", "FLOAT", mode="NULLABLE"
+                        "decision_making_time", "FLOAT", mode="NULLABLE"
                     ),
                     bigquery.SchemaField("input_tokens", "INTEGER", mode="NULLABLE"),
                     bigquery.SchemaField("output_tokens", "INTEGER", mode="NULLABLE"),
                     bigquery.SchemaField("total_tokens", "INTEGER", mode="NULLABLE"),
                     bigquery.SchemaField("tokens_per_second", "FLOAT", mode="NULLABLE"),
+                    bigquery.SchemaField("total_processing_seconds", "FLOAT", mode="NULLABLE"),
                 ],
                 "directive_changes": [
                     bigquery.SchemaField("timestamp", "TIMESTAMP", mode="REQUIRED"),
                     bigquery.SchemaField("directive_name", "STRING", mode="NULLABLE"),
+                    bigquery.SchemaField("directive_text", "STRING", mode="NULLABLE"),
                     bigquery.SchemaField("client_id", "STRING", mode="NULLABLE"),
                     bigquery.SchemaField("user_token", "STRING", mode="NULLABLE"),
                 ],
@@ -112,7 +114,7 @@ class BigQueryLogger:
 
         self._ensured_tables.add(table_id)
 
-    def log(self, table_id: str, data: Dict[str, Any]):
+    def log(self, table_id: str, data: Dict[str, Any], logger: logging.Logger):
         if not self.client:
             return
 
@@ -121,10 +123,10 @@ class BigQueryLogger:
 
             full_table_id = f"{self.project_id}.{self.dataset_id}.{table_id}"
             errors = self.client.insert_rows_json(full_table_id, [data])
-            self.logger.debug(f"Logged to BigQuery table {table_id}: {data}")
+            logger.debug(f"Logged to BigQuery table {table_id}: {data}")
             if errors:
-                self.logger.error(
+                logger.error(
                     f"Encountered errors while inserting rows into {table_id}: {errors}"
                 )
         except Exception as e:
-            self.logger.error(f"Failed to log to BigQuery table {table_id}: {e}")
+            logger.error(f"Failed to log to BigQuery table {table_id}: {e}")

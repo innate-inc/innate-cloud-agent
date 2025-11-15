@@ -100,7 +100,7 @@ class Brain:
         self.logger = BrainLogger(connection_id)
 
         # Initialize BigQuery logger
-        self.bq_logger = BigQueryLogger(self.logger)
+        self.bq_logger = BigQueryLogger()
 
         self.image_processor = ImageProcessor(self.logger)
         self.vision_service = VisionService(self.logger)
@@ -151,7 +151,7 @@ class Brain:
                 time_start = time.time()
 
             if message_type == MessageInType.IMAGE:
-                vision_output = await self.handle_image(message)
+                vision_output, vlm_processing_time = await self.handle_image(message)
                 task_and_id = (
                     (
                         f"{vision_output.next_task.name} "
@@ -201,13 +201,14 @@ class Brain:
                 token_data = {
                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "model_name": self.gemini_variant,
-                    "processing_time_seconds": time_elapsed,
+                    "decision_making_time": vlm_processing_time,
                     "input_tokens": vision_output.input_tokens,
                     "output_tokens": vision_output.output_tokens,
                     "total_tokens": total_tokens,
                     "tokens_per_second": tokens_per_second,
+                    "total_processing_seconds": time_elapsed,
                 }
-                self.bq_logger.log("token_metrics", token_data)
+                self.bq_logger.log("token_metrics", token_data, self.logger)
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)
             elif message_type == MessageInType.CHAT_IN:
@@ -279,6 +280,7 @@ class Brain:
 
         local_primitives_list = prim_list_to_prim_obj_list(self.local_primitives_list)
 
+        vlm_start_time = time.time()
         vision_output = await self.vision_service.call_visual_language_model(
             base64_img=current_image_for_vlm,  # Use local variable
             user_prompt_text=self.latest_user_message,
@@ -291,6 +293,7 @@ class Brain:
             gemini_variant=self.gemini_variant,
             additional_image_data=additional_image_data,
         )
+        vlm_processing_time = time.time() - vlm_start_time
 
         # Log the image with appropriate type AFTER VLM call
         if current_image_for_vlm:
@@ -441,7 +444,7 @@ class Brain:
 
         self.history.check_and_summarize()
 
-        return vision_output
+        return vision_output, vlm_processing_time
 
     async def handle_pose_image(self, message: MessageIn):
         """Handle messages of type 'pose_image'."""
@@ -1049,11 +1052,12 @@ class Brain:
                 user_token = message.payload.get("user_token")
                 directive_data = {
                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "directive_name": new_directive,
+                    "directive_name": "",
+                    "directive_text": new_directive,
                     "client_id": self.connection_id,
                     "user_token": user_token,
                 }
-                self.bq_logger.log("directive_changes", directive_data)
+                self.bq_logger.log("directive_changes", directive_data, self.logger)
 
                 # Record the directive change in history
                 if old_directive is None:
