@@ -47,13 +47,13 @@ class BigQueryLogger:
                     bigquery.SchemaField("total_tokens", "INTEGER", mode="NULLABLE"),
                     bigquery.SchemaField("tokens_per_second", "FLOAT", mode="NULLABLE"),
                     bigquery.SchemaField("total_processing_seconds", "FLOAT", mode="NULLABLE"),
+                    bigquery.SchemaField("connection_id", "STRING", mode="NULLABLE"),
                 ],
                 "directive_changes": [
                     bigquery.SchemaField("timestamp", "TIMESTAMP", mode="REQUIRED"),
                     bigquery.SchemaField("directive_name", "STRING", mode="NULLABLE"),
                     bigquery.SchemaField("directive_text", "STRING", mode="NULLABLE"),
-                    bigquery.SchemaField("client_id", "STRING", mode="NULLABLE"),
-                    bigquery.SchemaField("user_token", "STRING", mode="NULLABLE"),
+                    bigquery.SchemaField("connection_id", "STRING", mode="NULLABLE"),
                 ],
             }
 

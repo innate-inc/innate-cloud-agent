@@ -207,6 +207,7 @@ class Brain:
                     "total_tokens": total_tokens,
                     "tokens_per_second": tokens_per_second,
                     "total_processing_seconds": time_elapsed,
+                    "connection_id": self.connection_id,
                 }
                 self.bq_logger.log("token_metrics", token_data, self.logger)
             elif message_type == MessageInType.POSE_IMAGE:
@@ -1054,8 +1055,7 @@ class Brain:
                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "directive_name": "",
                     "directive_text": new_directive,
-                    "client_id": self.connection_id,
-                    "user_token": user_token,
+                    "connection_id": self.connection_id,
                 }
                 self.bq_logger.log("directive_changes", directive_data, self.logger)
 
