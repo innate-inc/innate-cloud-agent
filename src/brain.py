@@ -96,11 +96,12 @@ class Brain:
             max_recent_pre_action_images=max_recent_pre_action_images,
         )
 
-        # Initialize BigQuery logger
-        self.bq_logger = BigQueryLogger()
-
         # Initialize logger and helper modules
         self.logger = BrainLogger(connection_id)
+
+        # Initialize BigQuery logger
+        self.bq_logger = BigQueryLogger(self.logger)
+
         self.image_processor = ImageProcessor(self.logger)
         self.vision_service = VisionService(self.logger)
         self.navigation_handler = NavigationHandler(
@@ -187,8 +188,13 @@ class Brain:
                 # Log token usage to BigQuery
                 total_tokens = None
                 tokens_per_second = None
-                if vision_output.input_tokens is not None and vision_output.output_tokens is not None:
-                    total_tokens = vision_output.input_tokens + vision_output.output_tokens
+                if (
+                    vision_output.input_tokens is not None
+                    and vision_output.output_tokens is not None
+                ):
+                    total_tokens = (
+                        vision_output.input_tokens + vision_output.output_tokens
+                    )
                     if time_elapsed > 0:
                         tokens_per_second = total_tokens / time_elapsed
 
