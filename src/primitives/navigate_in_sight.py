@@ -17,12 +17,14 @@ from src.primitives.visualization_utils import (
 )
 from src.primitives.projection_utils import (
     angle_distance_to_image_coordinates,
+    image_coordinates_to_angle_distance,
+    is_map_location_valid,
     sample_valid_navigation_points,
     world_to_grid_coordinates,
 )
 
 # Utility to decode depth payload (assumed defined in src/utils.py)
-from src.utils import decode_map_payload
+from src.brain_utils.payload_decoders import decode_map_payload
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 ROBOT_CAMERA_INFO = ROBOT_PARAMS_TO_USE["camera_info"]
@@ -30,12 +32,12 @@ MIN_OBSTACLE_DISTANCE = ROBOT_PARAMS_TO_USE["min_obstacle_distance"]
 ENABLE_VISUALIZATIONS = ROBOT_PARAMS_TO_USE["enable_visualizations"]
 
 # Gemini API constants from navigate_through_memory.py
-GEMINI_MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17"
+GEMINI_MODEL_NAME = "gemini-robotics-er-1.5-preview"
 GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64
 GEMINI_MAX_OUTPUT_TOKENS = 8192
-THINKING_BUDGET = 512
+THINKING_BUDGET = 0
 
 
 class PointSelectionReason(Enum):

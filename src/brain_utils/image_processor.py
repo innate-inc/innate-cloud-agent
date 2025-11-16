@@ -7,7 +7,7 @@ import imghdr  # For detecting image format from binary data
 import math
 
 
-from src.utils import decode_depth_payload, decode_map_payload
+from src.brain_utils.payload_decoders import decode_depth_payload, decode_map_payload
 
 
 class ImageProcessor:

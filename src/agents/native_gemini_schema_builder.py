@@ -36,6 +36,12 @@ class VisionAgentOutput(BaseModel):
     next_primitive: Optional[NextPrimitive] = Field(
         None, description="The next primitive to execute, if any"
     )
+    input_tokens: Optional[int] = Field(
+        None, description="Number of input tokens used in this call"
+    )
+    output_tokens: Optional[int] = Field(
+        None, description="Number of output tokens used in this call"
+    )
 
 
 class BrainCompatibleVisionAgentOutput(BaseModel):
@@ -52,6 +58,8 @@ class BrainCompatibleVisionAgentOutput(BaseModel):
     anticipation: Optional[str] = None
     to_tell_user: Optional[str] = None
     next_task: Optional[Dict[str, Any]] = None  # Already in PrimitiveDefinition format
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
 
 def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
@@ -156,6 +164,14 @@ def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
             Optional[NextPrimitiveUnion],
             Field(None, description="The next primitive to execute, if any"),
         ),
+        input_tokens=(
+            Optional[int],
+            Field(None, description="Number of input tokens used in this call"),
+        ),
+        output_tokens=(
+            Optional[int],
+            Field(None, description="Number of output tokens used in this call"),
+        ),
     )
 
     return VisionAgentOutput
@@ -224,4 +240,6 @@ def convert_to_brain_compatible_output(
         anticipation=gemini_output.anticipation,
         to_tell_user=gemini_output.to_tell_user,
         next_task=next_primitive_dict,
+        input_tokens=getattr(gemini_output, 'input_tokens', None),
+        output_tokens=getattr(gemini_output, 'output_tokens', None),
     )

@@ -3,6 +3,9 @@ import json
 import time
 from typing import Dict, Optional
 import uuid
+import traceback
+
+from src.logging.bigquery_logger import BigQueryLogger
 
 
 from src.baml_client.partial_types import VisionAgentOutput
@@ -68,7 +71,7 @@ class Brain:
         # Whether memory state commands are enabled
         self.enable_memory_commands = enable_memory_commands
         # Current Gemini agent variant to use
-        self.gemini_variant = "gemini1"
+        self.gemini_variant = "gemini-flash"
 
         self.local_primitives_list = [
             NavigateInSight(),
@@ -95,6 +98,10 @@ class Brain:
 
         # Initialize logger and helper modules
         self.logger = BrainLogger(connection_id)
+
+        # Initialize BigQuery logger
+        self.bq_logger = BigQueryLogger()
+
         self.image_processor = ImageProcessor(self.logger)
         self.vision_service = VisionService(self.logger)
         self.navigation_handler = NavigationHandler(
@@ -144,7 +151,7 @@ class Brain:
                 time_start = time.time()
 
             if message_type == MessageInType.IMAGE:
-                vision_output = await self.handle_image(message)
+                vision_output, vlm_processing_time = await self.handle_image(message)
                 task_and_id = (
                     (
                         f"{vision_output.next_task.name} "
@@ -153,10 +160,56 @@ class Brain:
                     if vision_output.next_task
                     else "None"
                 )
+                time_elapsed = time.time() - time_start
+                total_tokens = None
+                tokens_per_sec = None
+
+                if (
+                    vision_output.input_tokens is not None
+                    and vision_output.output_tokens is not None
+                ):
+                    total_tokens = (
+                        vision_output.input_tokens + vision_output.output_tokens
+                    )
+                    if time_elapsed > 0:
+                        tokens_per_sec = total_tokens / time_elapsed
+
+                token_info = ""
+                if total_tokens is not None:
+                    token_info = f", tokens: {total_tokens}"
+                    if tokens_per_sec is not None:
+                        token_info += f" ({tokens_per_sec:.1f} tokens/sec)"
+
                 self.logger.info(
-                    f"Processed image message in {time.time() - time_start} seconds, "
+                    f"Processed image message in {time_elapsed:.2f} seconds{token_info}, "
                     f"sent {'stop and' if vision_output.stop_current_task else ''} task: {task_and_id}\n"
                 )
+
+                # Log token usage to BigQuery
+                total_tokens = None
+                tokens_per_second = None
+                if (
+                    vision_output.input_tokens is not None
+                    and vision_output.output_tokens is not None
+                ):
+                    total_tokens = (
+                        vision_output.input_tokens + vision_output.output_tokens
+                    )
+                    if time_elapsed > 0:
+                        tokens_per_second = total_tokens / time_elapsed
+
+                token_data = {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "model_name": self.gemini_variant,
+                    "decision_making_time": vlm_processing_time,
+                    "input_tokens": vision_output.input_tokens,
+                    "output_tokens": vision_output.output_tokens,
+                    "total_tokens": total_tokens,
+                    "tokens_per_second": tokens_per_second,
+                    "total_processing_seconds": time_elapsed,
+                    "connection_id": self.connection_id,
+                }
+                self.bq_logger.log("token_metrics", token_data, self.logger)
             elif message_type == MessageInType.POSE_IMAGE:
                 await self.handle_pose_image(message)
             elif message_type == MessageInType.CHAT_IN:
@@ -179,8 +232,6 @@ class Brain:
                 await self.handle_unknown(message)
 
         except Exception as e:
-            import traceback
-
             self.logger.error(
                 f"Error processing message: {e}\n{traceback.format_exc()}"
             )
@@ -230,6 +281,7 @@ class Brain:
 
         local_primitives_list = prim_list_to_prim_obj_list(self.local_primitives_list)
 
+        vlm_start_time = time.time()
         vision_output = await self.vision_service.call_visual_language_model(
             base64_img=current_image_for_vlm,  # Use local variable
             user_prompt_text=self.latest_user_message,
@@ -242,6 +294,7 @@ class Brain:
             gemini_variant=self.gemini_variant,
             additional_image_data=additional_image_data,
         )
+        vlm_processing_time = time.time() - vlm_start_time
 
         # Log the image with appropriate type AFTER VLM call
         if current_image_for_vlm:
@@ -392,7 +445,7 @@ class Brain:
 
         self.history.check_and_summarize()
 
-        return vision_output
+        return vision_output, vlm_processing_time
 
     async def handle_pose_image(self, message: MessageIn):
         """Handle messages of type 'pose_image'."""
@@ -506,7 +559,7 @@ class Brain:
 
         Other commands (always enabled):
         - !gemini VERSION: Switches the Gemini version used by the vision agent
-                          Valid versions: gemini1, gemini2, gemini3, gemini4
+                          Valid versions: gemini-flash, gemini-flash-lite, gemini-er
         """
         text = message.payload["text"]
 
@@ -515,7 +568,7 @@ class Brain:
             parts = text.split(maxsplit=1)
             if len(parts) > 1:
                 requested_variant = parts[1].strip().lower()
-                valid_variants = ["gemini1", "gemini2", "gemini3", "gemini4"]
+                valid_variants = ["gemini-flash", "gemini-flash-lite", "gemini-er"]
 
                 if requested_variant in valid_variants:
                     old_variant = self.gemini_variant
@@ -549,7 +602,7 @@ class Brain:
                 response_text = (
                     f"Current Gemini variant: '{self.gemini_variant}'\n"
                     f"To change, use: !gemini VERSION\n"
-                    f"Valid versions: gemini1, gemini2, gemini3, gemini4"
+                    f"Valid versions: gemini-flash, gemini-flash-lite, gemini-er"
                 )
                 await self.send_callback(
                     MessageOut(type="chat_out", payload={"text": response_text})
@@ -908,8 +961,8 @@ class Brain:
         self.primitive_in_execution = None
 
         # Reset Gemini variant to default
-        self.gemini_variant = "gemini1"
-        self.logger.info("Reset Gemini variant to default (gemini1)")
+        self.gemini_variant = "gemini-flash"
+        self.logger.info("Reset Gemini variant to default (gemini-flash)")
 
         # Reset pose graph memory for this connection
         navigate_through_memory = next(
@@ -995,6 +1048,16 @@ class Brain:
                 self.directive = new_directive
                 directive_registered = True
                 self.logger.info(f"Registered directive: {new_directive}")
+
+                # Log the directive change to BigQuery
+                user_token = message.payload.get("user_token")
+                directive_data = {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "directive_name": "",
+                    "directive_text": new_directive,
+                    "connection_id": self.connection_id,
+                }
+                self.bq_logger.log("directive_changes", directive_data, self.logger)
 
                 # Record the directive change in history
                 if old_directive is None:

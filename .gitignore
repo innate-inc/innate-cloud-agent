@@ -20,3 +20,6 @@ depth_maps/
 *.webp
 
 memory_states/
+
+# GCP credentials
+gcp-credentials.json
