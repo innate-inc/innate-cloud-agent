@@ -80,8 +80,15 @@ class Brain:
         self.running = True
         self.enable_memory_commands = enable_memory_commands
 
-        # Consolidated state
         self.state = BrainState()
+
+        # Initialize history to record chat messages and vision agent outputs.
+        # The History class defaults to MAX_MULTIMODAL_IMAGES = 3.
+        # To override, instantiate with: History(max_multimodal_images=N)
+        self.history = History(
+            max_recent_generic_images=max_recent_generic_images,
+            max_recent_pre_action_images=max_recent_pre_action_images,
+        )
 
         # Local primitives defined in the brain (not registered by user)
         self.local_primitives_list = [
@@ -93,14 +100,6 @@ class Brain:
         self._pending_feedback_callbacks = [
             (p, p.name) for p in self.local_primitives_list
         ]
-
-        # Initialize history to record chat messages and vision agent outputs.
-        # The History class defaults to MAX_MULTIMODAL_IMAGES = 3.
-        # To override, instantiate with: History(max_multimodal_images=N)
-        self.history = History(
-            max_recent_generic_images=max_recent_generic_images,
-            max_recent_pre_action_images=max_recent_pre_action_images,
-        )
 
         # Initialize logger and helper modules
         self.logger = BrainLogger(connection_id)
@@ -406,7 +405,6 @@ class Brain:
     async def handle_chat_in(self, message: MessageIn):
         """Handle messages of type 'chat_in'. Delegates to ChatHandler."""
         text = message.payload["text"]
-
         new_gemini_variant, user_message = await self.chat_handler.handle_chat_in(
             text=text,
             current_gemini_variant=self.state.gemini_variant,
@@ -528,104 +526,70 @@ class Brain:
         )
 
     async def handle_register_primitives_and_directive(self, message: MessageIn):
-        """
-        Handle messages of type 'register_primitives_and_directive'.
-        Registers new primitives and directive provided by the client.
-        """
+        """Handle 'register_primitives_and_directive' messages."""
         primitives_data = message.payload.get("primitives", [])
         new_directive = message.payload.get("directive")
-        registered_count = 0
-        directive_registered = False
 
-        # Clean up the primitives list
+        # Reset and process primitives
         self.state.primitives_list = []
+        local_names = {p.name for p in self.local_primitives_list}
 
-        # Process primitives
-        for primitive_data in primitives_data:
-            try:
-                name = primitive_data.get("name")
-                guidelines = primitive_data.get("guidelines")
-                guidelines_when_running = primitive_data.get("guidelines_when_running")
-                inputs = primitive_data.get("inputs", {})
+        for p in primitives_data:
+            name = p.get("name")
+            if not name:
+                self.logger.error(f"Primitive missing 'name': {p}")
+                continue
+            if name in local_names:
+                self.logger.info(f"Primitive '{name}' already exists locally, skipping")
+                continue
 
-                # Validate required fields
-                if not name:
-                    self.logger.error(
-                        f"Primitive registration missing required 'name' field: "
-                        f"{primitive_data}"
-                    )
-                    continue
-
-                # Check if a primitive with this name already exists in the local list
-                existing_primitive = next(
-                    (p for p in self.local_primitives_list if p.name == name), None
-                )
-                if existing_primitive:
-                    self.logger.info(f"Primitive '{name}' already registered, skipping")
-                    continue
-
-                new_primitive = PrimitiveDefinition(
+            self.state.primitives_list.append(
+                PrimitiveDefinition(
                     name=name,
-                    guidelines=guidelines,
-                    guidelines_when_running=guidelines_when_running,
-                    inputs=inputs,
+                    guidelines=p.get("guidelines"),
+                    guidelines_when_running=p.get("guidelines_when_running"),
+                    inputs=p.get("inputs", {}),
                 )
-                self.state.primitives_list.append(new_primitive)
-                registered_count += 1
-                self.logger.info(f"Registered new primitive: {name}")
+            )
 
-            except Exception as e:
-                self.logger.error(f"Error registering primitive: {e}")
+        registered_count = len(self.state.primitives_list)
 
-        # Process directive if provided
-        if new_directive is not None:
-            try:
-                old_directive = self.state.directive
-                self.state.directive = new_directive
-                directive_registered = True
-                self.logger.info(f"Registered directive: {new_directive}")
+        # Process directive
+        directive_registered = new_directive is not None
+        if directive_registered:
+            old_directive = self.state.directive
+            self.state.directive = new_directive
 
-                # Log the directive change to BigQuery
-                directive_data = {
+            self.bq_logger.log(
+                "directive_changes",
+                {
                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "directive_name": "",
                     "directive_text": new_directive,
                     "connection_id": self.connection_id,
-                }
-                self.bq_logger.log("directive_changes", directive_data, self.logger)
+                },
+                self.logger,
+            )
 
-                # Record the directive change in history
-                if old_directive is None:
-                    history_message = f"Directive set to '{new_directive}'"
-                else:
-                    history_message = (
-                        f"Directive changed from '{old_directive}' to '{new_directive}'"
-                    )
-
-                self.history.add(
-                    HistoryEntryType.SYSTEM_MESSAGE, description=history_message
-                )
-            except Exception as e:
-                self.logger.error(f"Error registering directive: {e}")
-
-        # Acknowledge the registration
-        response = MessageOut(
-            type=MessageOutType.PRIMITIVES_AND_DIRECTIVE_REGISTERED,
-            payload={
-                "success": True,
-                "count": registered_count,
-                "directive_registered": directive_registered,
-                "message": (
-                    f"Successfully registered {registered_count} primitives and "
-                    f"{'a' if directive_registered else 'no'} directive."
+            self.history.add(
+                HistoryEntryType.SYSTEM_MESSAGE,
+                description=(
+                    f"Directive set to '{new_directive}'"
+                    if old_directive is None
+                    else f"Directive changed from '{old_directive}' to '{new_directive}'"
                 ),
-            },
-        )
-        await self.send_callback(response)
+            )
 
-        self.logger.info(
-            f"Registered {registered_count} primitives and "
-            f"{'a' if directive_registered else 'no'} directive."
+        await self.send_callback(
+            MessageOut(
+                type=MessageOutType.PRIMITIVES_AND_DIRECTIVE_REGISTERED,
+                payload={
+                    "success": True,
+                    "count": registered_count,
+                    "directive_registered": directive_registered,
+                    "message": f"Registered {registered_count} primitives and {'a' if directive_registered else 'no'} directive.",
+                },
+            )
         )
 
     async def stop(self):
