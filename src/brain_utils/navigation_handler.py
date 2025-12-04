@@ -3,6 +3,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from src.agents.types import PrimitiveDefinition
+from src.brain_utils.constants import PrimitiveNames
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 from src.primitives.types import Primitive
 from typing import List
@@ -49,7 +50,7 @@ class NavigationHandler:
             (
                 prim
                 for prim in self.primitives_list
-                if prim.name == "check_distance_and_orientation"
+                if prim.name == PrimitiveNames.CHECK_DISTANCE_AND_ORIENTATION
             ),
             None,
         )
@@ -106,7 +107,11 @@ class NavigationHandler:
     ):
         has_canceled_task = False
         nav_in_sight = next(
-            (prim for prim in self.primitives_list if prim.name == "navigate_in_sight"),
+            (
+                prim
+                for prim in self.primitives_list
+                if prim.name == PrimitiveNames.NAVIGATE_IN_SIGHT
+            ),
             None,
         )
 
@@ -172,7 +177,7 @@ class NavigationHandler:
 
             # Replace the output with a navigation_to_position primitive.
             navigation_to_position_task = PrimitiveDefinition(
-                name="navigate_to_position",
+                name=PrimitiveNames.NAVIGATE_TO_POSITION,
                 inputs={
                     "x": navigation_command["x"],
                     "y": navigation_command["y"],
@@ -296,7 +301,6 @@ class NavigationHandler:
             obstacle_radius (int): Search radius in grid cells
         """
         try:
-
             # Create a copy of the map for visualization
             # Convert occupancy grid (-1, 0, 100) to an RGB image
             # -1: Unknown (gray), 0: Free (white), 100: Occupied (black)
@@ -381,7 +385,7 @@ class NavigationHandler:
             (
                 prim
                 for prim in self.primitives_list
-                if prim.name == "navigate_through_memory"
+                if prim.name == PrimitiveNames.NAVIGATE_THROUGH_MEMORY
             ),
             None,
         )
@@ -432,7 +436,7 @@ class NavigationHandler:
 
             # Replace the output with a navigate_to_position primitive
             navigation_to_position_task = PrimitiveDefinition(
-                name="navigate_to_position",
+                name=PrimitiveNames.NAVIGATE_TO_POSITION,
                 inputs=navigation_command,
                 primitive_id=original_primitive_id,
             )
@@ -503,7 +507,7 @@ class NavigationHandler:
 
         # Create a navigate_to_position task with the calculated coordinates
         navigation_to_position_task = PrimitiveDefinition(
-            name="navigate_to_position",
+            name=PrimitiveNames.NAVIGATE_TO_POSITION,
             inputs={
                 "x": new_x,
                 "y": new_y,
