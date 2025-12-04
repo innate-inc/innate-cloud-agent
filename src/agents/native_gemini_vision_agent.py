@@ -39,10 +39,10 @@ DEBUG_DATA_DIR = Path("test_data/debug_native_gemini_html")
 def get_model_name_for_variant(gemini_variant: str) -> str:
     """
     Determine the model name based on the gemini variant.
-    
+
     Args:
         gemini_variant: The variant to use ("gemini-flash", "gemini-flash-lite", or "gemini-er")
-        
+
     Returns:
         The appropriate model name
     """
@@ -463,7 +463,7 @@ class NativeGeminiVisionAgent:
             top_p=GEMINI_TOP_P,
             top_k=GEMINI_TOP_K,
             max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-            thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
             response_mime_type="application/json",
             response_schema=response_schema,
         )
@@ -493,8 +493,8 @@ class NativeGeminiVisionAgent:
 
             # Convert parsed response to dict and add token info
             response_dict = parsed_response.model_dump()
-            response_dict['input_tokens'] = input_tokens
-            response_dict['output_tokens'] = output_tokens
+            response_dict["input_tokens"] = input_tokens
+            response_dict["output_tokens"] = output_tokens
 
             # Create a new VisionAgentOutput instance with token data
             output_with_tokens = type(parsed_response)(**response_dict)

@@ -400,7 +400,7 @@ class NavigationHandler:
             vision_output.to_tell_user = (
                 "I couldn't navigate to that location: internal error"
             )
-            return vision_output
+            return vision_output, True
 
         # Execute the primitive to get navigation parameters
         description = vision_output.next_task.inputs.get("description", "")
@@ -432,7 +432,7 @@ class NavigationHandler:
                         f"I can't navigate to that position because it's too close to obstacles. "
                         f"{safety_msg}"
                     )
-                    return vision_output
+                    return vision_output, True
 
             # Replace the output with a navigate_to_position primitive
             navigation_to_position_task = PrimitiveDefinition(

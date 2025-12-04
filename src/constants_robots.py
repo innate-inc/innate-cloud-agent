@@ -28,8 +28,8 @@ ROBOT_PARAMS_MAURICE_OAK_D = {
         "x_cam": 0.0197,
         "height_cam": 0.19663,
     },
-    "average_pos_cov_threshold": 0.05,
-    "average_yaw_cov_threshold": 0.04,
+    "average_pos_cov_threshold": 0.25,
+    "average_yaw_cov_threshold": 0.18,
     "enable_visualizations": False,
 }
 
