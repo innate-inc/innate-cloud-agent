@@ -509,8 +509,8 @@ class Brain:
         primitives_data = message.payload.get("primitives", [])
         new_directive = message.payload.get("directive")
 
-        # Reset and process primitives
-        self.state.primitives_list = []
+        # Reset and process primitives (use clear() to preserve reference held by primitive_handler)
+        self.state.primitives_list.clear()
         local_names = {p.name for p in self.local_primitives_list}
 
         for p in primitives_data:

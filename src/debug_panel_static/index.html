@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brain Debug Panel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Berkeley+Mono:wght@400;500;600&family=Crimson+Pro:wght@300;400;500;600&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- INJECT_CSS -->
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <div class="logo">
+                <div class="logo-glyph">🧠</div>
+                <div class="logo-text">
+                    <span class="logo-title">Brain Debug Panel</span>
+                    <span class="logo-subtitle">Real-time State Monitor</span>
+                </div>
+            </div>
+            <div class="header-controls">
+                <div class="refresh-badge">
+                    <div class="refresh-dot"></div>
+                    <span>Auto-refresh: <span id="refreshRate">1s</span></span>
+                </div>
+                <div class="refresh-badge">
+                    <span>Last update: <span id="lastUpdate">--:--:--</span></span>
+                </div>
+            </div>
+        </header>
+
+        <div id="connectionTabs" class="connection-tabs" style="display: none;">
+            <!-- Dynamic connection tabs -->
+        </div>
+
+        <main class="main" id="mainContent">
+            <div class="no-connections">
+                <div class="no-connections-icon">🔌</div>
+                <div>No active Brain connections</div>
+                <div style="font-size: 0.85rem; margin-top: 8px; color: var(--text-dim);">
+                    Connect a client to the WebSocket server to see debug information
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- INJECT_JS -->
+</body>
+</html>
+
