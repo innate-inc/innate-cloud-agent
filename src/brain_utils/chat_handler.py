@@ -236,3 +236,4 @@ class ChatHandler:
     async def _send_chat_response(self, text: str) -> None:
         """Send a chat response to the client."""
         await self.send_callback(MessageOut(type="chat_out", payload={"text": text}))
+

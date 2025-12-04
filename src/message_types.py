@@ -27,7 +27,6 @@ class MessageOutType(str, Enum):
     THOUGHTS = "thoughts"
     ERROR = "error"
     PRIMITIVES_AND_DIRECTIVE_REGISTERED = "primitives_and_directive_registered"
-    SAVE_ORCHESTRATOR_STATE = "save_orchestrator_state"  # Request robot to save state
 
 
 class MessageIn(BaseModel):

@@ -132,3 +132,4 @@ class PoseGraphHandler:
         pose_graph_memory.reset_user_data(self.connection_id)
         self.logger.info(f"Reset pose graph memory for connection {self.connection_id}")
         return True
+

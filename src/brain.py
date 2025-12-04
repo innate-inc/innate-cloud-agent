@@ -29,9 +29,8 @@ from src.brain_utils.image_handler import ImageHandler
 from src.brain_utils.chat_handler import ChatHandler
 from src.brain_utils.primitive_handler import PrimitiveHandler
 from src.brain_utils.pose_graph_handler import PoseGraphHandler
-from src.brain_utils.orchestrator_state import OrchestratorStateHandler
 
-DEFAULT_GEMINI_VARIANT = "gemini-flash"
+DEFAULT_GEMINI_VARIANT = "gemini-2.5-flash"
 
 
 @dataclass
@@ -162,15 +161,6 @@ class Brain:
         self.pose_graph_handler = PoseGraphHandler(
             logger=self.logger,
             local_primitives_list=self.local_primitives_list,
-            connection_id=self.connection_id,
-        )
-
-        # Initialize orchestrator state handler
-        self.orchestrator_state_handler = OrchestratorStateHandler(
-            logger=self.logger,
-            history=self.history,
-            primitive_ids_map=self.state.primitive_ids_map,
-            send_callback=self.send_callback,
             connection_id=self.connection_id,
         )
 
@@ -305,11 +295,6 @@ class Brain:
         """Handle messages of type 'image'."""
         self.logger.debug(f"Received image message: {message.payload.keys()}")
 
-        # Restore orchestrator state from the message payload (stateless server)
-        self.state.primitive_in_execution = (
-            self.orchestrator_state_handler.restore_from_payload(message.payload)
-        )
-
         # Define callbacks for error handling
         async def send_error(error_text: str):
             await self.send_callback(
@@ -391,10 +376,6 @@ class Brain:
             type="vision_agent_output", payload=vision_output.model_dump()
         )
         await self.send_callback(response)
-
-        # Send orchestrator state to robot for persistence (stateless server)
-        state_to_send = primitive_to_remember or self.state.primitive_in_execution
-        await self.orchestrator_state_handler.send_state(state_to_send)
 
         self.history.save()
 
@@ -600,14 +581,6 @@ class Brain:
         self.running = False
         await self.message_queue.put(None)
 
-    async def handle_orchestrator_state(self, message: MessageIn):
-        """Handle orchestrator_state message. Delegates to OrchestratorStateHandler."""
-        self.state.primitive_in_execution = (
-            await self.orchestrator_state_handler.handle_orchestrator_state_message(
-                message.payload
-            )
-        )
-
     def _get_navigate_through_memory_primitive(self):
         """Get the NavigateThroughMemory primitive from local primitives."""
         return next(
@@ -618,3 +591,83 @@ class Brain:
             ),
             None,
         )
+
+    def get_debug_state(self) -> dict:
+        """
+        Export the current state of the Brain for debugging purposes.
+        Returns a dictionary with all relevant state information.
+        """
+        # Get history entries (limit to last 50 for performance)
+        history_entries = []
+        for entry in self.history.entries[-50:]:
+            entry_data = {
+                "timestamp": entry.timestamp.isoformat(),
+                "type": entry.type.value,
+                "description": entry.description[:500]
+                if len(entry.description) > 500
+                else entry.description,
+            }
+            # Don't include full image data in debug output
+            if entry.type.value in ["generic_image", "image_pre_action"]:
+                entry_data["description"] = "[Image data omitted]"
+            history_entries.append(entry_data)
+
+        # Get primitive info
+        primitive_in_execution = None
+        if self.state.primitive_in_execution:
+            primitive_in_execution = {
+                "name": self.state.primitive_in_execution.name,
+                "primitive_id": self.state.primitive_in_execution.primitive_id,
+                "inputs": self.state.primitive_in_execution.inputs,
+                "guidelines": self.state.primitive_in_execution.guidelines,
+            }
+
+        # Get registered primitives
+        registered_primitives = []
+        for p in self.state.primitives_list:
+            registered_primitives.append(
+                {
+                    "name": p.name,
+                    "guidelines": p.guidelines[:200] if p.guidelines else None,
+                    "inputs": p.inputs,
+                }
+            )
+
+        # Get local primitives
+        local_primitives = [p.name for p in self.local_primitives_list]
+
+        # Get primitive IDs map (recent ones)
+        primitive_ids_map = {}
+        for pid, pdef in list(self.state.primitive_ids_map.items())[-10:]:
+            primitive_ids_map[pid] = {
+                "name": pdef.name,
+                "inputs": pdef.inputs,
+            }
+
+        # Get discrepancies
+        discrepancies = []
+        for d in self.history.discrepancies[-10:]:
+            discrepancies.append(
+                {
+                    "timestamp": d["timestamp"].isoformat(),
+                    "message": d["message"],
+                }
+            )
+
+        return {
+            "connection_id": self.connection_id,
+            "running": self.running,
+            "gemini_variant": self.state.gemini_variant,
+            "directive": self.state.directive,
+            "latest_user_message": self.state.latest_user_message,
+            "primitive_in_execution": primitive_in_execution,
+            "registered_primitives": registered_primitives,
+            "local_primitives": local_primitives,
+            "primitive_ids_map": primitive_ids_map,
+            "message_queue_size": self.message_queue.qsize(),
+            "history_entry_count": len(self.history.entries),
+            "history_entries": history_entries,
+            "discrepancies": discrepancies,
+            "is_summarizing": self.history.is_summarizing,
+            "enable_memory_commands": self.enable_memory_commands,
+        }

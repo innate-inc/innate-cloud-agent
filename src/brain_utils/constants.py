@@ -23,3 +23,4 @@ NAVIGATION_PRIMITIVES = frozenset(
         PrimitiveNames.CHECK_DISTANCE_AND_ORIENTATION,
     ]
 )
+
