@@ -43,11 +43,10 @@ class WebSocketAgentConnection:
             print("[INFO] Memory state commands are enabled")
         else:
             print("[INFO] Memory state commands are disabled")
-        self.enable_debug_panel = False
-        # # Check if debug panel is enabled from environment variable
-        # self.enable_debug_panel = (
-        #     os.environ.get("ENABLE_DEBUG_PANEL", "false").lower() == "true"
-        # )
+        # Check if debug panel is enabled from environment variable
+        self.enable_debug_panel = (
+            os.environ.get("ENABLE_DEBUG_PANEL", "false").lower() == "true"
+        )
 
     async def handle_connection(self):
         """
