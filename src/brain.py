@@ -188,8 +188,6 @@ class Brain:
             # Log non-frequent messages
             if message.type != MessageInType.POSE_IMAGE:
                 self.logger.info(f"Processing message: {message.type}")
-                self.logger.info(f"Message payload: {message.payload}")
-                self.logger.info(f"Message type: {message.type}")
 
             match message.type:
                 case MessageInType.IMAGE:
