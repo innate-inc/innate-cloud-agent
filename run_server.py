@@ -10,6 +10,7 @@ import os
 # os.environ["BAML_LOG"] = "off"
 
 from src.agent_connection import WebSocketAgentConnection
+from src.debug_panel import start_debug_panel
 
 # Import dotenv
 from dotenv import load_dotenv
@@ -18,6 +19,7 @@ load_dotenv()
 
 # Optionally read port from environment or config
 WEBSOCKET_PORT = 8765
+DEBUG_PANEL_PORT = 8081
 
 
 def parse_arguments():
@@ -27,6 +29,18 @@ def parse_arguments():
         "--enable-memory-commands",
         action="store_true",
         help="Enable memory state management commands",
+    )
+    parser.add_argument(
+        "--debug-panel",
+        action="store_true",
+        help="Enable the debug panel web UI",
+        default=False,
+    )
+    parser.add_argument(
+        "--debug-panel-port",
+        type=int,
+        default=DEBUG_PANEL_PORT,
+        help=f"Port for the debug panel (default: {DEBUG_PANEL_PORT})",
     )
     return parser.parse_args()
 
@@ -54,6 +68,15 @@ async def main():
     else:
         os.environ["ENABLE_MEMORY_COMMANDS"] = "false"
         print("Memory state commands are DISABLED")
+
+    # Start debug panel if enabled
+    debug_server = None
+    if args.debug_panel:
+        os.environ["ENABLE_DEBUG_PANEL"] = "true"
+        debug_server = start_debug_panel(port=args.debug_panel_port)
+        print(f"Debug panel available at http://localhost:{args.debug_panel_port}")
+    else:
+        os.environ["ENABLE_DEBUG_PANEL"] = "false"
 
     print(f"Starting WebSocket server on port {WEBSOCKET_PORT}...")
     async with websockets.serve(

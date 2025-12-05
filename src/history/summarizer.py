@@ -13,7 +13,7 @@ from src.history.types import (
 
 class HistorySummarizer:
     # Gemini API constants for summarization
-    GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+    GEMINI_MODEL_NAME = "gemini-2.5-flash"
     GEMINI_TEMPERATURE = 0.7  # Adjusted for more creative summarization
     GEMINI_TOP_P = 0.95
     GEMINI_TOP_K = 64
@@ -25,9 +25,7 @@ class HistorySummarizer:
         api_key = os.getenv(
             "GEMINI_API_KEY"
         )  # Used to check if configuration is likely present
-        if (
-            api_key
-        ):  # Check if API key is set in env, assuming genai.configure() or GOOGLE_API_KEY handles actual auth
+        if api_key:  # Check if API key is set in env, assuming genai.configure() or GOOGLE_API_KEY handles actual auth
             try:
                 # Instantiate the main client. It will use GOOGLE_API_KEY or prior genai.configure().
                 self.genai_client = genai.Client(api_key=api_key)

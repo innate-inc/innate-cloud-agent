@@ -35,6 +35,8 @@ IMAGE_FILE_EXTENSION = ".jpg"
 TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S_%f"
 
 # Gemini API constants
+
+
 GEMINI_MODEL_NAME = "gemini-flash-latest"
 GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95

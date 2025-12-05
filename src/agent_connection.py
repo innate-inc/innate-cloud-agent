@@ -9,6 +9,7 @@ from typing import Optional
 
 from src.message_types import MessageInType, MessageOut, MessageOutType, MessageIn
 from src.brain import Brain
+from src.debug_panel import register_brain_for_debug, unregister_brain_for_debug
 
 
 def get_user_from_token(token: str):
@@ -42,6 +43,10 @@ class WebSocketAgentConnection:
             print("[INFO] Memory state commands are enabled")
         else:
             print("[INFO] Memory state commands are disabled")
+        # Check if debug panel is enabled from environment variable
+        self.enable_debug_panel = (
+            os.environ.get("ENABLE_DEBUG_PANEL", "false").lower() == "true"
+        )
 
     async def handle_connection(self):
         """
@@ -70,6 +75,8 @@ class WebSocketAgentConnection:
             }
             self.brain = Brain(**brain_args)
             self.brain_task = asyncio.create_task(self.brain.run())
+            if self.enable_debug_panel:
+                register_brain_for_debug(self.brain)
             print(f"[INFO] Brain instance started for user: {self.user_token}")
             if self.enable_memory_commands:
                 print("[INFO] Memory state commands are enabled for this brain")
@@ -120,6 +127,8 @@ class WebSocketAgentConnection:
         finally:
             # Shutdown the brain task gracefully
             if self.brain is not None:
+                if self.enable_debug_panel:
+                    unregister_brain_for_debug(self.brain.connection_id)
                 await self.brain.stop()
             if self.brain_task is not None:
                 self.brain_task.cancel()
