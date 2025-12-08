@@ -281,9 +281,9 @@ class Brain:
             "input_tokens": token_metrics.input_tokens if token_metrics else None,
             "output_tokens": token_metrics.output_tokens if token_metrics else None,
             "total_tokens": token_metrics.total_tokens if token_metrics else None,
-            "tokens_per_second": token_metrics.tokens_per_second
-            if token_metrics
-            else None,
+            "tokens_per_second": (
+                token_metrics.tokens_per_second if token_metrics else None
+            ),
             "total_processing_seconds": time_elapsed,
             "connection_id": self.connection_id,
         }
@@ -335,7 +335,7 @@ class Brain:
     async def handle_pose_image(self, message: MessageIn):
         """Handle messages of type 'pose_image'."""
         payload = message.payload
-        robot_coords = self.pose_graph_handler.handle_pose_image(
+        robot_coords, positions = self.pose_graph_handler.handle_pose_image(
             image_b64=payload.get("image", ""),
             x=payload.get("x", 0.0),
             y=payload.get("y", 0.0),
@@ -346,6 +346,15 @@ class Brain:
         )
         if robot_coords:
             self.current_robot_coords = robot_coords
+
+        # Send the full pose graph positions back to the client when a node is added
+        if positions:
+            await self.send_callback(
+                MessageOut(
+                    type=MessageOutType.MEMORY_POSITIONS,
+                    payload={"positions": positions},
+                )
+            )
 
     async def _send_vision_output(
         self, vision_output, vision_output_to_write_in_history=None
@@ -601,9 +610,11 @@ class Brain:
             entry_data = {
                 "timestamp": entry.timestamp.isoformat(),
                 "type": entry.type.value,
-                "description": entry.description[:500]
-                if len(entry.description) > 500
-                else entry.description,
+                "description": (
+                    entry.description[:500]
+                    if len(entry.description) > 500
+                    else entry.description
+                ),
             }
             # Don't include full image data in debug output
             if entry.type.value in ["generic_image", "image_pre_action"]:

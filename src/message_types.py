@@ -27,6 +27,7 @@ class MessageOutType(str, Enum):
     THOUGHTS = "thoughts"
     ERROR = "error"
     PRIMITIVES_AND_DIRECTIVE_REGISTERED = "primitives_and_directive_registered"
+    MEMORY_POSITIONS = "memory_positions"
 
 
 class MessageIn(BaseModel):
