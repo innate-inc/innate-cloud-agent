@@ -17,7 +17,6 @@ from src.primitives.visualization_utils import (
 )
 from src.primitives.projection_utils import (
     angle_distance_to_image_coordinates,
-    image_coordinates_to_angle_distance,
     is_map_location_valid,
     sample_valid_navigation_points,
     world_to_grid_coordinates,

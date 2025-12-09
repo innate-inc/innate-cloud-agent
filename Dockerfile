@@ -21,6 +21,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ src/
 COPY run_server.py .
 
+# Generate BAML client code from .baml source files
+RUN baml-cli generate --from src/baml_src
+
 # Expose port 8765 for the WebSocket
 EXPOSE 8765
 

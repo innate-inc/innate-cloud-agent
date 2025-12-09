@@ -7,8 +7,6 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8765:8765"
-    volumes:
-      - ./:/app
     env_file:
       - .env
     # Run with memory commands enabled for benchmarking
