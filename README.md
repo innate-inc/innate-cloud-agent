@@ -1,6 +1,29 @@
-# Cloud Agent
+<div align="center">
 
-## Build and test locally
+# Innate Cloud Agent
+
+*Cloud-based inference service for Innate robots*
+
+[![Discord](https://img.shields.io/badge/Discord-Join%20our%20community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/innate)
+[![Documentation](https://img.shields.io/badge/Docs-Read%20the%20docs-blue?style=for-the-badge&logo=readthedocs&logoColor=white)](https://docs.innate.bot)
+[![Website](https://img.shields.io/badge/Website-Visit%20us-orange?style=for-the-badge&logo=safari&logoColor=white)](https://innate.bot)
+
+</div>
+
+---
+
+> [!NOTE]
+> **This service is in active development.** APIs and features may change. Join our Discord for updates and support.
+
+---
+
+## Overview
+
+The Cloud Agent provides the "brain" for Innate robots — receiving sensor data via WebSocket, processing it through vision-language models, and returning navigation/action commands. It can run locally in Docker or deployed to Google Cloud Run.
+
+## Quick Start
+
+### Local Development
 
 ```bash
 python3 -m venv venv
