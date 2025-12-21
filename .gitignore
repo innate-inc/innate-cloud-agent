@@ -5,6 +5,7 @@ venv/
 recordings/
 histories/
 depth_maps/
+multimodal_history.json
 
 .env
 

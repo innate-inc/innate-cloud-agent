@@ -10,15 +10,21 @@ from typing import Optional
 from src.message_types import MessageInType, MessageOut, MessageOutType, MessageIn
 from src.brain import Brain
 from src.debug_panel import register_brain_for_debug, unregister_brain_for_debug
+from src.auth.token_auth import get_authenticator, AuthContext
 
 
-def get_user_from_token(token: str):
+def get_user_from_token(token: str) -> Optional[AuthContext]:
     """
-    Example token check. Replace with real logic (DB lookup, etc.) if needed.
+    Validate token against BigQuery user_management table.
+
+    Args:
+        token: The robot_special_token to validate
+
+    Returns:
+        AuthContext if valid, None otherwise
     """
-    if token == "MY_HARDCODED_TOKEN":
-        return "user123"
-    return None
+    authenticator = get_authenticator()
+    return authenticator.validate_service_key(token)
 
 
 class WebSocketAgentConnection:
@@ -30,6 +36,7 @@ class WebSocketAgentConnection:
     def __init__(self, websocket):
         self.websocket = websocket
         self.user_token: Optional[str] = None
+        self.auth_context: Optional[AuthContext] = None
         self.recording_dir: str = ""
         self.brain: Optional[Brain] = None
         self.brain_task = None  # Keep a reference to the brain task
@@ -167,11 +174,20 @@ class WebSocketAgentConnection:
             return False
 
         if token is None:
-            print("[WARN] Invalid token, closing connection.")
+            print("[WARN] No token provided, closing connection.")
             return False
 
-        self.user_token = token
-        print(f"[INFO] Authenticated user with token: {self.user_token}")
+        # Validate token against BigQuery user_management table
+        auth_context = get_user_from_token(token)
+        if auth_context is None:
+            print(f"[WARN] Invalid token, not found in database: {token[:10]}...")
+            return False
+
+        self.auth_context = auth_context
+        self.user_token = auth_context.robot_special_token
+        print(
+            f"[INFO] Authenticated user_id: {auth_context.user_id} with token: {self.user_token[:10]}..."
+        )
         return True
 
     async def _save_incoming_image(self, image_b64: str):
