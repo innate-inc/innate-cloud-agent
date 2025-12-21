@@ -475,6 +475,29 @@ class PoseGraphMemory:
             print(f"Error loading graph: {e}")
             return nx.DiGraph()
 
+    def get_all_positions(self, user_token: str) -> list:
+        """
+        Get all x, y, theta positions from the pose graph for a user.
+
+        Args:
+            user_token: The user/robot identifier
+
+        Returns:
+            List of dictionaries with 'x', 'y', and 'theta' keys
+        """
+        graph = self.get_user_graph(user_token)
+        positions = []
+        for node_id, node_data in graph.nodes(data=True):
+            pos = node_data.get("position", {})
+            positions.append(
+                {
+                    "x": pos.get("x", 0.0),
+                    "y": pos.get("y", 0.0),
+                    "theta": pos.get("theta", 0.0),
+                }
+            )
+        return positions
+
     def reset_user_data(self, user_token: str):
         """Reset a user's pose graph and delete their image files."""
         # Create a new empty graph for the user

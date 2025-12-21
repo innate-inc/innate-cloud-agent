@@ -3,7 +3,7 @@ Pose graph handler for the Brain.
 Handles pose_image messages and manages the pose graph memory.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from src.brain_utils.constants import PrimitiveNames
 from src.constants_robots import ROBOT_PARAMS_TO_USE
@@ -39,7 +39,7 @@ class PoseGraphHandler:
         cov_x: float,
         cov_y: float,
         cov_yaw: float,
-    ) -> Optional[dict]:
+    ) -> Tuple[Optional[dict], Optional[list]]:
         """
         Handle a pose_image message.
 
@@ -49,7 +49,9 @@ class PoseGraphHandler:
             cov_x, cov_y, cov_yaw: Position/orientation covariances
 
         Returns:
-            Updated robot coordinates dict if successful, None if skipped
+            Tuple of (robot_coords, positions):
+            - robot_coords: Updated robot coordinates dict if successful, None if skipped
+            - positions: All pose graph positions if a node was added, None otherwise
         """
         # Check if covariance is too high (robot position uncertain)
         if self._is_covariance_too_high(cov_x, cov_y, cov_yaw):
@@ -57,7 +59,7 @@ class PoseGraphHandler:
                 f"Skipping image addition to pose graph because covariances are too high: "
                 f"cov_x={cov_x}, cov_y={cov_y}, cov_yaw={cov_yaw}"
             )
-            return None
+            return None, None
 
         robot_coords = {"x": x, "y": y, "theta": theta}
 
@@ -68,7 +70,7 @@ class PoseGraphHandler:
 
         if navigate_through_memory is None:
             self.logger.error("NavigateThroughMemory primitive not found")
-            return robot_coords
+            return robot_coords, None
 
         pose_graph_memory = navigate_through_memory.pose_graph_memory
 
@@ -77,7 +79,7 @@ class PoseGraphHandler:
             self.logger.debug(
                 "Skipping image addition to pose graph because a close node exists"
             )
-            return robot_coords
+            return robot_coords, None
 
         # Add the image to the pose graph
         self.logger.debug(f"Adding image to pose graph with user_token: {user_token}")
@@ -86,7 +88,10 @@ class PoseGraphHandler:
         )
 
         self.logger.info(f"Added image to pose graph with node ID: {node_id}")
-        return robot_coords
+
+        # Return positions so caller can send them to the client
+        positions = pose_graph_memory.get_all_positions(user_token)
+        return robot_coords, positions
 
     def _is_covariance_too_high(
         self,
@@ -132,4 +137,3 @@ class PoseGraphHandler:
         pose_graph_memory.reset_user_data(self.connection_id)
         self.logger.info(f"Reset pose graph memory for connection {self.connection_id}")
         return True
-
