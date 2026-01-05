@@ -428,6 +428,9 @@ class Brain:
         if result.new_gemini_variant is not None:
             self.state.gemini_variant = result.new_gemini_variant
 
+        if result.user_message_to_store is not None:
+            self.state.latest_user_message = result.user_message_to_store
+
     async def handle_primitive_completed(self, message: MessageIn):
         """Handle primitive completion."""
         self.state.primitive_in_execution = (

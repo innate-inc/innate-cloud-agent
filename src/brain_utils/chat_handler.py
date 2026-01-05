@@ -26,6 +26,7 @@ class ChatProcessingResult:
 
     new_gemini_variant: Optional[str] = None
     fast_response_sent: bool = False
+    user_message_to_store: Optional[str] = None
 
 
 class ChatHandler:
@@ -80,11 +81,11 @@ class ChatHandler:
 
         self.history.add(HistoryEntryType.AUDIO_IN, description=text)
 
+        current_image = self.history.get_last_image()
         current_primitive_name = (
             primitive_in_execution.name if primitive_in_execution else None
         )
 
-        current_image = self.history.get_last_image()
         local_primitives = [primitive_to_object(p) for p in self.local_primitives_list]
         all_primitives = local_primitives + (primitives_list or [])
 
