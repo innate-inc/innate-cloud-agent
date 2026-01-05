@@ -1,8 +1,11 @@
 """
 Chat message handler for the Brain.
 Handles chat_in messages including special commands.
+Supports parallel fast/slow agent processing for optimal latency.
 """
 
+import asyncio
+from dataclasses import dataclass
 from typing import Callable, List, Optional
 
 from src.brain_utils.constants import PrimitiveNames
@@ -10,10 +13,25 @@ from src.brain_utils.memory_state_manager import MemoryStateManager
 from src.history.history import History, HistoryEntryType
 from src.message_types import MessageOut
 from src.primitives.types import Primitive
+from src.agents.fast_answer_agent import (
+    fast_answer,
+    FastAnswerDecision,
+    FastAnswerResult,
+)
 
 
 # Valid Gemini variants
 VALID_GEMINI_VARIANTS = ["gemini-flash", "gemini-flash-lite", "gemini-er"]
+
+
+@dataclass
+class ChatProcessingResult:
+    """Result of processing a chat message."""
+
+    new_gemini_variant: Optional[str] = None
+    user_message_to_store: Optional[str] = None
+    fast_response_sent: bool = False
+    deferred_to_vision: bool = False
 
 
 class ChatHandler:
@@ -48,42 +66,132 @@ class ChatHandler:
         text: str,
         current_gemini_variant: str,
         enable_memory_commands: bool,
-    ) -> tuple[Optional[str], Optional[str]]:
+        directive: Optional[str] = None,
+        current_primitive_name: Optional[str] = None,
+    ) -> ChatProcessingResult:
         """
-        Handle a chat_in message.
+        Handle a chat_in message with parallel fast/slow agent processing.
 
         Args:
             text: The chat message text
             current_gemini_variant: Current Gemini variant setting
             enable_memory_commands: Whether memory commands are enabled
+            directive: Current directive for context
+            current_primitive_name: Name of currently executing primitive
 
         Returns:
-            Tuple of (new_gemini_variant, user_message_to_store)
-            - new_gemini_variant: Updated variant if changed, None otherwise
-            - user_message_to_store: Message to store for VLM, None if command was handled
+            ChatProcessingResult with processing outcome
         """
         # Handle Gemini version switch command (always enabled)
         if text.startswith("!gemini"):
             new_variant = await self._handle_gemini_command(
                 text, current_gemini_variant
             )
-            return new_variant, None
+            return ChatProcessingResult(new_gemini_variant=new_variant)
 
         # Check for special memory commands if enabled
         if enable_memory_commands and self.memory_state_manager is not None:
             handled = await self._handle_memory_commands(text)
             if handled:
-                return None, None
+                return ChatProcessingResult()
 
         # Handle memory command attempt when disabled
         if text.startswith("!"):
             handled = await self._handle_disabled_memory_command(text)
             if handled:
-                return None, None
+                return ChatProcessingResult()
 
-        # Regular user message - store for VLM processing
+        # Regular user message - add to history
         self.history.add(HistoryEntryType.AUDIO_IN, description=text)
-        return None, text
+
+        # Try fast answer agent for quick responses
+        fast_result = await self._try_fast_answer(
+            text, directive, current_primitive_name
+        )
+
+        if fast_result and fast_result.decision == FastAnswerDecision.ANSWER_NOW:
+            # Fast agent can answer - send response immediately
+            if fast_result.response:
+                await self._send_chat_response(fast_result.response)
+                # Add the fast agent's response to history so VLM knows we already answered
+                self.history.add(
+                    HistoryEntryType.SYSTEM_MESSAGE,
+                    description=f"Fast agent response: {fast_result.response}",
+                )
+                self.logger.info(
+                    f"Fast agent answered: {fast_result.reasoning}"
+                )
+            return ChatProcessingResult(
+                user_message_to_store=text,  # Still store for context
+                fast_response_sent=True,
+            )
+        else:
+            # Defer to vision agent
+            reason = fast_result.reasoning if fast_result else "Fast agent unavailable"
+            self.logger.info(f"Deferring to vision agent: {reason}")
+            return ChatProcessingResult(
+                user_message_to_store=text,
+                deferred_to_vision=True,
+            )
+
+    async def _try_fast_answer(
+        self,
+        text: str,
+        directive: Optional[str],
+        current_primitive_name: Optional[str],
+    ) -> Optional[FastAnswerResult]:
+        """
+        Try to get a fast answer for the user message.
+
+        Args:
+            text: The user's message
+            directive: Current directive
+            current_primitive_name: Name of currently executing primitive
+
+        Returns:
+            FastAnswerResult or None if fast answer is not available
+        """
+        import time
+        start_time = time.time()
+        self.logger.info(f"[ChatHandler] Starting fast answer for: '{text[:50]}...'")
+
+        try:
+            # Get a brief history summary for context
+            history_summary = self._get_brief_history_summary()
+            self.logger.info(f"[ChatHandler] History summary: {history_summary[:100]}...")
+
+            result = await fast_answer(
+                user_message=text,
+                directive=directive,
+                current_primitive=current_primitive_name,
+                history_summary=history_summary,
+            )
+            elapsed = time.time() - start_time
+            self.logger.info(
+                f"[ChatHandler] Fast answer completed in {elapsed:.2f}s, "
+                f"decision: {result.decision.value if result else 'None'}"
+            )
+            return result
+        except Exception as e:
+            elapsed = time.time() - start_time
+            self.logger.warn(f"Fast answer agent failed in {elapsed:.2f}s: {e}")
+            return None
+
+    def _get_brief_history_summary(self) -> str:
+        """Get a brief summary of recent history for fast agent context."""
+        # Get last few non-image entries from history
+        recent_entries = []
+        for entry in reversed(self.history.entries[-10:]):
+            if entry.type not in [
+                HistoryEntryType.GENERIC_IMAGE,
+                HistoryEntryType.IMAGE_PRE_ACTION,
+            ]:
+                # Truncate long descriptions
+                desc = entry.description[:100] if len(entry.description) > 100 else entry.description
+                recent_entries.append(f"{entry.type.value}: {desc}")
+            if len(recent_entries) >= 5:
+                break
+        return "\n".join(reversed(recent_entries)) if recent_entries else "No recent history"
 
     async def _handle_gemini_command(
         self,
@@ -235,5 +343,5 @@ class ChatHandler:
 
     async def _send_chat_response(self, text: str) -> None:
         """Send a chat response to the client."""
-        await self.send_callback(MessageOut(type="chat_out", payload={"text": text}))
+        await self.send_callback(MessageOut(type="brain/chat_out", payload={"text": text}))
 

@@ -101,21 +101,26 @@ class PrimitiveHandler:
         primitive_id = payload["primitive_id"]
         primitive_name = payload["primitive_name"]
 
-        if (
-            primitive_in_execution
-            and primitive_in_execution.primitive_id == primitive_id
-        ):
-            self.logger.info(f"Task '{primitive_in_execution.name}' interrupted.")
-            self.history.add(
-                HistoryEntryType.PRIMITIVE_INTERRUPTED,
-                description=f"Primitive '{primitive_name}' interrupted.",
+        if primitive_in_execution is None:
+            self.logger.warn(
+                f"Received interrupt for '{primitive_name}' (ID: {primitive_id}) "
+                f"but no primitive is currently executing. Ignoring."
             )
             return None
 
-        raise ValueError(
-            f"[Brain {self.connection_id}] Task '{primitive_name}' (ID: {primitive_id}) "
-            f"is not the current task in execution."
+        if primitive_in_execution.primitive_id != primitive_id:
+            self.logger.warn(
+                f"Interrupt for '{primitive_name}' (ID: {primitive_id}) doesn't match "
+                f"current task '{primitive_in_execution.name}' (ID: {primitive_in_execution.primitive_id}). "
+                f"Clearing current task anyway."
+            )
+
+        self.logger.info(f"Task '{primitive_in_execution.name}' interrupted.")
+        self.history.add(
+            HistoryEntryType.PRIMITIVE_INTERRUPTED,
+            description=f"Primitive '{primitive_name}' interrupted.",
         )
+        return None
 
     def handle_primitive_feedback(
         self,
@@ -134,7 +139,7 @@ class PrimitiveHandler:
                 description=f"'{task_name}': {feedback_text}",
             )
         else:
-            self.logger.warning(
+            self.logger.warn(
                 "Received primitive_feedback message with no feedback text."
             )
 
@@ -216,6 +221,6 @@ class PrimitiveHandler:
                 description=entry_text,
             )
         else:
-            self.logger.warning(
+            self.logger.warn(
                 f"Received empty feedback message from primitive '{primitive_name}'."
             )

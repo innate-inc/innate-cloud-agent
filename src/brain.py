@@ -30,7 +30,7 @@ from src.brain_utils.chat_handler import ChatHandler
 from src.brain_utils.primitive_handler import PrimitiveHandler
 from src.brain_utils.pose_graph_handler import PoseGraphHandler
 
-DEFAULT_GEMINI_VARIANT = "gemini-2.5-flash"
+DEFAULT_GEMINI_VARIANT = "gemini-3-flash-preview"
 
 
 @dataclass
@@ -118,7 +118,7 @@ class Brain:
         if self.enable_memory_commands:
             self.memory_state_manager = MemoryStateManager(self.logger, connection_id)
 
-        # Initialize the image handler
+        # Initialize the image handler with chat callback for fast agent responses
         self.image_handler = ImageHandler(
             logger=self.logger,
             image_processor=self.image_processor,
@@ -126,6 +126,7 @@ class Brain:
             navigation_handler=self.navigation_handler,
             history=self.history,
             local_primitives_list=self.local_primitives_list,
+            send_chat_callback=self._send_chat_out,
         )
 
         # Initialize chat handler
@@ -168,8 +169,30 @@ class Brain:
         """
         Called externally (by your websocket connection handler) to push
         messages into the brain for processing.
+
+        CHAT_IN messages are processed immediately in a separate task to avoid
+        waiting behind slow IMAGE processing. This ensures fast response times
+        for user questions.
         """
-        await self.message_queue.put(message)
+        # Process CHAT_IN immediately without waiting for the queue
+        if message.type == MessageInType.CHAT_IN:
+            # Fire and forget - process chat in parallel
+            asyncio.create_task(self._process_chat_immediately(message))
+        else:
+            await self.message_queue.put(message)
+
+    async def _process_chat_immediately(self, message: MessageIn):
+        """
+        Process a CHAT_IN message immediately, bypassing the queue.
+        This ensures fast response times for user questions.
+        """
+        try:
+            self.logger.info(f"Processing message: {message.type} (fast path)")
+            await self.handle_chat_in(message)
+        except Exception as e:
+            self.logger.error(
+                f"Error processing chat message: {e}\n{traceback.format_exc()}"
+            )
 
     async def run(self):
         """
@@ -229,7 +252,7 @@ class Brain:
 
         # Handle failure case
         if vision_output is None:
-            self.logger.warning(f"Image processing failed after {time_elapsed:.2f}s")
+            self.logger.warn(f"Image processing failed after {time_elapsed:.2f}s")
             self._log_image_metrics_to_bigquery(
                 vlm_processing_time=None,
                 token_metrics=None,
@@ -391,21 +414,38 @@ class Brain:
             await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_chat_in(self, message: MessageIn):
-        """Handle messages of type 'chat_in'. Delegates to ChatHandler."""
+        """
+        Handle messages of type 'chat_in'. Delegates to ChatHandler.
+
+        The ChatHandler now uses a fast answer agent that runs in parallel:
+        - Fast agent answers simple questions immediately
+        - Complex questions or those requiring vision/movement are deferred
+          to the main vision agent on the next image processing cycle
+        """
         text = message.payload["text"]
-        new_gemini_variant, user_message = await self.chat_handler.handle_chat_in(
+
+        # Get current primitive name for context
+        current_primitive_name = (
+            self.state.primitive_in_execution.name
+            if self.state.primitive_in_execution
+            else None
+        )
+
+        result = await self.chat_handler.handle_chat_in(
             text=text,
             current_gemini_variant=self.state.gemini_variant,
             enable_memory_commands=self.enable_memory_commands,
+            directive=self.state.directive,
+            current_primitive_name=current_primitive_name,
         )
 
         # Update Gemini variant if changed
-        if new_gemini_variant is not None:
-            self.state.gemini_variant = new_gemini_variant
+        if result.new_gemini_variant is not None:
+            self.state.gemini_variant = result.new_gemini_variant
 
-        # Store user message for VLM processing if not a command
-        if user_message is not None:
-            self.state.latest_user_message = user_message
+        # Store user message for VLM processing if deferred to vision agent
+        if result.user_message_to_store is not None and result.deferred_to_vision:
+            self.state.latest_user_message = result.user_message_to_store
 
     async def handle_primitive_completed(self, message: MessageIn):
         """Handle primitive completion."""
@@ -498,7 +538,7 @@ class Brain:
         elif memory_state and (
             not self.enable_memory_commands or self.memory_state_manager is None
         ):
-            self.logger.warning(
+            self.logger.warn(
                 f"Memory state '{memory_state}' provided, "
                 f"but memory commands are disabled"
             )
@@ -546,6 +586,17 @@ class Brain:
         directive_registered = new_directive is not None
         if directive_registered:
             old_directive = self.state.directive
+            directive_changed = (
+                old_directive is not None and old_directive != new_directive
+            )
+
+            # Reset history if directive actually changed (not just set for the first time)
+            if directive_changed:
+                self.logger.info(
+                    f"Directive changed, resetting conversation history for connection {self.connection_id}"
+                )
+                self.history.reset()
+
             self.state.directive = new_directive
 
             self.bq_logger.log(
@@ -587,6 +638,12 @@ class Brain:
         """
         self.running = False
         await self.message_queue.put(None)
+
+    async def _send_chat_out(self, text: str):
+        """Send a chat message to the client."""
+        await self.send_callback(
+            MessageOut(type=MessageOutType.CHAT_OUT, payload={"text": text})
+        )
 
     def _get_navigate_through_memory_primitive(self):
         """Get the NavigateThroughMemory primitive from local primitives."""
