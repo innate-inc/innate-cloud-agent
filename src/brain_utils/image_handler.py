@@ -507,6 +507,7 @@ class ImageHandler:
                 directive=directive,
                 current_primitive=current_primitive_name,
                 history_summary=history_summary,
+                current_image=current_image_for_vlm,
             )
         )
 
