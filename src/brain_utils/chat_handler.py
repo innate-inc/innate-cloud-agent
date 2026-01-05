@@ -1,10 +1,8 @@
 """
 Chat message handler for the Brain.
 Handles chat_in messages including special commands.
-Supports parallel fast/slow agent processing for optimal latency.
 """
 
-import asyncio
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
@@ -13,11 +11,7 @@ from src.brain_utils.memory_state_manager import MemoryStateManager
 from src.history.history import History, HistoryEntryType
 from src.message_types import MessageOut
 from src.primitives.types import Primitive
-from src.agents.fast_answer_agent import (
-    fast_answer,
-    FastAnswerDecision,
-    FastAnswerResult,
-)
+from src.agents.fast_answer_agent import fast_answer, FastAnswerDecision
 
 
 # Valid Gemini variants
@@ -105,77 +99,23 @@ class ChatHandler:
         self.history.add(HistoryEntryType.AUDIO_IN, description=text)
 
         # Try fast answer agent for quick responses
-        fast_result = await self._try_fast_answer(
-            text, directive, current_primitive_name
+        fast_result = await fast_answer(
+            user_message=text,
+            directive=directive,
+            current_primitive=current_primitive_name,
+            history_summary=self._get_brief_history_summary(),
         )
 
-        if fast_result and fast_result.decision == FastAnswerDecision.ANSWER_NOW:
-            # Fast agent can answer - send response immediately
-            if fast_result.response:
-                await self._send_chat_response(fast_result.response)
-                # Add the fast agent's response to history so VLM knows we already answered
-                self.history.add(
-                    HistoryEntryType.SYSTEM_MESSAGE,
-                    description=f"Fast agent response: {fast_result.response}",
-                )
-                self.logger.info(
-                    f"Fast agent answered: {fast_result.reasoning}"
-                )
-            return ChatProcessingResult(
-                user_message_to_store=text,  # Still store for context
-                fast_response_sent=True,
+        if fast_result.decision == FastAnswerDecision.ANSWER_NOW and fast_result.response:
+            await self._send_chat_response(fast_result.response)
+            self.history.add(
+                HistoryEntryType.SYSTEM_MESSAGE,
+                description=f"Fast agent response: {fast_result.response}",
             )
-        else:
-            # Defer to vision agent
-            reason = fast_result.reasoning if fast_result else "Fast agent unavailable"
-            self.logger.info(f"Deferring to vision agent: {reason}")
-            return ChatProcessingResult(
-                user_message_to_store=text,
-                deferred_to_vision=True,
-            )
+            return ChatProcessingResult(user_message_to_store=text, fast_response_sent=True)
 
-    async def _try_fast_answer(
-        self,
-        text: str,
-        directive: Optional[str],
-        current_primitive_name: Optional[str],
-    ) -> Optional[FastAnswerResult]:
-        """
-        Try to get a fast answer for the user message.
-
-        Args:
-            text: The user's message
-            directive: Current directive
-            current_primitive_name: Name of currently executing primitive
-
-        Returns:
-            FastAnswerResult or None if fast answer is not available
-        """
-        import time
-        start_time = time.time()
-        self.logger.info(f"[ChatHandler] Starting fast answer for: '{text[:50]}...'")
-
-        try:
-            # Get a brief history summary for context
-            history_summary = self._get_brief_history_summary()
-            self.logger.info(f"[ChatHandler] History summary: {history_summary[:100]}...")
-
-            result = await fast_answer(
-                user_message=text,
-                directive=directive,
-                current_primitive=current_primitive_name,
-                history_summary=history_summary,
-            )
-            elapsed = time.time() - start_time
-            self.logger.info(
-                f"[ChatHandler] Fast answer completed in {elapsed:.2f}s, "
-                f"decision: {result.decision.value if result else 'None'}"
-            )
-            return result
-        except Exception as e:
-            elapsed = time.time() - start_time
-            self.logger.warn(f"Fast answer agent failed in {elapsed:.2f}s: {e}")
-            return None
+        # Defer to vision agent
+        return ChatProcessingResult(user_message_to_store=text, deferred_to_vision=True)
 
     def _get_brief_history_summary(self) -> str:
         """Get a brief summary of recent history for fast agent context."""
