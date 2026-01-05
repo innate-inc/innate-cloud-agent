@@ -103,35 +103,24 @@ class ChatHandler:
             user_message=text,
             directive=directive,
             current_primitive=current_primitive_name,
-            history_summary=self._get_brief_history_summary(),
+            history_summary=self.history.get_brief_summary(),
         )
 
-        if fast_result.decision == FastAnswerDecision.ANSWER_NOW and fast_result.response:
+        if (
+            fast_result.decision == FastAnswerDecision.ANSWER_NOW
+            and fast_result.response
+        ):
             await self._send_chat_response(fast_result.response)
             self.history.add(
                 HistoryEntryType.SYSTEM_MESSAGE,
                 description=f"Fast agent response: {fast_result.response}",
             )
-            return ChatProcessingResult(user_message_to_store=text, fast_response_sent=True)
+            return ChatProcessingResult(
+                user_message_to_store=text, fast_response_sent=True
+            )
 
         # Defer to vision agent
         return ChatProcessingResult(user_message_to_store=text, deferred_to_vision=True)
-
-    def _get_brief_history_summary(self) -> str:
-        """Get a brief summary of recent history for fast agent context."""
-        # Get last few non-image entries from history
-        recent_entries = []
-        for entry in reversed(self.history.entries[-10:]):
-            if entry.type not in [
-                HistoryEntryType.GENERIC_IMAGE,
-                HistoryEntryType.IMAGE_PRE_ACTION,
-            ]:
-                # Truncate long descriptions
-                desc = entry.description[:100] if len(entry.description) > 100 else entry.description
-                recent_entries.append(f"{entry.type.value}: {desc}")
-            if len(recent_entries) >= 5:
-                break
-        return "\n".join(reversed(recent_entries)) if recent_entries else "No recent history"
 
     async def _handle_gemini_command(
         self,
@@ -283,5 +272,6 @@ class ChatHandler:
 
     async def _send_chat_response(self, text: str) -> None:
         """Send a chat response to the client."""
-        await self.send_callback(MessageOut(type="brain/chat_out", payload={"text": text}))
-
+        await self.send_callback(
+            MessageOut(type="brain/chat_out", payload={"text": text})
+        )

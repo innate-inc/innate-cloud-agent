@@ -497,7 +497,7 @@ class ImageHandler:
         )
 
         # Get brief history summary for fast agent
-        history_summary = self._get_brief_history_summary()
+        history_summary = self.history.get_brief_summary()
 
         # Create tasks for parallel execution
         self.logger.info("[Parallel] Creating fast agent task...")
@@ -582,25 +582,3 @@ class ImageHandler:
         )
 
         return vision_output, fast_answered
-
-    def _get_brief_history_summary(self) -> str:
-        """Get a brief summary of recent history for fast agent context."""
-        recent_entries = []
-        for entry in reversed(self.history.entries[-10:]):
-            if entry.type not in [
-                HistoryEntryType.GENERIC_IMAGE,
-                HistoryEntryType.IMAGE_PRE_ACTION,
-            ]:
-                desc = (
-                    entry.description[:100]
-                    if len(entry.description) > 100
-                    else entry.description
-                )
-                recent_entries.append(f"{entry.type.value}: {desc}")
-            if len(recent_entries) >= 5:
-                break
-        return (
-            "\n".join(reversed(recent_entries))
-            if recent_entries
-            else "No recent history"
-        )
