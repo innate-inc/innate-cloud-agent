@@ -1,6 +1,4 @@
-from enum import Enum
-from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import os
 import json
@@ -425,6 +423,16 @@ class History:
             if recent_entries
             else "No recent history"
         )
+
+    def get_last_image(self) -> Optional[str]:
+        """Get the most recent image from history (base64 encoded)."""
+        for entry in reversed(self.entries):
+            if entry.type in [
+                HistoryEntryType.GENERIC_IMAGE,
+                HistoryEntryType.IMAGE_PRE_ACTION,
+            ]:
+                return entry.description
+        return None
 
     def get_as_string(self) -> str:
         now = get_now()

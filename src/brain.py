@@ -135,6 +135,7 @@ class Brain:
             history=self.history,
             local_primitives_list=self.local_primitives_list,
             send_callback=self.send_callback,
+            vision_service=self.vision_service,
             memory_state_manager=self.memory_state_manager,
         )
 
@@ -414,38 +415,18 @@ class Brain:
             await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_chat_in(self, message: MessageIn):
-        """
-        Handle messages of type 'chat_in'. Delegates to ChatHandler.
-
-        The ChatHandler now uses a fast answer agent that runs in parallel:
-        - Fast agent answers simple questions immediately
-        - Complex questions or those requiring vision/movement are deferred
-          to the main vision agent on the next image processing cycle
-        """
-        text = message.payload["text"]
-
-        # Get current primitive name for context
-        current_primitive_name = (
-            self.state.primitive_in_execution.name
-            if self.state.primitive_in_execution
-            else None
-        )
-
+        """Handle messages of type 'chat_in'. Uses parallel fast/slow agent processing."""
         result = await self.chat_handler.handle_chat_in(
-            text=text,
+            text=message.payload["text"],
             current_gemini_variant=self.state.gemini_variant,
             enable_memory_commands=self.enable_memory_commands,
             directive=self.state.directive,
-            current_primitive_name=current_primitive_name,
+            primitive_in_execution=self.state.primitive_in_execution,
+            primitives_list=self.state.primitives_list,
         )
 
-        # Update Gemini variant if changed
         if result.new_gemini_variant is not None:
             self.state.gemini_variant = result.new_gemini_variant
-
-        # Store user message for VLM processing if deferred to vision agent
-        if result.user_message_to_store is not None and result.deferred_to_vision:
-            self.state.latest_user_message = result.user_message_to_store
 
     async def handle_primitive_completed(self, message: MessageIn):
         """Handle primitive completion."""

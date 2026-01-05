@@ -1,20 +1,18 @@
 """
 Image message handler for the Brain.
 Breaks down the complex handle_image logic into smaller, focused methods.
-Supports parallel fast/slow agent processing for optimal latency.
 """
 
-import asyncio
 import time
 import uuid
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
 from src.agents.types import PrimitiveDefinition, VisionAgentOutput
-from src.agents.fast_answer_agent import fast_answer, FastAnswerDecision
 from src.brain_utils.constants import PrimitiveNames
 from src.brain_utils.image_processor import ImageProcessor
 from src.brain_utils.navigation_handler import NavigationHandler
+from src.brain_utils.parallel_agents import run_agents_in_parallel
 from src.brain_utils.vision_service import VisionAgentType, VisionService
 from src.history.history import History, HistoryEntryType
 from src.primitives.transforms import primitive_to_object
@@ -43,12 +41,7 @@ class TokenMetrics:
 class ImageHandler:
     """
     Handles image message processing for the Brain.
-    Extracts the complex logic from handle_image into focused methods.
-
-    Supports parallel fast/slow agent processing:
-    - When a user message is present, starts both fast and slow agents in parallel
-    - Fast agent can answer simple questions immediately
-    - If fast agent defers, waits for slow (vision) agent result
+    Uses parallel fast/slow agent processing when a user message is present.
     """
 
     def __init__(
@@ -461,124 +454,33 @@ class ImageHandler:
         gemini_variant: str,
         additional_image_data: dict,
     ) -> Tuple[Optional[VisionAgentOutput], bool]:
-        """
-        Call fast and slow agents in parallel for optimal latency.
-
-        The fast agent evaluates the user message quickly (text-only).
-        The slow agent (VLM) processes the full visual context.
-
-        If fast agent can answer, we send the response immediately and
-        still return the VLM result for any actions needed.
-
-        Args:
-            current_image_for_vlm: Base64 encoded image
-            latest_user_message: User's message
-            primitive_in_execution: Currently executing primitive
-            primitives_list: Available primitives
-            robot_coords: Robot coordinates
-            directive: Current directive
-            gemini_variant: Gemini model variant
-            additional_image_data: Additional camera data
-
-        Returns:
-            Tuple of (vision_output, fast_answered)
-            - vision_output: VLM result (always returned)
-            - fast_answered: True if fast agent sent a response
-        """
-        parallel_start = time.time()
-        self.logger.info(
-            f"[Parallel] Starting parallel agent processing for: "
-            f"'{latest_user_message[:50]}...'"
-        )
-
-        # Get current primitive name for fast agent context
+        """Call fast and slow agents in parallel, returns (vision_output, fast_answered)."""
         current_primitive_name = (
             primitive_in_execution.name if primitive_in_execution else None
         )
 
-        # Get brief history summary for fast agent
-        history_summary = self.history.get_brief_summary()
-
-        # Create tasks for parallel execution
-        self.logger.info("[Parallel] Creating fast agent task...")
-        fast_task = asyncio.create_task(
-            fast_answer(
-                user_message=latest_user_message,
-                directive=directive,
-                current_primitive=current_primitive_name,
-                history_summary=history_summary,
-                current_image=current_image_for_vlm,
-            )
+        slow_coro = self.vision_service.call_visual_language_model(
+            base64_img=current_image_for_vlm,
+            user_prompt_text=latest_user_message,
+            primitive_in_execution=primitive_in_execution,
+            primitives_list=primitives_list,
+            history=self.history.get_as_multimodal_list(),
+            robot_coords=robot_coords,
+            directive=directive,
+            agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,
+            gemini_variant=gemini_variant,
+            additional_image_data=additional_image_data,
         )
 
-        self.logger.info("[Parallel] Creating slow (VLM) agent task...")
-        slow_task = asyncio.create_task(
-            self.vision_service.call_visual_language_model(
-                base64_img=current_image_for_vlm,
-                user_prompt_text=latest_user_message,
-                primitive_in_execution=primitive_in_execution,
-                primitives_list=primitives_list,
-                history=self.history.get_as_multimodal_list(),
-                robot_coords=robot_coords,
-                directive=directive,
-                agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,
-                gemini_variant=gemini_variant,
-                additional_image_data=additional_image_data,
-            )
-        )
-        self.logger.info("[Parallel] Both tasks created, waiting for fast agent...")
-
-        fast_answered = False
-        vision_output = None
-
-        try:
-            # Wait for fast agent first (it should be much faster)
-            fast_start = time.time()
-            fast_result = await fast_task
-            fast_elapsed = time.time() - fast_start
-            self.logger.info(
-                f"[Parallel] Fast agent completed in {fast_elapsed:.2f}s, "
-                f"decision: {fast_result.decision.value if fast_result else 'None'}"
-            )
-
-            if fast_result and fast_result.decision == FastAnswerDecision.ANSWER_NOW:
-                # Fast agent can answer - send response immediately
-                if fast_result.response and self.send_chat_callback:
-                    self.logger.info(
-                        f"[Parallel] Fast agent answering immediately: "
-                        f"'{fast_result.response[:50]}...'"
-                    )
-                    await self.send_chat_callback(fast_result.response)
-                    fast_answered = True
-                    self.logger.info(f"Fast agent answered: {fast_result.reasoning}")
-
-            # Always wait for slow agent to complete (for actions/primitives)
-            self.logger.info("[Parallel] Waiting for slow (VLM) agent...")
-            slow_start = time.time()
-            vision_output = await slow_task
-            slow_elapsed = time.time() - slow_start
-            self.logger.info(
-                f"[Parallel] Slow agent completed in {slow_elapsed:.2f}s "
-                f"(waited {slow_elapsed:.2f}s after fast agent)"
-            )
-
-            if fast_answered and vision_output:
-                # Clear the to_tell_user since fast agent already responded
-                self.logger.info(
-                    "[Parallel] Clearing VLM to_tell_user since fast agent responded"
-                )
-                vision_output.to_tell_user = None
-
-        except Exception as e:
-            self.logger.error(f"Error in parallel agent processing: {e}")
-            # If fast task failed, ensure slow task completes
-            if not slow_task.done():
-                vision_output = await slow_task
-
-        total_elapsed = time.time() - parallel_start
-        self.logger.info(
-            f"[Parallel] Total parallel processing: {total_elapsed:.2f}s, "
-            f"fast_answered: {fast_answered}"
+        result = await run_agents_in_parallel(
+            user_message=latest_user_message,
+            current_image=current_image_for_vlm,
+            directive=directive,
+            current_primitive_name=current_primitive_name,
+            history_summary=self.history.get_brief_summary(),
+            slow_agent_coro=slow_coro,
+            send_chat_callback=self.send_chat_callback,
+            logger=self.logger,
         )
 
-        return vision_output, fast_answered
+        return result.vision_output, result.fast_answered
