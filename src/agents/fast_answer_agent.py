@@ -26,7 +26,7 @@ class FastAnswerDecision(str, Enum):
     """Decision made by the fast answer agent."""
 
     ANSWER_NOW = "answer_now"
-    DEFER_TO_VISION = "defer_to_vision"
+    DEFER_TO_EXPERT = "defer_to_expert"
 
 
 @dataclass
@@ -38,17 +38,17 @@ class FastAnswerResult:
     reasoning: Optional[str] = None
 
 
-FAST_ANSWER_PROMPT = """You are a robot assistant. Answer the user's question if possible, or defer to the vision agent if movement/actions are needed.
+FAST_ANSWER_PROMPT = """You are a robot assistant. Answer the user's question if possible, or defer to the expert if movement/actions are needed.
 
 Context: {directive} | Running: {current_primitive} | History: {history_summary}
 
 User: {user_message}
 
 Rules:
-- ANSWER_NOW: questions, conversation, what you see in the image
-- DEFER_TO_VISION: movement commands, navigation, multi-step tasks
+- ANSWER_NOW: questions, conversation, basic what you see in the image
+- DEFER_TO_EXPERT: movement commands, navigation, multi-step tasks
 
-Respond as JSON: {{"decision": "ANSWER_NOW" or "DEFER_TO_VISION", "response": "your answer if ANSWER_NOW", "reasoning": "why"}}"""
+Respond as JSON: {{"decision": "ANSWER_NOW" or "DEFER_TO_EXPERT", "response": "your answer if ANSWER_NOW", "reasoning": "why"}}"""
 
 
 # Singleton client
@@ -114,7 +114,7 @@ async def fast_answer(
         )
 
         result = json.loads(response.text)
-        decision = FastAnswerDecision(result.get("decision", "defer_to_vision").lower())
+        decision = FastAnswerDecision(result.get("decision", "defer_to_expert").lower())
         return FastAnswerResult(
             decision=decision,
             response=result.get("response")
@@ -125,6 +125,6 @@ async def fast_answer(
     except Exception as e:
         print(f"[FastAgent] Error: {e}")
         return FastAnswerResult(
-            decision=FastAnswerDecision.DEFER_TO_VISION,
+            decision=FastAnswerDecision.DEFER_TO_EXPERT,
             reasoning=f"Fast agent error: {e}",
         )

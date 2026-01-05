@@ -1,19 +1,21 @@
 """
 Chat message handler for the Brain.
 Handles chat_in messages including special commands.
+
+The chat handler runs only the fast agent for immediate responses.
+If the fast agent defers, the message is stored and will be processed
+by the image handler with the next fresh image.
 """
 
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
+from src.agents.fast_answer_agent import fast_answer, FastAnswerDecision
 from src.agents.types import PrimitiveDefinition
 from src.brain_utils.constants import PrimitiveNames
 from src.brain_utils.memory_state_manager import MemoryStateManager
-from src.brain_utils.parallel_agents import run_agents_in_parallel
-from src.brain_utils.vision_service import VisionAgentType, VisionService
 from src.history.history import History, HistoryEntryType
 from src.message_types import MessageOut
-from src.primitives.transforms import primitive_to_object
 from src.primitives.types import Primitive
 
 
@@ -32,7 +34,12 @@ class ChatProcessingResult:
 class ChatHandler:
     """
     Handles chat_in messages and special commands.
-    Uses parallel fast/slow agent processing for user messages.
+
+    For regular user messages:
+    - Runs only the fast agent for immediate responses
+    - If fast agent can answer, sends response immediately
+    - If fast agent defers, stores the message for the image handler
+      to process with the next fresh image
     """
 
     def __init__(
@@ -41,14 +48,12 @@ class ChatHandler:
         history: History,
         local_primitives_list: List[Primitive],
         send_callback: Callable,
-        vision_service: VisionService,
         memory_state_manager: Optional[MemoryStateManager] = None,
     ):
         self.logger = logger
         self.history = history
         self.local_primitives_list = local_primitives_list
         self.send_callback = send_callback
-        self.vision_service = vision_service
         self.memory_state_manager = memory_state_manager
 
     async def handle_chat_in(
@@ -61,7 +66,11 @@ class ChatHandler:
         primitives_list: Optional[List[PrimitiveDefinition]] = None,
     ) -> ChatProcessingResult:
         """
-        Handle a chat_in message with parallel fast/slow agent processing.
+        Handle a chat_in message.
+
+        Runs the fast agent to check if we can answer immediately.
+        If not, stores the message for the image handler to process
+        with the next fresh image.
         """
         if text.startswith("!gemini"):
             new_variant = await self._handle_gemini_command(
@@ -79,53 +88,50 @@ class ChatHandler:
             if handled:
                 return ChatProcessingResult()
 
+        # Add user message to history
         self.history.add(HistoryEntryType.AUDIO_IN, description=text)
 
+        # Get context for fast agent
         current_image = self.history.get_last_image()
         current_primitive_name = (
             primitive_in_execution.name if primitive_in_execution else None
         )
+        history_summary = self.history.get_brief_summary()
 
-        local_primitives = [primitive_to_object(p) for p in self.local_primitives_list]
-        all_primitives = local_primitives + (primitives_list or [])
+        # Run fast agent only - it decides whether to answer now or defer
+        self.logger.info(f"[FastAgent] Evaluating: '{text[:50]}...'")
 
-        slow_coro = self.vision_service.call_visual_language_model(
-            base64_img=current_image or "",
-            user_prompt_text=text,
-            primitive_in_execution=primitive_in_execution,
-            primitives_list=all_primitives,
-            history=self.history.get_as_multimodal_list(),
-            robot_coords={},
-            directive=directive,
-            agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,
-            gemini_variant=current_gemini_variant,
-            additional_image_data={},
-        )
-
-        result = await run_agents_in_parallel(
+        fast_result = await fast_answer(
             user_message=text,
-            current_image=current_image,
             directive=directive,
-            current_primitive_name=current_primitive_name,
-            history_summary=self.history.get_brief_summary(),
-            slow_agent_coro=slow_coro,
-            send_chat_callback=self._send_chat_response,
-            logger=self.logger,
+            current_primitive=current_primitive_name,
+            history_summary=history_summary,
+            current_image=current_image,
         )
 
-        if result.fast_answered:
-            self.history.add(
-                HistoryEntryType.SYSTEM_MESSAGE,
-                description=f"Fast agent response: {result.fast_response}",
-            )
-        elif result.vision_output and result.vision_output.to_tell_user:
-            await self._send_chat_response(result.vision_output.to_tell_user)
-            self.history.add(
-                HistoryEntryType.SYSTEM_MESSAGE,
-                description=f"Vision agent response: {result.vision_output.to_tell_user}",
-            )
+        self.logger.info(
+            f"[FastAgent] Decision: {fast_result.decision.value}"
+            + (f" - {fast_result.reasoning}" if fast_result.reasoning else "")
+        )
 
-        return ChatProcessingResult(fast_response_sent=result.fast_answered)
+        if (
+            fast_result.decision == FastAnswerDecision.ANSWER_NOW
+            and fast_result.response
+        ):
+            # Fast agent can answer - send response immediately
+            await self._send_chat_response(fast_result.response)
+            self.history.add(
+                HistoryEntryType.SYSTEM_MESSAGE,
+                description=f"Fast agent response: {fast_result.response}",
+            )
+            return ChatProcessingResult(fast_response_sent=True)
+        else:
+            # Fast agent defers - store message for image handler to process
+            # with the next fresh image (both fast and slow agents will run there)
+            self.logger.info(
+                "[FastAgent] Deferring to vision agent - message stored for next image"
+            )
+            return ChatProcessingResult(user_message_to_store=text)
 
     async def _handle_gemini_command(
         self,

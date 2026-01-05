@@ -135,7 +135,6 @@ class Brain:
             history=self.history,
             local_primitives_list=self.local_primitives_list,
             send_callback=self.send_callback,
-            vision_service=self.vision_service,
             memory_state_manager=self.memory_state_manager,
         )
 
@@ -346,6 +345,16 @@ class Brain:
         vision_output = processing_result.vision_output
         vlm_processing_time = processing_result.vlm_processing_time
 
+        # If there was no explicit user message for this image processing,
+        # clear any to_tell_user that the VLM might have generated from
+        # seeing user messages in history - those are handled by the chat handler.
+        if self.state.latest_user_message is None and vision_output.to_tell_user:
+            self.logger.debug(
+                f"Clearing to_tell_user from image processing (no explicit user message): "
+                f"{vision_output.to_tell_user[:50]}..."
+            )
+            vision_output.to_tell_user = None
+
         # Clear the user message as it's been consumed
         self.state.latest_user_message = None
 
@@ -415,7 +424,13 @@ class Brain:
             await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_chat_in(self, message: MessageIn):
-        """Handle messages of type 'chat_in'. Uses parallel fast/slow agent processing."""
+        """
+        Handle messages of type 'chat_in'.
+
+        Fast agent runs immediately. If it can answer, response is sent.
+        If it defers, the message is stored and will be processed by the
+        image handler with the next fresh image (running both fast and slow agents).
+        """
         result = await self.chat_handler.handle_chat_in(
             text=message.payload["text"],
             current_gemini_variant=self.state.gemini_variant,
@@ -430,6 +445,9 @@ class Brain:
 
         if result.user_message_to_store is not None:
             self.state.latest_user_message = result.user_message_to_store
+            self.logger.info(
+                f"Stored user message for next image: '{result.user_message_to_store[:50]}...'"
+            )
 
     async def handle_primitive_completed(self, message: MessageIn):
         """Handle primitive completion."""

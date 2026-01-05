@@ -132,6 +132,9 @@ class ImageHandler:
         # Parallel processing: if there's a user message, start fast agent in parallel
         # with the vision agent. Fast agent may answer immediately, avoiding VLM latency.
         if latest_user_message:
+            self.logger.info(
+                f"Processing image with pending user message: '{latest_user_message[:50]}...'"
+            )
             vision_output, fast_answered = await self._call_agents_in_parallel(
                 current_image_for_vlm=current_image_for_vlm,
                 latest_user_message=latest_user_message,
@@ -143,11 +146,21 @@ class ImageHandler:
                 additional_image_data=additional_image_data,
             )
             if fast_answered:
-                # Fast agent handled the response, no need for VLM output
+                # Fast agent handled the response, VLM's to_tell_user already cleared
                 vlm_processing_time = time.time() - vlm_start_time
+                self.logger.info(f"Fast agent answered in {vlm_processing_time:.2f}s")
+            elif (
+                vision_output and vision_output.to_tell_user and self.send_chat_callback
+            ):
+                # Fast agent deferred, send slow agent's response as chat
+                await self.send_chat_callback(vision_output.to_tell_user)
                 self.logger.info(
-                    f"Fast agent answered in {vlm_processing_time:.2f}s, "
-                    f"VLM result discarded"
+                    f"Slow agent response sent: {vision_output.to_tell_user[:50]}..."
+                )
+                # Record in history
+                self.history.add(
+                    HistoryEntryType.SYSTEM_MESSAGE,
+                    description=f"Vision agent response: {vision_output.to_tell_user}",
                 )
         else:
             # No user message, just call the vision agent
