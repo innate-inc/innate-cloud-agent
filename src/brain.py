@@ -80,6 +80,7 @@ class Brain:
         self.enable_memory_commands = enable_memory_commands
 
         self.state = BrainState()
+        self.current_robot_coords = {}
 
         # Initialize history to record chat messages and vision agent outputs.
         # The History class defaults to MAX_MULTIMODAL_IMAGES = 3.
@@ -135,6 +136,7 @@ class Brain:
             history=self.history,
             local_primitives_list=self.local_primitives_list,
             send_callback=self.send_callback,
+            vision_service=self.vision_service,
             memory_state_manager=self.memory_state_manager,
         )
 
@@ -401,6 +403,9 @@ class Brain:
             self.state.primitive_ids_map[primitive_to_remember.primitive_id] = (
                 primitive_to_remember
             )
+            # Set primitive_in_execution immediately when sending to prevent race conditions
+            # where multiple primitives could be sent before the first is acknowledged
+            self.state.primitive_in_execution = primitive_to_remember
         # Record the vision agent output in the history.
         self.history.add(
             HistoryEntryType.VISION_AGENT_OUTPUT,
@@ -427,27 +432,28 @@ class Brain:
         """
         Handle messages of type 'chat_in'.
 
-        Fast agent runs immediately. If it can answer, response is sent.
-        If it defers, the message is stored and will be processed by the
-        image handler with the next fresh image (running both fast and slow agents).
+        Fast and slow agents run in parallel. If fast agent can answer,
+        response is sent immediately. If fast defers, slow agent result
+        is already available and processed here.
         """
         result = await self.chat_handler.handle_chat_in(
             text=message.payload["text"],
+            image_b64=message.payload.get("image_b64"),
             current_gemini_variant=self.state.gemini_variant,
             enable_memory_commands=self.enable_memory_commands,
             directive=self.state.directive,
             primitive_in_execution=self.state.primitive_in_execution,
             primitives_list=self.state.primitives_list,
+            robot_coords=self.current_robot_coords,
         )
 
         if result.new_gemini_variant is not None:
             self.state.gemini_variant = result.new_gemini_variant
 
-        if result.user_message_to_store is not None:
-            self.state.latest_user_message = result.user_message_to_store
-            self.logger.info(
-                f"Stored user message for next image: '{result.user_message_to_store[:50]}...'"
-            )
+        if result.vision_output is not None:
+            # Fast agent deferred - process the slow agent's vision output
+            await self._send_vision_output(result.vision_output, result.vision_output)
+            self.history.check_and_summarize()
 
     async def handle_primitive_completed(self, message: MessageIn):
         """Handle primitive completion."""

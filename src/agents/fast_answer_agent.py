@@ -9,12 +9,14 @@ import os
 import json
 import asyncio
 import base64
-from typing import Optional
+from typing import List, Optional
 from dataclasses import dataclass
 from enum import Enum
 
 from google import genai
 from google.genai import types
+
+from src.agents.types import PrimitiveDefinition
 
 
 FAST_MODEL_NAME = "gemini-2.0-flash"
@@ -41,12 +43,13 @@ class FastAnswerResult:
 FAST_ANSWER_PROMPT = """You are a robot assistant. Answer the user's question if possible, or defer to the expert if movement/actions are needed.
 
 Context: {directive} | Running: {current_primitive} | History: {history_summary}
+Available primitives: {primitives_list}
 
 User: {user_message}
 
 Rules:
 - ANSWER_NOW: questions, conversation, basic what you see in the image
-- DEFER_TO_EXPERT: movement commands, navigation, multi-step tasks
+- DEFER_TO_EXPERT: movement commands, navigation, multi-step tasks, requests that need primitives
 
 Respond as JSON: {{"decision": "ANSWER_NOW" or "DEFER_TO_EXPERT", "response": "your answer if ANSWER_NOW", "reasoning": "why"}}"""
 
@@ -81,6 +84,7 @@ async def fast_answer(
     current_primitive: Optional[str] = None,
     history_summary: Optional[str] = None,
     current_image: Optional[str] = None,
+    primitives_list: Optional[List[PrimitiveDefinition]] = None,
 ) -> FastAnswerResult:
     """
     Evaluate a user message and determine if it can be answered quickly.
@@ -88,10 +92,16 @@ async def fast_answer(
     Returns FastAnswerResult with decision and optional response.
     On any error, defers to the vision agent.
     """
+    # Format primitives list as comma-separated names
+    primitives_str = "None"
+    if primitives_list:
+        primitives_str = ", ".join(p.name for p in primitives_list)
+
     prompt_text = FAST_ANSWER_PROMPT.format(
         directive=directive or "No directive set",
         current_primitive=current_primitive or "None",
         history_summary=history_summary or "No recent history",
+        primitives_list=primitives_str,
         user_message=user_message,
     )
 

@@ -4,7 +4,6 @@ Breaks down the complex handle_image logic into smaller, focused methods.
 """
 
 import time
-import uuid
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
@@ -12,7 +11,10 @@ from src.agents.types import PrimitiveDefinition, VisionAgentOutput
 from src.brain_utils.constants import PrimitiveNames
 from src.brain_utils.image_processor import ImageProcessor
 from src.brain_utils.navigation_handler import NavigationHandler
-from src.brain_utils.parallel_agents import run_agents_in_parallel
+from src.brain_utils.parallel_agents import (
+    run_agents_in_parallel,
+    validate_vision_output,
+)
 from src.brain_utils.vision_service import VisionAgentType, VisionService
 from src.history.history import History, HistoryEntryType
 from src.primitives.transforms import primitive_to_object
@@ -190,8 +192,8 @@ class ImageHandler:
             vision_output = self._create_fallback_vision_output()
 
         # Validate and clean up vision output
-        vision_output = self._validate_vision_output(
-            vision_output, primitive_in_execution
+        vision_output = validate_vision_output(
+            vision_output, primitive_in_execution, self.history
         )
 
         # Handle navigation primitives
@@ -296,46 +298,6 @@ class ImageHandler:
                 "BEEP BOOP BEEP BOOP, the brain failed. Stopping the current task."
             ),
         )
-
-    def _validate_vision_output(
-        self,
-        vision_output: VisionAgentOutput,
-        primitive_in_execution: Optional[PrimitiveDefinition],
-    ) -> VisionAgentOutput:
-        """
-        Validate and clean up the vision output.
-        Handles discrepancies between VLM output and current state.
-        """
-        # Validate the next task
-        vision_output.next_task = (
-            PrimitiveDefinition.model_validate(vision_output.next_task)
-            if vision_output.next_task
-            else None
-        )
-
-        # Check for discrepancy: next_task provided without stop_current_task
-        # when a primitive is already running
-        if (
-            not vision_output.stop_current_task
-            and vision_output.next_task is not None
-            and primitive_in_execution is not None
-        ):
-            self.history.record_discrepancy(
-                message=(
-                    f"The VLM returned a next_task ({vision_output.next_task.name}) "
-                    f"even though there is a task running "
-                    f"({primitive_in_execution.name}) and it did not say to "
-                    f"stop the current task."
-                )
-            )
-            # Force next_task to None if stop wasn't explicitly requested
-            vision_output.next_task = None
-
-        # Ensure next_task has a primitive_id
-        if vision_output.next_task and not vision_output.next_task.primitive_id:
-            vision_output.next_task.primitive_id = str(uuid.uuid4())
-
-        return vision_output
 
     async def _handle_navigation_primitives(
         self,
@@ -494,6 +456,7 @@ class ImageHandler:
             slow_agent_coro=slow_coro,
             send_chat_callback=self.send_chat_callback,
             logger=self.logger,
+            primitives_list=primitives_list,
         )
 
         return result.vision_output, result.fast_answered

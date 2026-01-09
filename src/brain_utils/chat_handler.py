@@ -2,18 +2,23 @@
 Chat message handler for the Brain.
 Handles chat_in messages including special commands.
 
-The chat handler runs only the fast agent for immediate responses.
-If the fast agent defers, the message is stored and will be processed
-by the image handler with the next fresh image.
+The chat handler runs fast and slow agents in parallel for immediate responses.
+If fast agent can answer, it responds immediately.
+If fast agent defers, the slow agent result is already available.
 """
 
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
-from src.agents.fast_answer_agent import fast_answer, FastAnswerDecision
 from src.agents.types import PrimitiveDefinition
+from src.baml_client.types import VisionAgentOutput
 from src.brain_utils.constants import PrimitiveNames
 from src.brain_utils.memory_state_manager import MemoryStateManager
+from src.brain_utils.parallel_agents import (
+    run_agents_in_parallel,
+    validate_vision_output,
+)
+from src.brain_utils.vision_service import VisionAgentType, VisionService
 from src.history.history import History, HistoryEntryType
 from src.message_types import MessageOut
 from src.primitives.types import Primitive
@@ -28,7 +33,7 @@ class ChatProcessingResult:
 
     new_gemini_variant: Optional[str] = None
     fast_response_sent: bool = False
-    user_message_to_store: Optional[str] = None
+    vision_output: Optional[VisionAgentOutput] = None
 
 
 class ChatHandler:
@@ -36,10 +41,9 @@ class ChatHandler:
     Handles chat_in messages and special commands.
 
     For regular user messages:
-    - Runs only the fast agent for immediate responses
+    - Runs fast and slow agents in parallel
     - If fast agent can answer, sends response immediately
-    - If fast agent defers, stores the message for the image handler
-      to process with the next fresh image
+    - If fast agent defers, slow agent result is already available
     """
 
     def __init__(
@@ -48,29 +52,37 @@ class ChatHandler:
         history: History,
         local_primitives_list: List[Primitive],
         send_callback: Callable,
+        vision_service: VisionService,
         memory_state_manager: Optional[MemoryStateManager] = None,
     ):
         self.logger = logger
         self.history = history
         self.local_primitives_list = local_primitives_list
         self.send_callback = send_callback
+        self.vision_service = vision_service
         self.memory_state_manager = memory_state_manager
 
     async def handle_chat_in(
         self,
         text: str,
+        image_b64: Optional[str],
         current_gemini_variant: str,
         enable_memory_commands: bool,
         directive: Optional[str] = None,
         primitive_in_execution: Optional[PrimitiveDefinition] = None,
         primitives_list: Optional[List[PrimitiveDefinition]] = None,
+        robot_coords: Optional[dict] = None,
     ) -> ChatProcessingResult:
         """
         Handle a chat_in message.
 
-        Runs the fast agent to check if we can answer immediately.
-        If not, stores the message for the image handler to process
-        with the next fresh image.
+        Args:
+            text: The user's chat message text
+            image_b64: Optional base64-encoded JPEG image from the robot's camera
+
+        Runs fast and slow agents in parallel. If fast agent can answer,
+        response is sent immediately. If fast defers, slow agent result
+        is already available.
         """
         if text.startswith("!gemini"):
             new_variant = await self._handle_gemini_command(
@@ -91,47 +103,71 @@ class ChatHandler:
         # Add user message to history
         self.history.add(HistoryEntryType.AUDIO_IN, description=text)
 
-        # Get context for fast agent
-        current_image = self.history.get_last_image()
+        # Get context for agents
         current_primitive_name = (
             primitive_in_execution.name if primitive_in_execution else None
         )
         history_summary = self.history.get_brief_summary()
 
-        # Run fast agent only - it decides whether to answer now or defer
-        self.logger.info(f"[FastAgent] Evaluating: '{text[:50]}...'")
+        # Build primitives list for VLM (local + registered)
+        from src.primitives.transforms import primitive_to_object
 
-        fast_result = await fast_answer(
+        local_primitives_as_definitions = [
+            primitive_to_object(p) for p in self.local_primitives_list
+        ]
+        all_primitives = local_primitives_as_definitions + (primitives_list or [])
+
+        # Create the slow agent coroutine only if we have an image
+        # The VLM requires an image to function
+        slow_coro = None
+        if image_b64:
+            slow_coro = self.vision_service.call_visual_language_model(
+                base64_img=image_b64,
+                user_prompt_text=text,
+                primitive_in_execution=primitive_in_execution,
+                primitives_list=all_primitives,
+                history=self.history.get_as_multimodal_list(),
+                robot_coords=robot_coords or {},
+                directive=directive,
+                agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,
+                gemini_variant=current_gemini_variant,
+                additional_image_data={},
+            )
+
+        # Run fast and slow agents in parallel
+        self.logger.info(f"[ChatHandler] Running parallel agents for: '{text[:50]}...'")
+
+        result = await run_agents_in_parallel(
             user_message=text,
+            current_image=image_b64,
             directive=directive,
-            current_primitive=current_primitive_name,
+            current_primitive_name=current_primitive_name,
             history_summary=history_summary,
-            current_image=current_image,
+            slow_agent_coro=slow_coro,
+            send_chat_callback=self._send_chat_response,
+            logger=self.logger,
+            primitives_list=primitives_list,
         )
 
-        self.logger.info(
-            f"[FastAgent] Decision: {fast_result.decision.value}"
-            + (f" - {fast_result.reasoning}" if fast_result.reasoning else "")
-        )
-
-        if (
-            fast_result.decision == FastAnswerDecision.ANSWER_NOW
-            and fast_result.response
-        ):
-            # Fast agent can answer - send response immediately
-            await self._send_chat_response(fast_result.response)
+        if result.fast_answered:
+            # Fast agent answered - record in history
             self.history.add(
                 HistoryEntryType.SYSTEM_MESSAGE,
-                description=f"Fast agent response: {fast_result.response}",
+                description=f"Fast agent response: {result.fast_response}",
             )
             return ChatProcessingResult(fast_response_sent=True)
         else:
-            # Fast agent defers - store message for image handler to process
-            # with the next fresh image (both fast and slow agents will run there)
+            # Fast agent deferred - return slow agent's vision output
             self.logger.info(
-                "[FastAgent] Deferring to vision agent - message stored for next image"
+                "[ChatHandler] Fast agent deferred, using slow agent result"
             )
-            return ChatProcessingResult(user_message_to_store=text)
+            # Validate the vision output to ensure next_task is a PrimitiveDefinition
+            vision_output = result.vision_output
+            if vision_output:
+                vision_output = validate_vision_output(
+                    vision_output, primitive_in_execution, self.history
+                )
+            return ChatProcessingResult(vision_output=vision_output)
 
     async def _handle_gemini_command(
         self,
