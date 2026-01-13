@@ -10,7 +10,6 @@ from src.primitives.types import Primitive
 SERIALIZE_VLM_IO = True  # Set to False to disable
 VLM_IO_DUMP_FILE = Path("test_data/vlm_io_dump.jsonl")
 
-from src.agents.baml_agent import vision_agent
 from src.agents.gemini_flash_baml_agent import gemini_vision_agent
 from src.agents.gemini_flash_baml_multi_agent import (
     gemini_vision_agent_multimodal_history,
