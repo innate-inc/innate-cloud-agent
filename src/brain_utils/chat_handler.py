@@ -10,8 +10,7 @@ If fast agent defers, the slow agent result is already available.
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
-from src.agents.types import PrimitiveDefinition
-from src.baml_client.types import VisionAgentOutput
+from src.agents.types import PrimitiveDefinition, VisionAgentOutput
 from src.brain_utils.constants import PrimitiveNames
 from src.brain_utils.memory_state_manager import MemoryStateManager
 from src.brain_utils.parallel_agents import (

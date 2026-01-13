@@ -10,8 +10,7 @@ from dataclasses import dataclass
 from typing import Callable, List, Optional
 
 from src.agents.fast_answer_agent import fast_answer, FastAnswerDecision
-from src.agents.types import PrimitiveDefinition
-from src.baml_client.types import VisionAgentOutput
+from src.agents.types import PrimitiveDefinition, VisionAgentOutput
 from src.history.history import History
 
 
