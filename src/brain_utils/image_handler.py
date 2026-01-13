@@ -8,8 +8,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
-from src.agents.types import PrimitiveDefinition
-from src.baml_client.types import VisionAgentOutput
+from src.agents.types import PrimitiveDefinition, VisionAgentOutput
 from src.brain_utils.constants import PrimitiveNames
 from src.brain_utils.image_processor import ImageProcessor
 from src.brain_utils.navigation_handler import NavigationHandler
@@ -169,10 +168,13 @@ class ImageHandler:
             connection_id,
         )
 
-        return ImageProcessingResult(
-            vision_output=vision_output,
-            vlm_processing_time=vlm_processing_time,
-        ), vision_output_for_history
+        return (
+            ImageProcessingResult(
+                vision_output=vision_output,
+                vlm_processing_time=vlm_processing_time,
+            ),
+            vision_output_for_history,
+        )
 
     def _extract_and_validate_image_data(self, payload: dict) -> Optional[Tuple]:
         """Extract and validate image data from payload."""

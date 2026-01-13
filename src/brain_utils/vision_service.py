@@ -10,10 +10,6 @@ from src.primitives.types import Primitive
 SERIALIZE_VLM_IO = True  # Set to False to disable
 VLM_IO_DUMP_FILE = Path("test_data/vlm_io_dump.jsonl")
 
-from src.agents.gemini_flash_baml_agent import gemini_vision_agent
-from src.agents.gemini_flash_baml_multi_agent import (
-    gemini_vision_agent_multimodal_history,
-)
 from src.agents.native_gemini_vision_agent import (
     native_gemini_vision_agent_multimodal_history,
 )
@@ -21,8 +17,8 @@ from src.agents.types import (
     MultimodalVisionAgentInput,
     PrimitiveDefinition,
     VisionAgentInput,
+    VisionAgentOutput,
 )
-from src.baml_client.types import VisionAgentOutput
 from src.agents.exceptions import MaxRetriesExceededException, UnforeseenBamlClientError
 from src.primitives.transforms import primitive_to_object
 
@@ -105,37 +101,9 @@ class VisionService:
             if agent_type in [
                 VisionAgentType.ANTHROPIC,
                 VisionAgentType.GEMINI_FLASH,
+                VisionAgentType.GEMINI_FLASH_MULTI,
             ]:  # deprecated
                 raise ValueError(f"Unsupported agent type: {agent_type}")
-            elif agent_type == VisionAgentType.GEMINI_FLASH_MULTI:
-                vlm_inputs = MultimodalVisionAgentInput(
-                    base64_img=base64_img,
-                    user_prompt_text=user_prompt_text,
-                    primitive_in_execution=primitive_object,
-                    primitives_list=primitives_list,
-                    multimodal_history=history,
-                    robot_coords=robot_coords,
-                    directive=directive,
-                    additional_image_data=additional_image_data,
-                )
-                completion = await gemini_vision_agent_multimodal_history(vlm_inputs)
-
-                if SERIALIZE_VLM_IO:
-                    try:
-                        VLM_IO_DUMP_FILE.parent.mkdir(parents=True, exist_ok=True)
-                        # Assuming vlm_inputs and completion are Pydantic models
-                        data_to_serialize = {
-                            "input": vlm_inputs.model_dump(mode="json"),
-                            "output": completion.model_dump(mode="json"),
-                        }
-                        with open(VLM_IO_DUMP_FILE, "a") as f:
-                            f.write(json.dumps(data_to_serialize) + "\n")
-                        self.logger.info(f"Serialized VLM I/O to {VLM_IO_DUMP_FILE}")
-                    except Exception as ser_exc:
-                        self.logger.error(
-                            f"Error during VLM I/O serialization: {ser_exc}, Input: {vlm_inputs}, Completion: {completion}"
-                        )
-                return completion
             elif agent_type in [
                 VisionAgentType.NATIVE_GEMINI_MULTI,
                 VisionAgentType.NATIVE_GEMINI_FLASH,
