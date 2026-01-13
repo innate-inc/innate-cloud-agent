@@ -57,3 +57,13 @@ class MultimodalVisionAgentInput(BaseModel):
     robot_coords: Optional[Dict[str, Union[float, str]]] = None
     directive: Optional[str] = None
     additional_image_data: Optional[Dict[str, str]] = None
+
+
+class VisionAgentOutput(BaseModel):
+    stop_current_task: bool
+    observation: str
+    thoughts: str
+    new_goal: Optional[str] = None
+    next_task: Optional[Any] = None
+    anticipation: Optional[str] = None
+    to_tell_user: Optional[str] = None
