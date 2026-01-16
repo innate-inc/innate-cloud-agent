@@ -45,6 +45,26 @@ class TokenAuthenticator:
         self._token_cache: Dict[str, tuple] = {}
         self._cache_ttl = 300  # 5 minutes
 
+        # Check if authentication should be skipped
+        self.skip_auth = os.getenv("SKIP_AUTH", "").lower() in ("true", "1", "yes")
+        if self.skip_auth:
+            robot_token = os.getenv("DEFAULT_ROBOT_TOKEN")
+            user_id = os.getenv("DEFAULT_USER_ID")
+            service_key = os.getenv("DEFAULT_SERVICE_KEY")
+            
+            if not robot_token or not user_id or not service_key:
+                raise ValueError(
+                    "SKIP_AUTH is enabled but required environment variables are not set. "
+                    "Please set DEFAULT_ROBOT_TOKEN, DEFAULT_USER_ID, and DEFAULT_SERVICE_KEY"
+                )
+            
+            self.default_auth_context = AuthContext(
+                robot_special_token=robot_token,
+                user_id=user_id,
+                innate_service_key=service_key
+            )
+            logger.info("SKIP_AUTH enabled - authentication will be bypassed")
+
         if not self.project_id:
             logger.warning(
                 "BIGQUERY_PROJECT_ID is not set. Token authentication will be disabled."
@@ -77,6 +97,12 @@ class TokenAuthenticator:
         Returns:
             AuthContext if valid, None otherwise
         """
+        # Check if authentication should be skipped
+        if self.skip_auth:
+            logger.debug("SKIP_AUTH enabled - returning default auth context")
+            return self.default_auth_context
+        
+        # return True
         if not self.client:
             logger.warning("BigQuery client not initialized - cannot validate token")
             return None
