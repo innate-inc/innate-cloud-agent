@@ -213,10 +213,17 @@ def create_map_visualization(
         invalid_points: Optional list of (x, y, theta, point_id) tuples for invalid points in grid coordinates
     """
     # Create RGB visualization
-    vis_map = np.zeros((map_array.shape[0], map_array.shape[1], 3), dtype=np.uint8)
-    vis_map[map_array == 0] = [255, 255, 255]  # Free space = white
-    vis_map[map_array == 100] = [0, 0, 0]  # Obstacles = black
-    vis_map[map_array == -1] = [128, 128, 128]  # Unknown = gray
+    vis_map = np.full((map_array.shape[0], map_array.shape[1], 3), [255, 192, 203], dtype=np.uint8)
+    vis_map[map_array < 0] = [0, 0, 128]  # Unknown = blue
+    
+    # For values between 0 and 100, create gradient proportional to the value
+    # mask for values that are not <0
+    other_values_mask = (map_array >= 0)
+    if np.any(other_values_mask):
+        normalized = ((100 - map_array[other_values_mask]) / 100.0 * 255).astype(np.uint8)
+        vis_map[other_values_mask] = np.stack([normalized, normalized, normalized], axis=-1)
+    
+    
 
     # Scale up the visualization FIRST
     vis_map_large = cv2.resize(

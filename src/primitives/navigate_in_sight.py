@@ -419,11 +419,19 @@ If there's a need for clarification, explain in the explanation field.
         # Get the selected point
         if selected_point_id in point_mapping:
             selected_point = point_mapping[selected_point_id]
+            angle, distance = selected_point["angle_distance"]
+            
+            # Compute x, y, theta from angle_distance
+            angle_world_vector = angle
+            x = distance * np.cos(angle_world_vector)
+            y = distance * np.sin(angle_world_vector)
+            theta = angle_world_vector
 
             navigation_command = {
-                "x": selected_point["x"],
-                "y": selected_point["y"],
-                "theta": selected_point["theta"],
+                "x": x,
+                "y": y,
+                "theta": theta,
+                "local_frame": True,
             }
 
             print(
@@ -564,11 +572,19 @@ If there's a need for clarification, explain in the explanation field.
         if len(point_mapping) == 1:
             selected_point_id = list(point_mapping.keys())[0]
             selected_point = point_mapping[selected_point_id]
+            angle, distance = selected_point["angle_distance"]
+            
+            # Compute x, y, theta from angle_distance
+            angle_world_vector =  angle
+            x =  distance * np.cos(angle_world_vector)
+            y = distance * np.sin(angle_world_vector)
+            theta = angle_world_vector
 
             navigation_command = {
-                "x": selected_point["x"],
-                "y": selected_point["y"],
-                "theta": selected_point["theta"],
+                "x": x,
+                "y": y,
+                "theta": theta,
+                "local_frame": True,
             }
 
             print(

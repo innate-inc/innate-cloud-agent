@@ -591,6 +591,7 @@ class NavigateThroughMemory(Primitive):
             "x": x,
             "y": y,
             "theta": theta,
+            "local_frame": False,
         }
 
         return (
