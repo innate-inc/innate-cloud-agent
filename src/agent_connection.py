@@ -180,25 +180,27 @@ class WebSocketAgentConnection:
 
         # Validate client version
         client_version = auth_msg_payload.get("client_version")
-        if client_version:
-            is_valid, version_msg = compare_versions(client_version)
-            print(f"[INFO] Client version check: {version_msg}")
-            if not is_valid:
-                print(f"[WARN] {version_msg}")
-                await self.send_message(
-                    MessageOut(
-                        type=MessageOutType.ERROR,
-                        payload={
-                            "error": "version_mismatch",
-                            "message": version_msg,
-                            "min_version": MIN_CLIENT_VERSION,
-                        },
-                    )
-                )
-                return False
-        else:
+        if not client_version:
             print("[WARN] No client_version provided in auth message")
-
+            client_version = "0.2.4"
+        
+            
+        
+        is_valid, version_msg = compare_versions(client_version)
+        print(f"[INFO] Client version check: {version_msg}")
+        if not is_valid:
+            print(f"[WARN] {version_msg}")
+            await self.send_message(
+                MessageOut(
+                    type=MessageOutType.ERROR,
+                    payload={
+                        "error": "version_mismatch",
+                        "message": version_msg,
+                        "min_version": MIN_CLIENT_VERSION,
+                    },
+                )
+            )
+            return False
         # Validate token against BigQuery user_management table
         auth_context = get_user_from_token(token)
         if auth_context is None:
