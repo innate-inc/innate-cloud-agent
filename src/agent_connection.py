@@ -10,7 +10,8 @@ from typing import Optional
 from src.message_types import MessageInType, MessageOut, MessageOutType, MessageIn
 from src.brain import Brain
 from src.debug_panel import register_brain_for_debug, unregister_brain_for_debug
-from src.auth.token_auth import get_authenticator, AuthContext
+from src.auth.token_auth import get_authenticator, AuthContext, compare_versions
+from src.constants_robots import MIN_CLIENT_VERSION
 
 
 def get_user_from_token(token: str) -> Optional[AuthContext]:
@@ -177,6 +178,36 @@ class WebSocketAgentConnection:
             print("[WARN] No token provided, closing connection.")
             return False
 
+        # Validate client version
+        client_version = auth_msg_payload.get("client_version")
+        if not client_version:
+            print("[WARN] No client_version provided in auth message")
+            await self.send_message(
+                MessageOut(
+                    type=MessageOutType.BRAIN_CHAT_OUT,
+                    payload={
+                        "text": "Your app version is 0.2.4 or older. Please update your robot to continue.",
+                    },
+                )
+            )
+            client_version = "0.2.4"
+            return False
+        
+        is_valid, version_msg = compare_versions(client_version)
+        print(f"[INFO] Client version check: {version_msg}")
+        if not is_valid:
+            print(f"[WARN] {version_msg}")
+            await self.send_message(
+                MessageOut(
+                    type=MessageOutType.ERROR,
+                    payload={
+                        "error": "version_mismatch",
+                        "message": version_msg,
+                        "min_version": MIN_CLIENT_VERSION,
+                    },
+                )
+            )
+            return False
         # Validate token against BigQuery user_management table
         auth_context = get_user_from_token(token)
         if auth_context is None:

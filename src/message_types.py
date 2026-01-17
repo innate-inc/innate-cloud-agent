@@ -24,6 +24,7 @@ class MessageOutType(str, Enum):
     READY_FOR_IMAGE = "ready_for_image"
     VISION_AGENT_OUTPUT = "vision_agent_output"
     CHAT_OUT = "chat_out"
+    BRAIN_CHAT_OUT= "brain/chat_out" # LEGACY type only for error message
     THOUGHTS = "thoughts"
     ERROR = "error"
     PRIMITIVES_AND_DIRECTIVE_REGISTERED = "primitives_and_directive_registered"

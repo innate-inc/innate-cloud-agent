@@ -3,12 +3,45 @@
 import os
 import logging
 import time
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 from dataclasses import dataclass
 
 from google.cloud import bigquery
+from packaging.version import Version
+
+from src.constants_robots import MIN_CLIENT_VERSION
 
 logger = logging.getLogger(__name__)
+
+
+def compare_versions(client_version: str, min_version: str = MIN_CLIENT_VERSION) -> Tuple[bool, str]:
+    """
+    Compare client version against minimum required version.
+    
+    Args:
+        client_version: The client's semver version string (e.g., "1.2.3" or "1.2.3-dev")
+        min_version: The minimum required version (defaults to MIN_CLIENT_VERSION)
+    
+    Returns:
+        Tuple of (is_valid, message) where is_valid is True if client_version >= min_version
+        Dev versions (containing "-dev") are always allowed.
+    """
+    try:
+        # Allow any dev version without version checking
+        if "-dev" in client_version.lower():
+            return True, f"Brain Client version {client_version} is a dev version (allowed)"
+        
+        client_ver = Version(client_version)
+        min_ver = Version(min_version)
+        
+        if client_ver < min_ver:
+            return False, f"Brain Client version {client_version} is less than minimum required version {min_version}. Please update your robot or modify code to switch to a dev version."
+        elif client_ver > min_ver:
+            return True, f"Brain Client version {client_version} is greater than minimum version {min_version}"
+        else:
+            return True, f"Brain Client version {client_version} matches minimum version {min_version}"
+    except Exception as e:
+        return False, f"Invalid version format: {e}"
 
 
 @dataclass
