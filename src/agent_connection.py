@@ -182,9 +182,16 @@ class WebSocketAgentConnection:
         client_version = auth_msg_payload.get("client_version")
         if not client_version:
             print("[WARN] No client_version provided in auth message")
+            await self.send_message(
+                MessageOut(
+                    type=MessageOutType.BRAIN_CHAT_OUT,
+                    payload={
+                        "text": "Your app version is 0.2.4 or older. Please update your robot to continue.",
+                    },
+                )
+            )
             client_version = "0.2.4"
-        
-            
+            return False
         
         is_valid, version_msg = compare_versions(client_version)
         print(f"[INFO] Client version check: {version_msg}")
