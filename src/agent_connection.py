@@ -186,7 +186,7 @@ class WebSocketAgentConnection:
                 MessageOut(
                     type=MessageOutType.BRAIN_CHAT_OUT,
                     payload={
-                        "text": "Your robot brain version is 0 point 2 point 4 or older. Please update your robot to continue.",
+                        "text": "Your robot OS version is 0 point 2 point 4 or older. Please update your robot to continue.",
                     },
                 )
             )

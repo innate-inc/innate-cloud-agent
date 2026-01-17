@@ -31,16 +31,16 @@ def compare_versions(client_version: str, min_version: str = MIN_CLIENT_VERSION)
         client_ver = Version(client_version)
         client_version = client_version.replace(".", " point ")
         if "-dev" in client_version.lower():
-            return True, f"Brain Client version {client_version} is a dev version (allowed)"
+            return True, f"Robot OS version {client_version} is a dev version (allowed)"
         
         min_ver = Version(min_version)
         
         if client_ver < min_ver:
-            return False, f"Brain Client version {client_version} is less than minimum required version {min_version}. Please update your robot or modify code to switch to a dev version."
+            return False, f"Robot OS version {client_version} is less than minimum required version {min_version}. Please update your robot or modify code to switch to a dev version."
         elif client_ver > min_ver:
-            return True, f"Brain Client version {client_version} is greater than minimum version {min_version}"
+            return True, f"Robot OS version {client_version} is greater than minimum version {min_version}"
         else:
-            return True, f"Brain Client version {client_version} matches minimum version {min_version}"
+            return True, f"Robot OS version {client_version} matches minimum version {min_version}"
     except Exception as e:
         return False, f"Invalid version format: {e}"
 
