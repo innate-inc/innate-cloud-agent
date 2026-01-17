@@ -28,10 +28,11 @@ def compare_versions(client_version: str, min_version: str = MIN_CLIENT_VERSION)
     """
     try:
         # Allow any dev version without version checking
+        client_ver = Version(client_version)
+        client_version = client_version.replace(".", " point ")
         if "-dev" in client_version.lower():
             return True, f"Brain Client version {client_version} is a dev version (allowed)"
         
-        client_ver = Version(client_version)
         min_ver = Version(min_version)
         
         if client_ver < min_ver:
