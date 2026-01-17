@@ -182,6 +182,7 @@ class NavigationHandler:
                     "x": navigation_command["x"],
                     "y": navigation_command["y"],
                     "theta": navigation_command["theta"],
+                    "local_frame": True,
                 },
                 primitive_id=original_primitive_id,  # Preserve the ID
             )
@@ -304,18 +305,18 @@ class NavigationHandler:
             # Create a copy of the map for visualization
             # Convert occupancy grid (-1, 0, 100) to an RGB image
             # -1: Unknown (gray), 0: Free (white), 100: Occupied (black)
-            rgb_map = np.zeros(
-                (map_array.shape[0], map_array.shape[1], 3), dtype=np.uint8
+            rgb_map = np.full(
+                (map_array.shape[0], map_array.shape[1], 3), [255, 0, 0], dtype=np.uint8
             )
 
-            # Unknown space (gray)
-            rgb_map[map_array == -1] = [128, 128, 128]
+            # Unknown space (magenta)
+            rgb_map[map_array == -1] = [255, 0, 255]
 
-            # Free space (white)
-            rgb_map[map_array == 0] = [255, 255, 255]
+            # Free space (lime green)
+            rgb_map[map_array == 0] = [0, 255, 0]
 
-            # Occupied space (black)
-            rgb_map[map_array == 100] = [0, 0, 0]
+            # Occupied space (orange)
+            rgb_map[map_array == 100] = [255, 165, 0]
 
             # Flip the map vertically to match the visualization in image_processor
             rgb_map = np.flipud(rgb_map)
@@ -465,13 +466,13 @@ class NavigationHandler:
         """
         # Get the angle and distance from the inputs
         angle = vision_output.next_task.inputs.get("angle", 0.0)
-        angle = radians(angle)
+        # angle = radians(angle)
         distance = vision_output.next_task.inputs.get("distance", 0.0)
 
         # Get current robot coordinates
-        current_x = robot_coords.get("x", 0.0)
-        current_y = robot_coords.get("y", 0.0)
-        current_theta = robot_coords.get("theta", 0.0)
+        current_x = 0# robot_coords.get("x", 0.0)
+        current_y = 0#robot_coords.get("y", 0.0)
+        current_theta = 0#robot_coords.get("theta", 0.0)
 
         # Calculate the new theta (current + angle to turn)
         new_theta = current_theta + angle
@@ -512,6 +513,7 @@ class NavigationHandler:
                 "x": new_x,
                 "y": new_y,
                 "theta": new_theta,
+                "local_frame": True,
             },
             primitive_id=original_primitive_id,
         )

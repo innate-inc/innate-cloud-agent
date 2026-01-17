@@ -252,11 +252,13 @@ def is_map_location_valid(
         return False
 
     # 3. Create Pathfinding Grid
-    # python-pathfinding Grid: 0 is blocked, >0 is cost.
+    # python-pathfinding Grid: <0 is blocked, >0 is cost.
     # map_array: 0=free, 100=obstacle, -1=unknown
     walkable_matrix = np.ones_like(map_array, dtype=int)  # Cost 1 for walkable
     walkable_matrix[map_array == 100] = 0  # Obstacles are blocked
-    walkable_matrix[map_array == -1] = 0  # Unknown areas are blocked
+    walkable_matrix[map_array == -1] = -1  # Unknown areas are blocked
+    mask = (map_array > 0) & (map_array < 100)
+    walkable_matrix[mask] = map_array[mask]  # keep original costs
 
     # Ensure the matrix is C-contiguous for pathfinding library if it's picky
     # (usually numpy outputs are fine, but an explicit copy can ensure it)
@@ -318,9 +320,9 @@ def sample_valid_navigation_points(
     Sample valid navigation points in front of the robot.
 
     Args:
-        current_x (float): Current robot X position in world coordinates
-        current_y (float): Current robot Y position in world coordinates
-        current_yaw (float): Current robot orientation in radians
+        current_x (float): Current robot X position in world coordinates (for pathfinding)
+        current_y (float): Current robot Y position in world coordinates (for pathfinding)
+        current_yaw (float): Current robot orientation in radians (for pathfinding)
         map_array (np.ndarray): Map occupancy grid data
         map_info (dict): Map metadata
         h_fov_deg (float): Horizontal field of view in degrees for FOV check.
@@ -340,11 +342,7 @@ def sample_valid_navigation_points(
             invalid_points_angle_distance # List of (angle,distance) relative (invalid)
         )
     """
-    # Get map metadata (not strictly needed here anymore, but good for context)
-    # resolution = map_info["resolution"]
-    # origin_x = map_info["origin_x"]
-    # origin_y = map_info["origin_y"]
-
+    # Navigation points are computed relative to origin (0, 0, 0)
     # Sample points in a sector in front of the robot
     valid_points_absolute = []
     valid_points_angle_distance = []
