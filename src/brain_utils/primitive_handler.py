@@ -8,7 +8,6 @@ from typing import Callable, Dict, List, Optional
 from src.agents.types import PrimitiveDefinition
 from src.history.history import History, HistoryEntryType
 from src.message_types import MessageOut
-from src.primitives.transforms import primitive_to_object
 from src.primitives.types import Primitive
 
 
@@ -53,6 +52,7 @@ class PrimitiveHandler:
             primitive_in_execution
             and primitive_id == primitive_in_execution.primitive_id
         ):
+            # Expected case: the completed primitive matches what we're tracking
             self.logger.info(
                 f"Task '{primitive_in_execution.name}' (ID: {primitive_id}) completed."
             )
@@ -62,10 +62,16 @@ class PrimitiveHandler:
             )
             return None
 
-        raise ValueError(
-            f"[Brain {self.connection_id}] Task '{primitive_name}' (ID: {primitive_id}) "
-            f"is not the current task in execution."
+        # Stale completion - log warning but don't crash
+        # This can happen due to race conditions when multiple primitives are sent quickly
+        current_id = primitive_in_execution.primitive_id if primitive_in_execution else None
+        current_name = primitive_in_execution.name if primitive_in_execution else None
+        self.logger.warn(
+            f"[Brain {self.connection_id}] Received completion for '{primitive_name}' "
+            f"(ID: {primitive_id}) but current task is '{current_name}' "
+            f"(ID: {current_id}). Ignoring stale completion."
         )
+        return primitive_in_execution
 
     async def handle_primitive_failed(
         self,
@@ -80,6 +86,7 @@ class PrimitiveHandler:
             primitive_in_execution
             and primitive_in_execution.primitive_id == primitive_id
         ):
+            # Expected case: the failed primitive matches what we're tracking
             self.logger.info(f"Task '{primitive_in_execution.name}' failed.")
             self.history.add(
                 HistoryEntryType.PRIMITIVE_CANCELLED,
@@ -87,10 +94,16 @@ class PrimitiveHandler:
             )
             return None
 
-        raise ValueError(
-            f"[Brain {self.connection_id}] Task '{primitive_name}' (ID: {primitive_id}) "
-            f"is not the current task in execution."
+        # Stale failure - log warning but don't crash
+        # This can happen due to race conditions when multiple primitives are sent quickly
+        current_id = primitive_in_execution.primitive_id if primitive_in_execution else None
+        current_name = primitive_in_execution.name if primitive_in_execution else None
+        self.logger.warn(
+            f"[Brain {self.connection_id}] Received failure for '{primitive_name}' "
+            f"(ID: {primitive_id}) but current task is '{current_name}' "
+            f"(ID: {current_id}). Ignoring stale failure."
         )
+        return primitive_in_execution
 
     async def handle_primitive_interrupted(
         self,
@@ -101,21 +114,29 @@ class PrimitiveHandler:
         primitive_id = payload["primitive_id"]
         primitive_name = payload["primitive_name"]
 
-        if (
-            primitive_in_execution
-            and primitive_in_execution.primitive_id == primitive_id
-        ):
-            self.logger.info(f"Task '{primitive_in_execution.name}' interrupted.")
-            self.history.add(
-                HistoryEntryType.PRIMITIVE_INTERRUPTED,
-                description=f"Primitive '{primitive_name}' interrupted.",
+        if primitive_in_execution is None:
+            self.logger.warn(
+                f"Received interrupt for '{primitive_name}' (ID: {primitive_id}) "
+                f"but no primitive is currently executing. Ignoring."
             )
             return None
 
-        raise ValueError(
-            f"[Brain {self.connection_id}] Task '{primitive_name}' (ID: {primitive_id}) "
-            f"is not the current task in execution."
+        if primitive_in_execution.primitive_id != primitive_id:
+            # Stale interrupt - the client is reporting an interrupt for an old primitive
+            # while we've already moved on to tracking a new one. Ignore it.
+            self.logger.warn(
+                f"Interrupt for '{primitive_name}' (ID: {primitive_id}) doesn't match "
+                f"current task '{primitive_in_execution.name}' (ID: {primitive_in_execution.primitive_id}). "
+                f"Ignoring stale interrupt."
+            )
+            return primitive_in_execution
+
+        self.logger.info(f"Task '{primitive_in_execution.name}' interrupted.")
+        self.history.add(
+            HistoryEntryType.PRIMITIVE_INTERRUPTED,
+            description=f"Primitive '{primitive_name}' interrupted.",
         )
+        return None
 
     def handle_primitive_feedback(
         self,
@@ -134,7 +155,7 @@ class PrimitiveHandler:
                 description=f"'{task_name}': {feedback_text}",
             )
         else:
-            self.logger.warning(
+            self.logger.warn(
                 "Received primitive_feedback message with no feedback text."
             )
 
@@ -143,7 +164,15 @@ class PrimitiveHandler:
         payload: dict,
         primitive_in_execution: Optional[PrimitiveDefinition],
     ) -> Optional[PrimitiveDefinition]:
-        """Handle primitive activation. Returns the new primitive_in_execution."""
+        """
+        Handle primitive activation from client.
+        
+        Since we now set primitive_in_execution when sending (not when activated),
+        this method just validates that the client activated what we expected
+        and records it in history.
+        
+        Returns the current primitive_in_execution (unchanged).
+        """
         primitive_id = payload["primitive_id"]
         primitive_activated = self.primitive_ids_map.get(primitive_id)
 
@@ -154,38 +183,34 @@ class PrimitiveHandler:
             await self.send_callback(MessageOut(type="ready_for_image", payload={}))
             return primitive_in_execution
 
-        if primitive_in_execution:
-            self.logger.warn(
-                f"[Brain {self.connection_id}] Task '{primitive_in_execution.name}' "
-                f"(ID: {primitive_id}) was activated by the client, but we didn't activate it."
-            )
-            new_primitive_in_execution = primitive_in_execution
-        else:
-            task_name = primitive_activated.name
+        # Check if this matches what we're currently tracking
+        if primitive_in_execution and primitive_in_execution.primitive_id == primitive_id:
+            # Expected case: client activated the primitive we sent
             self.logger.info(
-                f"\033[92m[Brain {self.connection_id}] Task '{task_name}' "
-                f"(ID: {primitive_id}) activated.\033[0m"
+                f"\033[92m[Brain {self.connection_id}] Task '{primitive_in_execution.name}' "
+                f"(ID: {primitive_id}) activated by client.\033[0m"
             )
-
-            matched_prim = self._find_matching_primitive(task_name)
-            if matched_prim is not None:
-                prim_obj = (
-                    primitive_to_object(matched_prim)
-                    if isinstance(matched_prim, Primitive)
-                    else matched_prim
-                )
-                if primitive_id:
-                    prim_obj.primitive_id = primitive_id
-                new_primitive_in_execution = prim_obj
-                self.history.add(
-                    HistoryEntryType.PRIMITIVE_ACTIVATED,
-                    description=f"Primitive {task_name} activated",
-                )
-            else:
-                new_primitive_in_execution = None
+            self.history.add(
+                HistoryEntryType.PRIMITIVE_ACTIVATED,
+                description=f"Primitive {primitive_in_execution.name} activated",
+            )
+        elif primitive_in_execution:
+            # Client activated a different primitive than we're tracking
+            # This can happen due to race conditions - log warning but don't crash
+            self.logger.warn(
+                f"[Brain {self.connection_id}] Client activated '{primitive_activated.name}' "
+                f"(ID: {primitive_id}) but we're tracking '{primitive_in_execution.name}' "
+                f"(ID: {primitive_in_execution.primitive_id}). Ignoring stale activation."
+            )
+        else:
+            # No primitive in execution - unexpected activation
+            self.logger.warn(
+                f"[Brain {self.connection_id}] Client activated '{primitive_activated.name}' "
+                f"(ID: {primitive_id}) but no primitive is in execution. Ignoring."
+            )
 
         await self.send_callback(MessageOut(type="ready_for_image", payload={}))
-        return new_primitive_in_execution
+        return primitive_in_execution
 
     def _find_matching_primitive(self, task_name: str):
         """Find a primitive by name in the registered lists."""
@@ -216,6 +241,6 @@ class PrimitiveHandler:
                 description=entry_text,
             )
         else:
-            self.logger.warning(
+            self.logger.warn(
                 f"Received empty feedback message from primitive '{primitive_name}'."
             )

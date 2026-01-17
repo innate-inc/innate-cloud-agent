@@ -1,32 +1,48 @@
 """
 Chat message handler for the Brain.
 Handles chat_in messages including special commands.
+
+The chat handler runs fast and slow agents in parallel for immediate responses.
+If fast agent can answer, it responds immediately.
+If fast agent defers, the slow agent result is already available.
 """
 
+from dataclasses import dataclass
 from typing import Callable, List, Optional
 
+from src.agents.types import PrimitiveDefinition, VisionAgentOutput
 from src.brain_utils.constants import PrimitiveNames
 from src.brain_utils.memory_state_manager import MemoryStateManager
+from src.brain_utils.parallel_agents import (
+    run_agents_in_parallel,
+    validate_vision_output,
+)
+from src.brain_utils.vision_service import VisionAgentType, VisionService
 from src.history.history import History, HistoryEntryType
 from src.message_types import MessageOut
 from src.primitives.types import Primitive
 
 
-# Valid Gemini variants
 VALID_GEMINI_VARIANTS = ["gemini-flash", "gemini-flash-lite", "gemini-er"]
+
+
+@dataclass
+class ChatProcessingResult:
+    """Result of processing a chat message."""
+
+    new_gemini_variant: Optional[str] = None
+    fast_response_sent: bool = False
+    vision_output: Optional[VisionAgentOutput] = None
 
 
 class ChatHandler:
     """
     Handles chat_in messages and special commands.
 
-    Special commands (if memory enabled):
-    - !save_memory NAME: Saves the current memory state
-    - !load_memory NAME: Loads a saved memory state
-    - !list_memory: Lists available memory states
-
-    Other commands (always enabled):
-    - !gemini VERSION: Switches the Gemini version
+    For regular user messages:
+    - Runs fast and slow agents in parallel
+    - If fast agent can answer, sends response immediately
+    - If fast agent defers, slow agent result is already available
     """
 
     def __init__(
@@ -35,55 +51,122 @@ class ChatHandler:
         history: History,
         local_primitives_list: List[Primitive],
         send_callback: Callable,
+        vision_service: VisionService,
         memory_state_manager: Optional[MemoryStateManager] = None,
     ):
         self.logger = logger
         self.history = history
         self.local_primitives_list = local_primitives_list
         self.send_callback = send_callback
+        self.vision_service = vision_service
         self.memory_state_manager = memory_state_manager
 
     async def handle_chat_in(
         self,
         text: str,
+        image_b64: Optional[str],
         current_gemini_variant: str,
         enable_memory_commands: bool,
-    ) -> tuple[Optional[str], Optional[str]]:
+        directive: Optional[str] = None,
+        primitive_in_execution: Optional[PrimitiveDefinition] = None,
+        primitives_list: Optional[List[PrimitiveDefinition]] = None,
+        robot_coords: Optional[dict] = None,
+    ) -> ChatProcessingResult:
         """
         Handle a chat_in message.
 
         Args:
-            text: The chat message text
-            current_gemini_variant: Current Gemini variant setting
-            enable_memory_commands: Whether memory commands are enabled
+            text: The user's chat message text
+            image_b64: Optional base64-encoded JPEG image from the robot's camera
 
-        Returns:
-            Tuple of (new_gemini_variant, user_message_to_store)
-            - new_gemini_variant: Updated variant if changed, None otherwise
-            - user_message_to_store: Message to store for VLM, None if command was handled
+        Runs fast and slow agents in parallel. If fast agent can answer,
+        response is sent immediately. If fast defers, slow agent result
+        is already available.
         """
-        # Handle Gemini version switch command (always enabled)
         if text.startswith("!gemini"):
             new_variant = await self._handle_gemini_command(
                 text, current_gemini_variant
             )
-            return new_variant, None
+            return ChatProcessingResult(new_gemini_variant=new_variant)
 
-        # Check for special memory commands if enabled
         if enable_memory_commands and self.memory_state_manager is not None:
             handled = await self._handle_memory_commands(text)
             if handled:
-                return None, None
+                return ChatProcessingResult()
 
-        # Handle memory command attempt when disabled
         if text.startswith("!"):
             handled = await self._handle_disabled_memory_command(text)
             if handled:
-                return None, None
+                return ChatProcessingResult()
 
-        # Regular user message - store for VLM processing
+        # Add user message to history
         self.history.add(HistoryEntryType.AUDIO_IN, description=text)
-        return None, text
+
+        # Get context for agents
+        current_primitive_name = (
+            primitive_in_execution.name if primitive_in_execution else None
+        )
+        history_summary = self.history.get_brief_summary()
+
+        # Build primitives list for VLM (local + registered)
+        from src.primitives.transforms import primitive_to_object
+
+        local_primitives_as_definitions = [
+            primitive_to_object(p) for p in self.local_primitives_list
+        ]
+        all_primitives = local_primitives_as_definitions + (primitives_list or [])
+
+        # Create the slow agent coroutine only if we have an image
+        # The VLM requires an image to function
+        slow_coro = None
+        if image_b64:
+            slow_coro = self.vision_service.call_visual_language_model(
+                base64_img=image_b64,
+                user_prompt_text=text,
+                primitive_in_execution=primitive_in_execution,
+                primitives_list=all_primitives,
+                history=self.history.get_as_multimodal_list(),
+                robot_coords=robot_coords or {},
+                directive=directive,
+                agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,
+                gemini_variant=current_gemini_variant,
+                additional_image_data={},
+            )
+
+        # Run fast and slow agents in parallel
+        self.logger.info(f"[ChatHandler] Running parallel agents for: '{text[:50]}...'")
+
+        result = await run_agents_in_parallel(
+            user_message=text,
+            current_image=image_b64,
+            directive=directive,
+            current_primitive_name=current_primitive_name,
+            history_summary=history_summary,
+            slow_agent_coro=slow_coro,
+            send_chat_callback=self._send_chat_response,
+            logger=self.logger,
+            primitives_list=primitives_list,
+        )
+
+        if result.fast_answered:
+            # Fast agent answered - record in history
+            self.history.add(
+                HistoryEntryType.SYSTEM_MESSAGE,
+                description=f"Fast agent response: {result.fast_response}",
+            )
+            return ChatProcessingResult(fast_response_sent=True)
+        else:
+            # Fast agent deferred - return slow agent's vision output
+            self.logger.info(
+                "[ChatHandler] Fast agent deferred, using slow agent result"
+            )
+            # Validate the vision output to ensure next_task is a PrimitiveDefinition
+            vision_output = result.vision_output
+            if vision_output:
+                vision_output = validate_vision_output(
+                    vision_output, primitive_in_execution, self.history
+                )
+            return ChatProcessingResult(vision_output=vision_output)
 
     async def _handle_gemini_command(
         self,
@@ -235,5 +318,6 @@ class ChatHandler:
 
     async def _send_chat_response(self, text: str) -> None:
         """Send a chat response to the client."""
-        await self.send_callback(MessageOut(type="chat_out", payload={"text": text}))
-
+        await self.send_callback(
+            MessageOut(type="brain/chat_out", payload={"text": text})
+        )

@@ -46,7 +46,9 @@ class BigQueryLogger:
                     bigquery.SchemaField("output_tokens", "INTEGER", mode="NULLABLE"),
                     bigquery.SchemaField("total_tokens", "INTEGER", mode="NULLABLE"),
                     bigquery.SchemaField("tokens_per_second", "FLOAT", mode="NULLABLE"),
-                    bigquery.SchemaField("total_processing_seconds", "FLOAT", mode="NULLABLE"),
+                    bigquery.SchemaField(
+                        "total_processing_seconds", "FLOAT", mode="NULLABLE"
+                    ),
                     bigquery.SchemaField("connection_id", "STRING", mode="NULLABLE"),
                 ],
                 "directive_changes": [
@@ -58,7 +60,7 @@ class BigQueryLogger:
             }
 
             if not all([self.project_id, self.dataset_id]):
-                self.logger.warning(
+                self.logger.warn(
                     "BIGQUERY_PROJECT_ID or BIGQUERY_DATASET_ID are not set. "
                     "BigQuery logger will be disabled."
                 )

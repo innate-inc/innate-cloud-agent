@@ -23,10 +23,10 @@ from src.constants_robots import ROBOT_PARAMS_TO_USE
 GEMINI_MODEL_NAME = "gemini-flash-latest"
 GEMINI_FLASH_LITE_MODEL_NAME = "gemini-flash-lite-latest"
 GEMINI_ER_MODEL_NAME = "gemini-robotics-er-1.5-preview"
-GEMINI_TEMPERATURE = 0
+GEMINI_TEMPERATURE = 0.3
 GEMINI_TOP_P = 0.95
-GEMINI_TOP_K = 64
-GEMINI_MAX_OUTPUT_TOKENS = 8192
+GEMINI_TOP_K = 40
+GEMINI_MAX_OUTPUT_TOKENS = 2048
 THINKING_BUDGET = 0  # Matching BAML config
 EXECUTION_TIMEOUT = 5  # seconds
 

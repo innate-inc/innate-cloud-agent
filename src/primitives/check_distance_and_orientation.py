@@ -29,7 +29,7 @@ from src.constants_robots import ROBOT_PARAMS_TO_USE
 ROBOT_CAMERA_INFO = ROBOT_PARAMS_TO_USE["camera_info"]
 
 # Gemini API constants
-GEMINI_MODEL_NAME = "gemini-2.5-flash-lite-preview-06-17"
+GEMINI_MODEL_NAME = "gemini-3-flash-preview"
 GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64

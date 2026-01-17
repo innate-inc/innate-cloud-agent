@@ -78,11 +78,10 @@ class MemoryStateManager:
             # Create directory for this memory state
             state_dir = os.path.join(self.memory_states_dir, state_name)
             if os.path.exists(state_dir):
-                self.logger.warning(
+                self.logger.warn(
                     f"Memory state '{state_name}' already exists, overwriting"
                 )
                 shutil.rmtree(state_dir)
-
             os.makedirs(state_dir, exist_ok=True)
 
             # Create subdirectories

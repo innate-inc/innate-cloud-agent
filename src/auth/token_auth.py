@@ -138,6 +138,14 @@ class TokenAuthenticator:
         
         # return True
         if not self.client:
+            # If BigQuery is not configured, allow any token for local development
+            if os.getenv("SKIP_AUTH", "false").lower() == "true":
+                logger.warning("SKIP_AUTH enabled - bypassing token validation")
+                return AuthContext(
+                    robot_special_token=token,
+                    user_id="local_dev_user",
+                    innate_service_key=token,
+                )
             logger.warning("BigQuery client not initialized - cannot validate token")
             return None
 

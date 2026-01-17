@@ -1,6 +1,4 @@
-from enum import Enum
-from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import os
 import json
@@ -400,6 +398,41 @@ class History:
                 }
             )
         return unified_items
+
+    def get_brief_summary(self, max_entries: int = 5) -> str:
+        """
+        Get a brief text summary of recent history for context.
+        Excludes image entries and truncates long descriptions.
+        """
+        recent_entries = []
+        for entry in reversed(self.entries[-10:]):
+            if entry.type not in [
+                HistoryEntryType.GENERIC_IMAGE,
+                HistoryEntryType.IMAGE_PRE_ACTION,
+            ]:
+                desc = (
+                    entry.description[:100]
+                    if len(entry.description) > 100
+                    else entry.description
+                )
+                recent_entries.append(f"{entry.type.value}: {desc}")
+            if len(recent_entries) >= max_entries:
+                break
+        return (
+            "\n".join(reversed(recent_entries))
+            if recent_entries
+            else "No recent history"
+        )
+
+    def get_last_image(self) -> Optional[str]:
+        """Get the most recent image from history (base64 encoded)."""
+        for entry in reversed(self.entries):
+            if entry.type in [
+                HistoryEntryType.GENERIC_IMAGE,
+                HistoryEntryType.IMAGE_PRE_ACTION,
+            ]:
+                return entry.description
+        return None
 
     def get_as_string(self) -> str:
         now = get_now()

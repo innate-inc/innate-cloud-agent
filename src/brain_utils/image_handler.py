@@ -4,7 +4,6 @@ Breaks down the complex handle_image logic into smaller, focused methods.
 """
 
 import time
-import uuid
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
@@ -12,6 +11,10 @@ from src.agents.types import PrimitiveDefinition, VisionAgentOutput
 from src.brain_utils.constants import PrimitiveNames
 from src.brain_utils.image_processor import ImageProcessor
 from src.brain_utils.navigation_handler import NavigationHandler
+from src.brain_utils.parallel_agents import (
+    run_agents_in_parallel,
+    validate_vision_output,
+)
 from src.brain_utils.vision_service import VisionAgentType, VisionService
 from src.history.history import History, HistoryEntryType
 from src.primitives.transforms import primitive_to_object
@@ -40,7 +43,7 @@ class TokenMetrics:
 class ImageHandler:
     """
     Handles image message processing for the Brain.
-    Extracts the complex logic from handle_image into focused methods.
+    Uses parallel fast/slow agent processing when a user message is present.
     """
 
     def __init__(
@@ -51,6 +54,7 @@ class ImageHandler:
         navigation_handler: NavigationHandler,
         history: History,
         local_primitives_list: List[Primitive],
+        send_chat_callback: Optional[Callable] = None,
     ):
         self.logger = logger
         self.image_processor = image_processor
@@ -58,6 +62,7 @@ class ImageHandler:
         self.navigation_handler = navigation_handler
         self.history = history
         self.local_primitives_list = local_primitives_list
+        self.send_chat_callback = send_chat_callback
 
     async def process_image_message(
         self,
@@ -119,24 +124,61 @@ class ImageHandler:
         # Process depth and map data
         self._process_supplementary_data(depth_payload, map_payload, robot_coords)
 
-        # Call the VLM
+        # Call the VLM (with parallel fast agent if user message present)
         local_primitives_list = [
             primitive_to_object(prim) for prim in self.local_primitives_list
         ]
 
         vlm_start_time = time.time()
-        vision_output = await self.vision_service.call_visual_language_model(
-            base64_img=current_image_for_vlm,
-            user_prompt_text=latest_user_message,
-            primitive_in_execution=primitive_in_execution,
-            primitives_list=local_primitives_list + primitives_list,
-            history=self.history.get_as_multimodal_list(),
-            robot_coords=robot_coords,
-            directive=directive,
-            agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,
-            gemini_variant=gemini_variant,
-            additional_image_data=additional_image_data,
-        )
+
+        # Parallel processing: if there's a user message, start fast agent in parallel
+        # with the vision agent. Fast agent may answer immediately, avoiding VLM latency.
+        if latest_user_message:
+            self.logger.info(
+                f"Processing image with pending user message: '{latest_user_message[:50]}...'"
+            )
+            vision_output, fast_answered = await self._call_agents_in_parallel(
+                current_image_for_vlm=current_image_for_vlm,
+                latest_user_message=latest_user_message,
+                primitive_in_execution=primitive_in_execution,
+                primitives_list=local_primitives_list + primitives_list,
+                robot_coords=robot_coords,
+                directive=directive,
+                gemini_variant=gemini_variant,
+                additional_image_data=additional_image_data,
+            )
+            if fast_answered:
+                # Fast agent handled the response, VLM's to_tell_user already cleared
+                vlm_processing_time = time.time() - vlm_start_time
+                self.logger.info(f"Fast agent answered in {vlm_processing_time:.2f}s")
+            elif (
+                vision_output and vision_output.to_tell_user and self.send_chat_callback
+            ):
+                # Fast agent deferred, send slow agent's response as chat
+                await self.send_chat_callback(vision_output.to_tell_user)
+                self.logger.info(
+                    f"Slow agent response sent: {vision_output.to_tell_user[:50]}..."
+                )
+                # Record in history
+                self.history.add(
+                    HistoryEntryType.SYSTEM_MESSAGE,
+                    description=f"Vision agent response: {vision_output.to_tell_user}",
+                )
+        else:
+            # No user message, just call the vision agent
+            vision_output = await self.vision_service.call_visual_language_model(
+                base64_img=current_image_for_vlm,
+                user_prompt_text=latest_user_message,
+                primitive_in_execution=primitive_in_execution,
+                primitives_list=local_primitives_list + primitives_list,
+                history=self.history.get_as_multimodal_list(),
+                robot_coords=robot_coords,
+                directive=directive,
+                agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,
+                gemini_variant=gemini_variant,
+                additional_image_data=additional_image_data,
+            )
+
         vlm_processing_time = time.time() - vlm_start_time
 
         # Add image to history with appropriate type
@@ -150,8 +192,8 @@ class ImageHandler:
             vision_output = self._create_fallback_vision_output()
 
         # Validate and clean up vision output
-        vision_output = self._validate_vision_output(
-            vision_output, primitive_in_execution
+        vision_output = validate_vision_output(
+            vision_output, primitive_in_execution, self.history
         )
 
         # Handle navigation primitives
@@ -256,46 +298,6 @@ class ImageHandler:
                 "BEEP BOOP BEEP BOOP, the brain failed. Stopping the current task."
             ),
         )
-
-    def _validate_vision_output(
-        self,
-        vision_output: VisionAgentOutput,
-        primitive_in_execution: Optional[PrimitiveDefinition],
-    ) -> VisionAgentOutput:
-        """
-        Validate and clean up the vision output.
-        Handles discrepancies between VLM output and current state.
-        """
-        # Validate the next task
-        vision_output.next_task = (
-            PrimitiveDefinition.model_validate(vision_output.next_task)
-            if vision_output.next_task
-            else None
-        )
-
-        # Check for discrepancy: next_task provided without stop_current_task
-        # when a primitive is already running
-        if (
-            not vision_output.stop_current_task
-            and vision_output.next_task is not None
-            and primitive_in_execution is not None
-        ):
-            self.history.record_discrepancy(
-                message=(
-                    f"The VLM returned a next_task ({vision_output.next_task.name}) "
-                    f"even though there is a task running "
-                    f"({primitive_in_execution.name}) and it did not say to "
-                    f"stop the current task."
-                )
-            )
-            # Force next_task to None if stop wasn't explicitly requested
-            vision_output.next_task = None
-
-        # Ensure next_task has a primitive_id
-        if vision_output.next_task and not vision_output.next_task.primitive_id:
-            vision_output.next_task.primitive_id = str(uuid.uuid4())
-
-        return vision_output
 
     async def _handle_navigation_primitives(
         self,
@@ -415,3 +417,46 @@ class ImageHandler:
         if metrics.tokens_per_second is not None:
             token_info += f" ({metrics.tokens_per_second:.1f} tokens/sec)"
         return token_info
+
+    async def _call_agents_in_parallel(
+        self,
+        current_image_for_vlm: str,
+        latest_user_message: str,
+        primitive_in_execution: Optional[PrimitiveDefinition],
+        primitives_list: List[PrimitiveDefinition],
+        robot_coords: dict,
+        directive: Optional[str],
+        gemini_variant: str,
+        additional_image_data: dict,
+    ) -> Tuple[Optional[VisionAgentOutput], bool]:
+        """Call fast and slow agents in parallel, returns (vision_output, fast_answered)."""
+        current_primitive_name = (
+            primitive_in_execution.name if primitive_in_execution else None
+        )
+
+        slow_coro = self.vision_service.call_visual_language_model(
+            base64_img=current_image_for_vlm,
+            user_prompt_text=latest_user_message,
+            primitive_in_execution=primitive_in_execution,
+            primitives_list=primitives_list,
+            history=self.history.get_as_multimodal_list(),
+            robot_coords=robot_coords,
+            directive=directive,
+            agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,
+            gemini_variant=gemini_variant,
+            additional_image_data=additional_image_data,
+        )
+
+        result = await run_agents_in_parallel(
+            user_message=latest_user_message,
+            current_image=current_image_for_vlm,
+            directive=directive,
+            current_primitive_name=current_primitive_name,
+            history_summary=self.history.get_brief_summary(),
+            slow_agent_coro=slow_coro,
+            send_chat_callback=self.send_chat_callback,
+            logger=self.logger,
+            primitives_list=primitives_list,
+        )
+
+        return result.vision_output, result.fast_answered
