@@ -10,7 +10,8 @@ from typing import Optional
 from src.message_types import MessageInType, MessageOut, MessageOutType, MessageIn
 from src.brain import Brain
 from src.debug_panel import register_brain_for_debug, unregister_brain_for_debug
-from src.auth.token_auth import get_authenticator, AuthContext
+from src.auth.token_auth import get_authenticator, AuthContext, compare_versions
+from src.constants_robots import MIN_CLIENT_VERSION
 
 
 def get_user_from_token(token: str) -> Optional[AuthContext]:
@@ -176,6 +177,27 @@ class WebSocketAgentConnection:
         if token is None:
             print("[WARN] No token provided, closing connection.")
             return False
+
+        # Validate client version
+        client_version = auth_msg_payload.get("client_version")
+        if client_version:
+            is_valid, version_msg = compare_versions(client_version)
+            print(f"[INFO] Client version check: {version_msg}")
+            if not is_valid:
+                print(f"[WARN] {version_msg}")
+                await self.send_message(
+                    MessageOut(
+                        type=MessageOutType.ERROR,
+                        payload={
+                            "error": "version_mismatch",
+                            "message": version_msg,
+                            "min_version": MIN_CLIENT_VERSION,
+                        },
+                    )
+                )
+                return False
+        else:
+            print("[WARN] No client_version provided in auth message")
 
         # Validate token against BigQuery user_management table
         auth_context = get_user_from_token(token)
