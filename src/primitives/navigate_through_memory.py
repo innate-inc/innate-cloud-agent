@@ -17,7 +17,7 @@ from enum import Enum
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 # Default values for PoseGraphMemory parameters
-DEFAULT_MIN_DISTANCE = 0.5  # meters
+DEFAULT_MIN_DISTANCE = 1.0  # meters
 DEFAULT_MIN_ANGLE_DEGREES = ROBOT_PARAMS_TO_USE["horizontal_fov"] * (
     100 / 120
 )  # degrees
@@ -25,6 +25,16 @@ DEFAULT_EDGE_DISTANCE_THRESHOLD = 0.8  # meters
 DEFAULT_EDGE_ANGLE_THRESHOLD_DEGREES = ROBOT_PARAMS_TO_USE["horizontal_fov"] * (
     100 / 120
 )  # degrees
+
+# Coverage-based node selection parameters
+COVERAGE_GRID_RESOLUTION = 0.25  # meters per grid cell
+COVERAGE_MAX_NODES = 50  # maximum number of nodes to keep in memory
+COVERAGE_RECENCY_DECAY = 0.01  # exponential decay rate for recency (per second)
+COVERAGE_MIN_GAIN_THRESHOLD = 0.15  # minimum marginal coverage gain to add a node (0-1)
+COVERAGE_VISIBILITY_RANGE = 3.0  # how far the camera can see (meters)
+COVERAGE_FOV_RADIANS = np.radians(
+    ROBOT_PARAMS_TO_USE["horizontal_fov"]
+)  # FOV in radians
 
 # File system constants
 DATA_DIR_NAME = "data"
@@ -123,65 +133,268 @@ class PoseGraphMemory:
             self._user_graphs[user_token] = self._load_graph(user_token)
         return self._user_graphs[user_token]
 
+    def _compute_visibility_cells(
+        self, x: float, y: float, theta: float, grid_bounds: tuple
+    ) -> set:
+        """
+        Compute the set of grid cells visible from a given pose.
+        Uses a visibility cone based on position, orientation, and FOV.
+
+        Args:
+            x, y, theta: Position and orientation of the viewpoint
+            grid_bounds: (min_x, max_x, min_y, max_y) of the grid
+
+        Returns:
+            Set of (grid_x, grid_y) tuples representing visible cells
+        """
+        min_x, max_x, min_y, max_y = grid_bounds
+        visible_cells = set()
+
+        half_fov = COVERAGE_FOV_RADIANS / 2
+
+        # Sample points within the visibility cone
+        for dist in np.arange(0, COVERAGE_VISIBILITY_RANGE, COVERAGE_GRID_RESOLUTION):
+            # Sample angles within FOV
+            for angle_offset in np.linspace(
+                -half_fov, half_fov, max(3, int(dist * 4) + 1)
+            ):
+                sample_angle = theta + angle_offset
+                sample_x = x + dist * np.cos(sample_angle)
+                sample_y = y + dist * np.sin(sample_angle)
+
+                # Convert to grid coordinates
+                grid_x = int((sample_x - min_x) / COVERAGE_GRID_RESOLUTION)
+                grid_y = int((sample_y - min_y) / COVERAGE_GRID_RESOLUTION)
+
+                visible_cells.add((grid_x, grid_y))
+
+        return visible_cells
+
+    def _get_grid_bounds(self, graph: nx.DiGraph, x: float, y: float) -> tuple:
+        """
+        Compute the grid bounds based on all node positions plus the candidate position.
+
+        Returns:
+            (min_x, max_x, min_y, max_y) with padding for visibility range
+        """
+        all_x = [x]
+        all_y = [y]
+
+        for _, node_data in graph.nodes(data=True):
+            pos = node_data.get("position", {})
+            all_x.append(pos.get("x", 0))
+            all_y.append(pos.get("y", 0))
+
+        padding = COVERAGE_VISIBILITY_RANGE + COVERAGE_GRID_RESOLUTION
+        return (
+            min(all_x) - padding,
+            max(all_x) + padding,
+            min(all_y) - padding,
+            max(all_y) + padding,
+        )
+
+    def _compute_node_coverage_score(
+        self,
+        node_id: int,
+        node_data: dict,
+        graph: nx.DiGraph,
+        grid_bounds: tuple,
+        current_time: float,
+    ) -> tuple:
+        """
+        Compute a node's coverage score = unique_coverage × recency_weight.
+
+        Returns:
+            (score, unique_cell_count, visibility_cells)
+        """
+        pos = node_data.get("position", {})
+        x, y, theta = pos.get("x", 0), pos.get("y", 0), pos.get("theta", 0)
+        timestamp = node_data.get("timestamp", current_time)
+
+        # Compute this node's visibility
+        node_cells = self._compute_visibility_cells(x, y, theta, grid_bounds)
+
+        # Compute coverage from all other nodes
+        other_coverage = set()
+        for other_id, other_data in graph.nodes(data=True):
+            if other_id == node_id:
+                continue
+            other_pos = other_data.get("position", {})
+            other_cells = self._compute_visibility_cells(
+                other_pos.get("x", 0),
+                other_pos.get("y", 0),
+                other_pos.get("theta", 0),
+                grid_bounds,
+            )
+            other_coverage.update(other_cells)
+
+        # Unique coverage = cells only this node sees
+        unique_cells = node_cells - other_coverage
+        unique_count = len(unique_cells)
+
+        # Recency weight: exponential decay
+        age = current_time - timestamp
+        recency_weight = np.exp(-COVERAGE_RECENCY_DECAY * age)
+
+        score = unique_count * recency_weight
+        return score, unique_count, node_cells
+
     def should_add_node(
         self, user_token: str, x: float, y: float, theta: float
-    ) -> bool:
+    ) -> tuple:
         """
-        Determine if a new node should be added to the graph based on distance and angle criteria.
+        Determine if a new node should be added based on coverage gain.
+        If at max capacity, also returns which node to evict.
 
         Args:
             user_token: The user/robot identifier
             x, y, theta: Current position and orientation
 
         Returns:
-            Boolean indicating whether a new node should be added
+            Tuple of (should_add: bool, node_to_evict: Optional[int])
         """
         graph = self.get_user_graph(user_token)
+        current_time = time.time()
 
         # If the graph is empty, always add the first node
         if not graph.nodes:
-            return True
+            print(
+                f"[PoseGraph] Adding first node at ({x:.2f}, {y:.2f}, θ={np.degrees(theta):.1f}°)"
+            )
+            return True, None
 
-        # Get the most recent node
+        # Pre-filter: check minimum distance to most recent node
+        # This avoids expensive coverage computation for tiny movements
         try:
             most_recent_node = max(
                 graph.nodes, key=lambda n: graph.nodes[n].get("timestamp", 0)
             )
-            last_node_data = graph.nodes[most_recent_node]
-        except ValueError:
-            # If there's an issue finding the most recent node, add a new one
-            return True
+            last_pos = graph.nodes[most_recent_node].get("position", {})
+            dist = np.sqrt(
+                (x - last_pos.get("x", 0)) ** 2 + (y - last_pos.get("y", 0)) ** 2
+            )
+            last_theta = last_pos.get("theta", 0)
+            angle_diff = abs(theta - last_theta)
+            angle_diff = min(angle_diff, 2 * np.pi - angle_diff)
 
-        # Get the last position
-        last_position = np.array(
-            [
-                last_node_data["position"]["x"],
-                last_node_data["position"]["y"],
-                0,  # Z coordinate (not used)
-            ]
+            if dist < self.min_distance and angle_diff < self.min_angle_diff:
+                print(
+                    f"[PoseGraph] SKIP: Too close to last node. "
+                    f"dist={dist:.2f}m < {self.min_distance:.2f}m, "
+                    f"angle_diff={np.degrees(angle_diff):.1f}° < {np.degrees(self.min_angle_diff):.1f}°"
+                )
+                return False, None
+            print(
+                f"[PoseGraph] Pre-filter passed: dist={dist:.2f}m, "
+                f"angle_diff={np.degrees(angle_diff):.1f}°. Computing coverage..."
+            )
+        except (ValueError, KeyError):
+            print(
+                "[PoseGraph] Pre-filter: Could not find recent node, proceeding to coverage check"
+            )
+
+        # Compute grid bounds
+        grid_bounds = self._get_grid_bounds(graph, x, y)
+
+        # Compute current total coverage
+        current_coverage = set()
+        for _, node_data in graph.nodes(data=True):
+            pos = node_data.get("position", {})
+            cells = self._compute_visibility_cells(
+                pos.get("x", 0),
+                pos.get("y", 0),
+                pos.get("theta", 0),
+                grid_bounds,
+            )
+            current_coverage.update(cells)
+
+        # Compute new node's visibility
+        new_cells = self._compute_visibility_cells(x, y, theta, grid_bounds)
+
+        # Marginal coverage gain
+        new_unique_cells = new_cells - current_coverage
+        if len(new_cells) == 0:
+            marginal_gain = 0
+        else:
+            marginal_gain = len(new_unique_cells) / len(new_cells)
+
+        print(
+            f"[PoseGraph] Coverage: {len(new_unique_cells)}/{len(new_cells)} new cells "
+            f"({marginal_gain*100:.1f}% gain, threshold={COVERAGE_MIN_GAIN_THRESHOLD*100:.0f}%)"
         )
 
-        # Get the current position
-        current_position = np.array([x, y, 0])
+        # Check if new node adds enough coverage
+        if marginal_gain < COVERAGE_MIN_GAIN_THRESHOLD:
+            print(
+                f"[PoseGraph] SKIP: Insufficient coverage gain ({marginal_gain*100:.1f}% < {COVERAGE_MIN_GAIN_THRESHOLD*100:.0f}%)"
+            )
+            return False, None
 
-        # Check distance condition
-        distance = np.linalg.norm(current_position - last_position)
-        if distance > self.min_distance:
-            return True
+        # Check if we're under capacity
+        if len(graph.nodes) < COVERAGE_MAX_NODES:
+            print(
+                f"[PoseGraph] ADD: Good coverage gain. "
+                f"Graph has {len(graph.nodes)}/{COVERAGE_MAX_NODES} nodes"
+            )
+            return True, None
 
-        # Check orientation condition
-        last_theta = last_node_data["position"]["theta"]
-        angle_diff = abs(theta - last_theta)
-        angle_diff = min(angle_diff, 2 * np.pi - angle_diff)  # Handle wrap-around
+        # At capacity: find node to evict (lowest score = coverage × recency)
+        print(
+            f"[PoseGraph] At capacity ({COVERAGE_MAX_NODES} nodes). Finding node to evict..."
+        )
+        worst_node = None
+        worst_score = float("inf")
 
-        if angle_diff > self.min_angle_diff:
-            return True
+        for node_id, node_data in graph.nodes(data=True):
+            score, unique_count, _ = self._compute_node_coverage_score(
+                node_id, node_data, graph, grid_bounds, current_time
+            )
+            if score < worst_score:
+                worst_score = score
+                worst_node = node_id
 
-        # If neither condition is met, don't add a new node
-        return False
+        if worst_node is not None:
+            worst_pos = graph.nodes[worst_node].get("position", {})
+            print(
+                f"[PoseGraph] ADD+EVICT: Evicting node {worst_node} "
+                f"(score={worst_score:.1f}) at ({worst_pos.get('x', 0):.2f}, {worst_pos.get('y', 0):.2f})"
+            )
+
+        return True, worst_node
+
+    def _remove_node(self, user_token: str, graph: nx.DiGraph, node_id: int):
+        """
+        Remove a node from the graph and delete its associated image file.
+
+        Args:
+            user_token: The user/robot identifier
+            graph: The graph to remove from
+            node_id: The node ID to remove
+        """
+        if node_id not in graph.nodes:
+            return
+
+        node_data = graph.nodes[node_id]
+        image_path = node_data.get("image_path", "")
+
+        # Remove the node (this also removes all edges to/from it)
+        graph.remove_node(node_id)
+
+        # Delete the image file
+        if image_path and os.path.exists(image_path):
+            try:
+                os.unlink(image_path)
+            except Exception as e:
+                print(f"Error deleting image file {image_path}: {e}")
 
     def add_image_to_graph(
-        self, user_token: str, image_data: str, x: float, y: float, theta: float
+        self,
+        user_token: str,
+        image_data: str,
+        x: float,
+        y: float,
+        theta: float,
+        node_to_evict: Optional[int] = None,
     ) -> int:
         """
         Add an image with position data to the user's pose graph.
@@ -190,11 +403,16 @@ class PoseGraphMemory:
             user_token: The user/robot identifier
             image_data: Base64 encoded image data
             x, y, theta: Position and orientation
+            node_to_evict: Optional node ID to remove before adding (from should_add_node)
 
         Returns:
             The ID of the newly added node
         """
         graph = self.get_user_graph(user_token)
+
+        # Evict node if specified (coverage-based eviction)
+        if node_to_evict is not None:
+            self._remove_node(user_token, graph, node_to_evict)
 
         # Save the image to disk
         image_path = self._save_image(user_token, image_data)

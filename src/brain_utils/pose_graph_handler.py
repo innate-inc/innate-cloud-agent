@@ -74,17 +74,24 @@ class PoseGraphHandler:
 
         pose_graph_memory = navigate_through_memory.pose_graph_memory
 
-        # Check if we should add a node (not too close to existing nodes)
-        if not pose_graph_memory.should_add_node(user_token, x, y, theta):
+        # Check if we should add a node based on coverage gain
+        should_add, node_to_evict = pose_graph_memory.should_add_node(
+            user_token, x, y, theta
+        )
+        if not should_add:
             self.logger.debug(
-                "Skipping image addition to pose graph because a close node exists"
+                "Skipping image addition to pose graph: insufficient coverage gain"
             )
             return robot_coords, None
 
-        # Add the image to the pose graph
+        # Add the image to the pose graph (with optional eviction)
         self.logger.debug(f"Adding image to pose graph with user_token: {user_token}")
+        if node_to_evict is not None:
+            self.logger.debug(
+                f"Evicting node {node_to_evict} to maintain coverage balance"
+            )
         node_id = pose_graph_memory.add_image_to_graph(
-            user_token, image_b64, x, y, theta
+            user_token, image_b64, x, y, theta, node_to_evict=node_to_evict
         )
 
         self.logger.info(f"Added image to pose graph with node ID: {node_id}")
