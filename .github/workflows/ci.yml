@@ -15,6 +15,10 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       ROBOT_TYPE: sim
+      SKIP_AUTH: "true"
+      DEFAULT_ROBOT_TOKEN: "test_robot_token"
+      DEFAULT_USER_ID: "test_user_id"
+      DEFAULT_SERVICE_KEY: "test_service_key"
 
     steps:
       - name: Checkout code
