@@ -38,7 +38,7 @@ async def common_setup(test_name):
     # Send authentication message.
     auth_message = {
         "type": "auth",
-        "payload": {"token": f"MY_HARDCODED_TOKEN_{test_name}"},
+        "payload": {"token": f"MY_HARDCODED_TOKEN_{test_name}", "client_version": "0.2.5"},
     }
     await websocket.send(json.dumps(auth_message))
 
