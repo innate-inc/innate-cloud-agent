@@ -466,16 +466,17 @@ class NavigationHandler:
         """
         # Get the angle and distance from the inputs
         angle = vision_output.next_task.inputs.get("angle", 0.0)
+        angle_rad = math.radians(angle)
         # angle = radians(angle)
         distance = vision_output.next_task.inputs.get("distance", 0.0)
 
         # Get current robot coordinates
-        current_x = 0# robot_coords.get("x", 0.0)
-        current_y = 0#robot_coords.get("y", 0.0)
-        current_theta = 0#robot_coords.get("theta", 0.0)
+        current_x = 0  # robot_coords.get("x", 0.0)
+        current_y = 0  # robot_coords.get("y", 0.0)
+        current_theta = 0  # robot_coords.get("theta", 0.0)
 
         # Calculate the new theta (current + angle to turn)
-        new_theta = current_theta + angle
+        new_theta = current_theta + angle_rad
 
         # Calculate the new x, y coordinates after moving forward
         # Using trigonometry: x = current_x + distance * cos(new_theta)
