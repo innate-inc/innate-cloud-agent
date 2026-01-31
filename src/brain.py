@@ -176,9 +176,11 @@ class Brain:
         waiting behind slow IMAGE processing. This ensures fast response times
         for user questions.
         """
+        self.logger.info(f"[Brain] Enqueue message type={message.type}, queue_size={self.message_queue.qsize()}")
         # Process CHAT_IN immediately without waiting for the queue
         if message.type == MessageInType.CHAT_IN:
             # Fire and forget - process chat in parallel
+            self.logger.info(f"[Brain] CHAT_IN fast path - processing immediately")
             asyncio.create_task(self._process_chat_immediately(message))
         else:
             await self.message_queue.put(message)
@@ -201,10 +203,13 @@ class Brain:
         The brain's main loop. It runs on a single thread (event loop), processes
         one message at a time, and sends back results with send_callback.
         """
+        self.logger.info("[Brain] Main loop started")
         while self.running:
             message = await self.message_queue.get()
             if message is None:
+                self.logger.info("[Brain] Received None message, shutting down")
                 break  # Allow graceful shutdown when a None message is pushed
+            self.logger.info(f"[Brain] Processing from queue: type={message.type}, queue_size={self.message_queue.qsize()}")
             await self.process_message(message)
 
     async def process_message(self, message: MessageIn):
