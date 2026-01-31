@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 load_dotenv()
 
 from run_server import connection_handler
+from src.constants_robots import MIN_CLIENT_VERSION
 
 
 async def common_setup(test_name):
@@ -40,7 +41,7 @@ async def common_setup(test_name):
     # Send authentication message.
     auth_message = {
         "type": "auth",
-        "payload": {"token": f"MY_HARDCODED_TOKEN_{test_name}", "client_version": "0.2.5"},
+        "payload": {"token": f"MY_HARDCODED_TOKEN_{test_name}", "client_version": MIN_CLIENT_VERSION},
     }
     await websocket.send(json.dumps(auth_message))
 

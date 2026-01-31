@@ -19,6 +19,7 @@ load_dotenv()
 
 # Import connection_handler after path modification and env loading
 from run_server import connection_handler
+from src.constants_robots import MIN_CLIENT_VERSION
 
 
 # Import the setup functions directly instead of from the other test file
@@ -40,7 +41,7 @@ async def common_setup(test_name):
     # Send authentication message.
     auth_message = {
         "type": "auth",
-        "payload": {"token": f"MY_HARDCODED_TOKEN_{test_name}", "client_version": "0.2.5"},
+        "payload": {"token": f"MY_HARDCODED_TOKEN_{test_name}", "client_version": MIN_CLIENT_VERSION},
     }
     await websocket.send(json.dumps(auth_message))
 
