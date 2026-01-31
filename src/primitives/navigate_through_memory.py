@@ -278,16 +278,16 @@ class PoseGraphMemory:
             angle_diff = min(angle_diff, 2 * np.pi - angle_diff)
 
             if dist < self.min_distance and angle_diff < self.min_angle_diff:
-                print(
-                    f"[PoseGraph] SKIP: Too close to last node. "
-                    f"dist={dist:.2f}m < {self.min_distance:.2f}m, "
-                    f"angle_diff={np.degrees(angle_diff):.1f}° < {np.degrees(self.min_angle_diff):.1f}°"
-                )
+                # print(
+                #     f"[PoseGraph] SKIP: Too close to last node. "
+                #     f"dist={dist:.2f}m < {self.min_distance:.2f}m, "
+                #     f"angle_diff={np.degrees(angle_diff):.1f}° < {np.degrees(self.min_angle_diff):.1f}°"
+                # )
                 return False, None
-            print(
-                f"[PoseGraph] Pre-filter passed: dist={dist:.2f}m, "
-                f"angle_diff={np.degrees(angle_diff):.1f}°. Computing coverage..."
-            )
+            # print(
+            #     f"[PoseGraph] Pre-filter passed: dist={dist:.2f}m, "
+            #     f"angle_diff={np.degrees(angle_diff):.1f}°. Computing coverage..."
+            # )
         except (ValueError, KeyError):
             print(
                 "[PoseGraph] Pre-filter: Could not find recent node, proceeding to coverage check"
