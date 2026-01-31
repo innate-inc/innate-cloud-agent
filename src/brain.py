@@ -461,7 +461,25 @@ class Brain:
 
         if result.vision_output is not None:
             # Fast agent deferred - process the slow agent's vision output
-            await self._send_vision_output(result.vision_output, result.vision_output)
+            vision_output = result.vision_output
+            vision_output_for_history = result.vision_output
+
+            # Handle navigation primitives if we have the required data
+            if vision_output.next_task:
+                (
+                    vision_output,
+                    vision_output_for_history,
+                ) = await self.image_handler._handle_navigation_primitives(
+                    vision_output,
+                    robot_coords=message.payload.get("robot_coords", self.current_robot_coords),
+                    base64_img=message.payload.get("image_b64"),
+                    depth_payload=message.payload.get("depth_payload"),
+                    map_payload=message.payload.get("map_payload"),
+                    camera_info=message.payload.get("camera_info", {}),
+                    connection_id=self.connection_id,
+                )
+
+            await self._send_vision_output(vision_output, vision_output_for_history)
             self.history.check_and_summarize()
 
     async def handle_primitive_completed(self, message: MessageIn):
@@ -760,6 +778,7 @@ class Brain:
                     "theta": navigation_command["theta"],
                     "local_frame": True,
                 },
+                primitive_id=nav_continuous._primitive_id,
             )
             
             # Create minimal vision output for navigation
