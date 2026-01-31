@@ -90,13 +90,14 @@ class WebSocketAgentConnection:
                 print("[INFO] Memory state commands are enabled for this brain")
 
             # Notify client that the server is ready for an image (or other messages)
+            print(f"[Auth] Sending ready_for_image to {self.user_token[:10]}...")
             await self.send_message(
                 MessageOut(
                     type=MessageOutType.READY_FOR_IMAGE,
                     payload={},
                 )
             )
-            print("[DEBUG] Sent 'ready_for_image' to client")
+            print(f"[Auth] ready_for_image sent successfully to {self.user_token[:10]}...")
 
             # Main listening loop --
             # For every message received on the websocket,

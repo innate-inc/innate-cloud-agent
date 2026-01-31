@@ -126,9 +126,11 @@ async def run_agents_in_parallel(
 
         if fast_result and fast_result.decision == FastAnswerDecision.ANSWER_NOW:
             if fast_result.response and send_chat_callback:
+                logger.info(f"[Parallel] Fast agent answering: '{fast_result.response[:50]}...'")
                 await send_chat_callback(fast_result.response)
                 fast_answered = True
                 fast_response = fast_result.response
+                logger.info("[Parallel] Fast agent response sent via callback")
 
         # Only await slow task if it exists
         if slow_task:
