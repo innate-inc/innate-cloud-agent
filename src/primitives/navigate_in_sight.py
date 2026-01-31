@@ -420,12 +420,12 @@ If there's a need for clarification, explain in the explanation field.
         if selected_point_id in point_mapping:
             selected_point = point_mapping[selected_point_id]
             angle, distance = selected_point["angle_distance"]
-            
+
             # Compute x, y, theta from angle_distance
-            angle_world_vector = angle
-            x = distance * np.cos(angle_world_vector)
-            y = distance * np.sin(angle_world_vector)
-            theta = angle_world_vector
+            # Negate angle to match image visualization convention
+            x = distance * np.cos(-angle)
+            y = distance * np.sin(-angle)
+            theta = -angle
 
             navigation_command = {
                 "x": x,
@@ -573,12 +573,12 @@ If there's a need for clarification, explain in the explanation field.
             selected_point_id = list(point_mapping.keys())[0]
             selected_point = point_mapping[selected_point_id]
             angle, distance = selected_point["angle_distance"]
-            
+
             # Compute x, y, theta from angle_distance
-            angle_world_vector =  angle
-            x =  distance * np.cos(angle_world_vector)
-            y = distance * np.sin(angle_world_vector)
-            theta = angle_world_vector
+            # Negate angle to match image visualization convention
+            x = distance * np.cos(-angle)
+            y = distance * np.sin(-angle)
+            theta = -angle
 
             navigation_command = {
                 "x": x,
