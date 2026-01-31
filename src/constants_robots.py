@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Minimum required client version (semver)
-MIN_CLIENT_VERSION = "0.2.5"
+MIN_CLIENT_VERSION = "0.3.0"
 
 ROBOT_PARAMS_SIM = {
     "vertical_fov": 80.0,
