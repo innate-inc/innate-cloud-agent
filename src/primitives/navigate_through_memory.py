@@ -318,16 +318,16 @@ class PoseGraphMemory:
         else:
             marginal_gain = len(new_unique_cells) / len(new_cells)
 
-        print(
-            f"[PoseGraph] Coverage: {len(new_unique_cells)}/{len(new_cells)} new cells "
-            f"({marginal_gain*100:.1f}% gain, threshold={COVERAGE_MIN_GAIN_THRESHOLD*100:.0f}%)"
-        )
+        # print(
+        #     f"[PoseGraph] Coverage: {len(new_unique_cells)}/{len(new_cells)} new cells "
+        #     f"({marginal_gain*100:.1f}% gain, threshold={COVERAGE_MIN_GAIN_THRESHOLD*100:.0f}%)"
+        # )
 
         # Check if new node adds enough coverage
         if marginal_gain < COVERAGE_MIN_GAIN_THRESHOLD:
-            print(
-                f"[PoseGraph] SKIP: Insufficient coverage gain ({marginal_gain*100:.1f}% < {COVERAGE_MIN_GAIN_THRESHOLD*100:.0f}%)"
-            )
+            # print(
+            #     f"[PoseGraph] SKIP: Insufficient coverage gain ({marginal_gain*100:.1f}% < {COVERAGE_MIN_GAIN_THRESHOLD*100:.0f}%)"
+            # )
             return False, None
 
         # Check if we're under capacity
