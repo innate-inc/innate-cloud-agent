@@ -585,11 +585,14 @@ class NavigationHandler:
         )
         max_iterations = vision_output.next_task.inputs.get("max_iterations", 50)
 
+        original_primitive_id = getattr(vision_output.next_task, "primitive_id", None)
+
         msg, result, navigation_command = await nav_continuous.execute(
             target_description=target_description,
             stop_in_front_of_target=stop_in_front_of_target,
             max_iterations=max_iterations,
             map_payload=map_payload,
+            primitive_id=original_primitive_id,
         )
 
         if result and navigation_command is not None:

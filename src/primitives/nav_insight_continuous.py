@@ -79,6 +79,7 @@ class NavInsightContinuous(Primitive):
 
         # State for continuous navigation
         self._is_active = False
+        self._primitive_id: Optional[str] = None  # Original primitive ID for tracking
         self._objective: Optional[str] = None
         self._stop_in_front_of_target: bool = True
         self._previous_image: Optional[np.ndarray] = None
@@ -371,6 +372,7 @@ Provide a brief explanation and describe any progress made since the last image.
     async def activate(
         self,
         objective: str,
+        primitive_id: str,
         stop_in_front_of_target: bool = True,
         max_iterations: int = 50,
     ):
@@ -379,10 +381,12 @@ Provide a brief explanation and describe any progress made since the last image.
 
         Args:
             objective: Description of what to navigate towards
+            primitive_id: The primitive ID to use for tracking
             stop_in_front_of_target: Whether to stop in front of the target
             max_iterations: Maximum number of navigation iterations
         """
         self._is_active = True
+        self._primitive_id = primitive_id
         self._objective = objective
         self._stop_in_front_of_target = stop_in_front_of_target
         self._max_iterations = max_iterations
@@ -391,12 +395,15 @@ Provide a brief explanation and describe any progress made since the last image.
         self._previous_annotated_image = None
         self._previous_decision = None
 
-        print(f"NavInsightContinuous: Activated with objective: {objective}")
+        print(
+            f"NavInsightContinuous: Activated with objective: {objective}, id: {primitive_id}"
+        )
         self._send_feedback(f"Starting continuous navigation towards: {objective}")
 
     def deactivate(self):
         """Deactivate continuous navigation mode."""
         self._is_active = False
+        self._primitive_id = None
         self._objective = None
         self._previous_image = None
         self._previous_annotated_image = None
@@ -569,6 +576,7 @@ Provide a brief explanation and describe any progress made since the last image.
         stop_in_front_of_target: bool = True,
         max_iterations: int = 50,
         map_payload: dict = None,
+        primitive_id: str = None,
     ):
         """
         Execute the continuous navigation primitive.
@@ -581,6 +589,7 @@ Provide a brief explanation and describe any progress made since the last image.
             stop_in_front_of_target: Whether to stop in front of the target
             max_iterations: Maximum number of navigation iterations
             map_payload: Initial map payload (optional, for first iteration)
+            primitive_id: The primitive ID for tracking
 
         Returns:
             tuple: (message, success, navigation_command or None)
@@ -592,6 +601,7 @@ Provide a brief explanation and describe any progress made since the last image.
         # Activate continuous mode
         await self.activate(
             objective=target_description,
+            primitive_id=primitive_id,
             stop_in_front_of_target=stop_in_front_of_target,
             max_iterations=max_iterations,
         )
