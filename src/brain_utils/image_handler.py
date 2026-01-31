@@ -354,6 +354,20 @@ class ImageHandler:
                 vision_output, robot_coords, map_payload
             )
 
+        elif primitive_name == PrimitiveNames.NAV_INSIGHT_CONTINUOUS:
+            vision_output_for_history = vision_output.model_copy()
+            (
+                vision_output,
+                has_canceled,
+            ) = await self.navigation_handler.handle_nav_insight_continuous(
+                vision_output,
+                robot_coords,
+                base64_img,
+                depth_payload,
+                map_payload,
+                camera_info,
+            )
+
         elif primitive_name == PrimitiveNames.CHECK_DISTANCE_AND_ORIENTATION:
             vision_output_for_history = vision_output.model_copy()
             (
