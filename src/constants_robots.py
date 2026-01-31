@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Minimum required client version (semver)
-MIN_CLIENT_VERSION = "0.2.5"
+MIN_CLIENT_VERSION = "0.3.0"
 
 ROBOT_PARAMS_SIM = {
     "vertical_fov": 80.0,
@@ -25,7 +25,7 @@ ROBOT_PARAMS_MAURICE_OAK_D = {
     "vertical_fov": 80.0,
     "horizontal_fov": 128.0,
     "camera_resolution": (1280, 800),
-    "min_obstacle_distance": 0.00, #our costmap is already inflated
+    "min_obstacle_distance": 0.00,  # our costmap is already inflated
     "camera_info": {
         "pitch_deg": -10,
         "x_cam": 0.0197,
@@ -33,7 +33,7 @@ ROBOT_PARAMS_MAURICE_OAK_D = {
     },
     "average_pos_cov_threshold": 0.25,
     "average_yaw_cov_threshold": 0.18,
-    "enable_visualizations": False,
+    "enable_visualizations": True,
 }
 
 ROBOTS_PARAMS = {

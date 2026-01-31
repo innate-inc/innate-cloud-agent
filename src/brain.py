@@ -16,6 +16,7 @@ from src.message_types import (
 from src.history.history import History, HistoryEntryType
 from src.agents.types import PrimitiveDefinition
 from src.primitives.navigate_in_sight import NavigateInSight
+from src.primitives.nav_insight_continuous import NavInsightContinuous
 from src.primitives.navigate_through_memory import NavigateThroughMemory
 from src.primitives.turn_and_move import TurnAndMove
 
@@ -93,6 +94,7 @@ class Brain:
         # Local primitives defined in the brain (not registered by user)
         self.local_primitives_list = [
             NavigateInSight(),
+            NavInsightContinuous(),
             NavigateThroughMemory(),
             TurnAndMove(),
         ]
@@ -252,7 +254,14 @@ class Brain:
         """
         Process an image message and log the results.
         Handles both success and failure cases cleanly.
+        
+        If continuous navigation is active, bypasses normal VLM processing
+        and routes the image directly to the NavInsightContinuous primitive.
         """
+        # Check if continuous navigation is active
+        if await self._handle_continuous_navigation_image(message):
+            return  # Handled by continuous navigation
+        
         time_start = time.time()
         vision_output, vlm_processing_time = await self.handle_image(message)
         time_elapsed = time.time() - time_start
@@ -457,7 +466,25 @@ class Brain:
 
         if result.vision_output is not None:
             # Fast agent deferred - process the slow agent's vision output
-            await self._send_vision_output(result.vision_output, result.vision_output)
+            vision_output = result.vision_output
+            vision_output_for_history = result.vision_output
+
+            # Handle navigation primitives if we have the required data
+            if vision_output.next_task:
+                (
+                    vision_output,
+                    vision_output_for_history,
+                ) = await self.image_handler._handle_navigation_primitives(
+                    vision_output,
+                    robot_coords=message.payload.get("robot_coords", self.current_robot_coords),
+                    base64_img=message.payload.get("image_b64"),
+                    depth_payload=message.payload.get("depth_payload"),
+                    map_payload=message.payload.get("map_payload"),
+                    camera_info=message.payload.get("camera_info", {}),
+                    connection_id=self.connection_id,
+                )
+
+            await self._send_vision_output(vision_output, vision_output_for_history)
             self.history.check_and_summarize()
 
     async def handle_primitive_completed(self, message: MessageIn):
@@ -475,6 +502,11 @@ class Brain:
                 message.payload, self.state.primitive_in_execution
             )
         )
+        # Deactivate continuous navigation if active
+        nav_continuous = self._get_nav_insight_continuous_primitive()
+        if nav_continuous and nav_continuous.is_active:
+            nav_continuous.deactivate()
+            self.logger.info("Deactivated continuous navigation due to primitive failure")
 
     async def handle_primitive_interrupted(self, message: MessageIn):
         """Handle primitive interruption."""
@@ -483,6 +515,11 @@ class Brain:
                 message.payload, self.state.primitive_in_execution
             )
         )
+        # Deactivate continuous navigation if active
+        nav_continuous = self._get_nav_insight_continuous_primitive()
+        if nav_continuous and nav_continuous.is_active:
+            nav_continuous.deactivate()
+            self.logger.info("Deactivated continuous navigation due to interruption")
 
     async def handle_primitive_feedback(self, message: MessageIn):
         """Handle primitive feedback."""
@@ -668,6 +705,115 @@ class Brain:
             ),
             None,
         )
+
+    def _get_nav_insight_continuous_primitive(self):
+        """Get the NavInsightContinuous primitive from local primitives."""
+        return next(
+            (
+                p
+                for p in self.local_primitives_list
+                if p.name == PrimitiveNames.NAV_INSIGHT_CONTINUOUS
+            ),
+            None,
+        )
+
+    async def _handle_continuous_navigation_image(self, message: MessageIn) -> bool:
+        """
+        Handle an image message when continuous navigation is active.
+        
+        When NavInsightContinuous is active, images bypass normal VLM processing
+        and are routed directly to the primitive for faster navigation decisions.
+        
+        Args:
+            message: The image message
+            
+        Returns:
+            True if the image was handled by continuous navigation, False otherwise
+        """
+        nav_continuous = self._get_nav_insight_continuous_primitive()
+        
+        if nav_continuous is None or not nav_continuous.is_active:
+            return False
+        
+        self.logger.info("Processing image for continuous navigation (bypassing VLM)")
+        
+        payload = message.payload
+        
+        # Extract image data
+        try:
+            extracted_data = self.image_processor.extract_image_data(payload)
+            if extracted_data is None:
+                self.logger.error("Failed to extract image data for continuous nav")
+                return False
+            
+            (
+                base64_img,
+                depth_payload,
+                robot_coords,
+                map_payload,
+                _,  # additional_image_data
+                camera_info,
+            ) = extracted_data
+        except Exception as e:
+            self.logger.error(f"Error extracting image data: {e}")
+            return False
+        
+        # Process through navigation handler
+        should_continue, navigation_command, msg = (
+            await self.navigation_handler.process_continuous_navigation_image(
+                robot_coords=robot_coords,
+                base64_img=base64_img,
+                depth_payload=depth_payload,
+                map_payload=map_payload,
+                camera_info=camera_info,
+            )
+        )
+        
+        self.logger.info(f"Continuous nav result: {msg}, continue={should_continue}")
+        
+        if should_continue and navigation_command:
+            # Send navigation command to client
+            from src.agents.types import PrimitiveDefinition
+            
+            nav_task = PrimitiveDefinition(
+                name=PrimitiveNames.NAVIGATE_TO_POSITION,
+                inputs={
+                    "x": navigation_command["x"],
+                    "y": navigation_command["y"],
+                    "theta": navigation_command["theta"],
+                    "local_frame": True,
+                },
+                primitive_id=nav_continuous._primitive_id,
+            )
+            
+            # Create minimal vision output for navigation
+            from src.agents.types import VisionAgentOutput
+            
+            vision_output = VisionAgentOutput(
+                stop_current_task=False,
+                observation=msg,
+                thoughts="Continuing navigation towards objective.",
+                new_goal=None,
+                next_task=nav_task,
+                anticipation="Will continue navigating after this movement.",
+                to_tell_user=None,
+            )
+            
+            await self._send_vision_output(vision_output)
+        else:
+            # Navigation complete or failed
+            nav_continuous.deactivate()
+            self.state.primitive_in_execution = None
+            
+            # Request next image for normal processing
+            await self.send_callback(
+                MessageOut(type=MessageOutType.READY_FOR_IMAGE, payload={})
+            )
+            
+            if msg:
+                await self._send_chat_out(f"Navigation complete: {msg}")
+        
+        return True
 
     def get_debug_state(self) -> dict:
         """

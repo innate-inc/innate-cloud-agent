@@ -529,3 +529,194 @@ class NavigationHandler:
         )
 
         return vision_output, has_canceled_task
+
+    async def handle_nav_insight_continuous(
+        self,
+        vision_output,
+        robot_coords,
+        base64_img,
+        depth_payload,
+        map_payload,
+        camera_info,
+    ):
+        """
+        Handle the nav_insight_continuous primitive.
+
+        This primitive activates continuous navigation mode where it keeps receiving
+        images and making navigation decisions until the objective is reached.
+        """
+        has_canceled_task = False
+        nav_continuous = next(
+            (
+                prim
+                for prim in self.primitives_list
+                if prim.name == PrimitiveNames.NAV_INSIGHT_CONTINUOUS
+            ),
+            None,
+        )
+
+        if nav_continuous is None:
+            self.logger.error("NavInsightContinuous primitive not found")
+            vision_output.stop_current_task = True
+            vision_output.observation = "Continuous navigation primitive not found"
+            vision_output.next_task = None
+            return vision_output, True
+
+        horizontal_fov = camera_info["horizontal_fov"]
+        vertical_fov = camera_info["vertical_fov"]
+
+        nav_continuous.update_current_vars(
+            current_x=robot_coords["x"],
+            current_y=robot_coords["y"],
+            current_yaw=robot_coords["theta"],
+            image_b64=base64_img,
+            depth_payload=depth_payload,
+            horizontal_fov=horizontal_fov,
+            vertical_fov=vertical_fov,
+            camera_info=camera_info,
+        )
+
+        target_object = vision_output.next_task.inputs.get("target_object")
+        target_description = vision_output.next_task.inputs.get(
+            "target_description", target_object
+        )
+        stop_in_front_of_target = vision_output.next_task.inputs.get(
+            "stop_in_front_of_target", True
+        )
+        max_iterations = vision_output.next_task.inputs.get("max_iterations", 50)
+
+        original_primitive_id = getattr(vision_output.next_task, "primitive_id", None)
+
+        msg, result, navigation_command = await nav_continuous.execute(
+            target_description=target_description,
+            stop_in_front_of_target=stop_in_front_of_target,
+            max_iterations=max_iterations,
+            map_payload=map_payload,
+            primitive_id=original_primitive_id,
+        )
+
+        if result and navigation_command is not None:
+            if map_payload:
+                is_safe, safety_msg = self.check_position_safety(
+                    navigation_command["x"], navigation_command["y"], map_payload
+                )
+
+                if not is_safe:
+                    self.logger.warn(
+                        f"Navigation (continuous) target at ({navigation_command['x']}, {navigation_command['y']}) "
+                        f"is too close to obstacles: {safety_msg}"
+                    )
+                    vision_output.stop_current_task = True
+                    vision_output.observation = f"Navigation failed: {safety_msg}"
+                    vision_output.next_task = None
+                    vision_output.to_tell_user = (
+                        f"I can't navigate to that position because it's too close to obstacles. "
+                        f"{safety_msg}"
+                    )
+                    return vision_output, True
+
+            original_primitive_id = getattr(
+                vision_output.next_task, "primitive_id", None
+            )
+
+            navigation_to_position_task = PrimitiveDefinition(
+                name=PrimitiveNames.NAVIGATE_TO_POSITION,
+                inputs={
+                    "x": navigation_command["x"],
+                    "y": navigation_command["y"],
+                    "theta": navigation_command["theta"],
+                    "local_frame": True,
+                },
+                primitive_id=original_primitive_id,
+            )
+            vision_output.next_task = navigation_to_position_task
+
+            self.logger.info(
+                f"Converted nav_insight_continuous to navigate_to_position with inputs: "
+                f"{navigation_to_position_task.inputs}. Initial coords were: {robot_coords}"
+            )
+        elif result and navigation_command is None:
+            vision_output.stop_current_task = True
+            vision_output.observation = (
+                f"Continuous navigation completed or cannot proceed: {msg}"
+            )
+            vision_output.anticipation = None
+            vision_output.next_task = None
+            vision_output.to_tell_user = None
+            self.logger.info(f"Continuous navigation ended: {msg}")
+        else:
+            has_canceled_task = True
+            vision_output.stop_current_task = True
+            vision_output.observation = f"Continuous navigation failed: {msg}"
+            vision_output.anticipation = (
+                "I should try a different approach to navigate."
+            )
+            vision_output.next_task = None
+            self.logger.info(f"Continuous navigation failed: {msg}")
+
+        return vision_output, has_canceled_task
+
+    def get_nav_insight_continuous(self):
+        """Get the NavInsightContinuous primitive instance."""
+        return next(
+            (
+                prim
+                for prim in self.primitives_list
+                if prim.name == PrimitiveNames.NAV_INSIGHT_CONTINUOUS
+            ),
+            None,
+        )
+
+    async def process_continuous_navigation_image(
+        self,
+        robot_coords,
+        base64_img,
+        depth_payload,
+        map_payload,
+        camera_info,
+    ):
+        """
+        Process an image for continuous navigation mode.
+
+        This is called when the NavInsightContinuous primitive is active and
+        a new image arrives. It bypasses the normal VLM pipeline.
+
+        Returns:
+            tuple: (should_continue, navigation_command, message)
+        """
+        nav_continuous = self.get_nav_insight_continuous()
+
+        if nav_continuous is None or not nav_continuous.is_active:
+            return False, None, "Continuous navigation not active"
+
+        horizontal_fov = camera_info["horizontal_fov"]
+        vertical_fov = camera_info["vertical_fov"]
+
+        nav_continuous.update_current_vars(
+            current_x=robot_coords["x"],
+            current_y=robot_coords["y"],
+            current_yaw=robot_coords["theta"],
+            image_b64=base64_img,
+            depth_payload=depth_payload,
+            horizontal_fov=horizontal_fov,
+            vertical_fov=vertical_fov,
+            camera_info=camera_info,
+        )
+
+        msg, should_continue, navigation_command = await nav_continuous.process_image(
+            map_payload
+        )
+
+        if should_continue and navigation_command:
+            if map_payload:
+                is_safe, safety_msg = self.check_position_safety(
+                    navigation_command["x"], navigation_command["y"], map_payload
+                )
+                if not is_safe:
+                    self.logger.warn(
+                        f"Continuous navigation target unsafe: {safety_msg}"
+                    )
+                    nav_continuous.deactivate()
+                    return False, None, f"Navigation blocked: {safety_msg}"
+
+        return should_continue, navigation_command, msg
