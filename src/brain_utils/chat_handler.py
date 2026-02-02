@@ -134,7 +134,9 @@ class ChatHandler:
             )
 
         # Run fast and slow agents in parallel
-        self.logger.info(f"[ChatHandler] Running parallel agents for: '{text[:50]}...', has_image={image_b64 is not None}")
+        self.logger.info(
+            f"[ChatHandler] Running parallel agents for: '{text[:50]}...', has_image={image_b64 is not None}"
+        )
 
         result = await run_agents_in_parallel(
             user_message=text,
@@ -319,7 +321,5 @@ class ChatHandler:
     async def _send_chat_response(self, text: str) -> None:
         """Send a chat response to the client."""
         self.logger.info(f"[ChatHandler] Sending brain/chat_out: '{text[:50]}...'")
-        await self.send_callback(
-            MessageOut(type="brain/chat_out", payload={"text": text})
-        )
-        self.logger.info("[ChatHandler] brain/chat_out sent successfully")
+        await self.send_callback(MessageOut(type="chat_out", payload={"text": text}))
+        self.logger.info("[ChatHandler] chat_out sent successfully")
