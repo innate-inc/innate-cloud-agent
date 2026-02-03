@@ -106,7 +106,7 @@ class ChatHandler:
         current_primitive_name = (
             primitive_in_execution.name if primitive_in_execution else None
         )
-        history_summary = self.history.get_brief_summary()
+        history_summary = self.history.get_as_string()
 
         # Build primitives list for VLM (local + registered)
         from src.primitives.transforms import primitive_to_object
