@@ -44,6 +44,7 @@ class BrainState:
     gemini_variant: str = DEFAULT_GEMINI_VARIANT
     primitives_list: list = field(default_factory=list)
     primitive_ids_map: Dict[str, PrimitiveDefinition] = field(default_factory=dict)
+    slow_agent_running: bool = False  # Skip image processing while slow agent is running
 
     def reset(self, preserve_gemini_variant: bool = False):
         """Reset state to initial values."""
@@ -54,6 +55,7 @@ class BrainState:
         self.primitive_in_execution = None
         self.directive = None
         self.gemini_variant = saved_variant
+        self.slow_agent_running = False
         # Note: primitives_list and primitive_ids_map are not reset here
         # as they are managed separately
 
@@ -258,6 +260,11 @@ class Brain:
         If continuous navigation is active, bypasses normal VLM processing
         and routes the image directly to the NavInsightContinuous primitive.
         """
+        # Skip image processing while slow agent is running (prevents duplicate primitives)
+        if self.state.slow_agent_running:
+            self.logger.info("Skipping image processing while slow agent is running")
+            return
+
         # Check if continuous navigation is active
         if await self._handle_continuous_navigation_image(message):
             return  # Handled by continuous navigation
@@ -450,16 +457,21 @@ class Brain:
         response is sent immediately. If fast defers, slow agent result
         is already available and processed here.
         """
-        result = await self.chat_handler.handle_chat_in(
-            text=message.payload["text"],
-            image_b64=message.payload.get("image_b64"),
-            current_gemini_variant=self.state.gemini_variant,
-            enable_memory_commands=self.enable_memory_commands,
-            directive=self.state.directive,
-            primitive_in_execution=self.state.primitive_in_execution,
-            primitives_list=self.state.primitives_list,
-            robot_coords=self.current_robot_coords,
-        )
+        # Set flag to skip image processing while slow agent may be running
+        self.state.slow_agent_running = True
+        try:
+            result = await self.chat_handler.handle_chat_in(
+                text=message.payload["text"],
+                image_b64=message.payload.get("image_b64"),
+                current_gemini_variant=self.state.gemini_variant,
+                enable_memory_commands=self.enable_memory_commands,
+                directive=self.state.directive,
+                primitive_in_execution=self.state.primitive_in_execution,
+                primitives_list=self.state.primitives_list,
+                robot_coords=self.current_robot_coords,
+            )
+        finally:
+            self.state.slow_agent_running = False
 
         if result.new_gemini_variant is not None:
             self.state.gemini_variant = result.new_gemini_variant
@@ -486,6 +498,9 @@ class Brain:
 
             await self._send_vision_output(vision_output, vision_output_for_history)
             self.history.check_and_summarize()
+        else:
+            # Fast agent answered or no vision output - request next image
+            await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
     async def handle_primitive_completed(self, message: MessageIn):
         """Handle primitive completion."""
