@@ -143,20 +143,30 @@ class PrimitiveHandler:
         payload: dict,
         primitive_in_execution: Optional[PrimitiveDefinition],
     ) -> None:
-        """Handle primitive feedback. Records feedback in history."""
+        """Handle primitive feedback. Records feedback and optional image in history."""
         feedback_text = payload.get("feedback")
+        image_b64 = payload.get("image_b64")
+        task_name = (
+            primitive_in_execution.name if primitive_in_execution else "unknown"
+        )
+
         if feedback_text:
             self.logger.info(f"Received primitive feedback: {feedback_text}")
-            task_name = (
-                primitive_in_execution.name if primitive_in_execution else "unknown"
-            )
             self.history.add(
                 HistoryEntryType.PRIMITIVE_FEEDBACK,
                 description=f"'{task_name}': {feedback_text}",
             )
-        else:
+        
+        if image_b64:
+            self.logger.info(f"Received feedback image from '{task_name}'")
+            self.history.add(
+                HistoryEntryType.GENERIC_IMAGE,
+                description=image_b64,
+            )
+        
+        if not feedback_text and not image_b64:
             self.logger.warn(
-                "Received primitive_feedback message with no feedback text."
+                "Received primitive_feedback message with no feedback text or image."
             )
 
     async def handle_primitive_activated(
