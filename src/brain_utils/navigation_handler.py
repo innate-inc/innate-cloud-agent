@@ -168,7 +168,7 @@ class NavigationHandler:
                         f"I can't navigate to that position because it's too close to obstacles. "
                         f"{safety_msg}"
                     )
-                    return vision_output
+                    return vision_output, has_canceled_task
 
             # Get the primitive ID from the original task if it exists
             original_primitive_id = getattr(
@@ -228,6 +228,10 @@ class NavigationHandler:
         Returns:
             tuple: (is_safe, message) where is_safe is a boolean and message is a string
         """
+        # Skip safety check if MIN_OBSTACLE_DISTANCE is 0 (costmap already inflated)
+        if MIN_OBSTACLE_DISTANCE <= 0:
+            return True, "Safety check skipped (costmap already inflated)"
+
         try:
             # Decode the map payload
             map_array, map_info = decode_map_payload(map_payload)
