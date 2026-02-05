@@ -64,7 +64,9 @@ class PrimitiveHandler:
 
         # Stale completion - log warning but don't crash
         # This can happen due to race conditions when multiple primitives are sent quickly
-        current_id = primitive_in_execution.primitive_id if primitive_in_execution else None
+        current_id = (
+            primitive_in_execution.primitive_id if primitive_in_execution else None
+        )
         current_name = primitive_in_execution.name if primitive_in_execution else None
         self.logger.warn(
             f"[Brain {self.connection_id}] Received completion for '{primitive_name}' "
@@ -96,7 +98,9 @@ class PrimitiveHandler:
 
         # Stale failure - log warning but don't crash
         # This can happen due to race conditions when multiple primitives are sent quickly
-        current_id = primitive_in_execution.primitive_id if primitive_in_execution else None
+        current_id = (
+            primitive_in_execution.primitive_id if primitive_in_execution else None
+        )
         current_name = primitive_in_execution.name if primitive_in_execution else None
         self.logger.warn(
             f"[Brain {self.connection_id}] Received failure for '{primitive_name}' "
@@ -146,9 +150,7 @@ class PrimitiveHandler:
         """Handle primitive feedback. Records feedback and optional image in history."""
         feedback_text = payload.get("feedback")
         image_b64 = payload.get("image_b64")
-        task_name = (
-            primitive_in_execution.name if primitive_in_execution else "unknown"
-        )
+        task_name = primitive_in_execution.name if primitive_in_execution else "unknown"
 
         if feedback_text:
             self.logger.info(f"Received primitive feedback: {feedback_text}")
@@ -156,14 +158,14 @@ class PrimitiveHandler:
                 HistoryEntryType.PRIMITIVE_FEEDBACK,
                 description=f"'{task_name}': {feedback_text}",
             )
-        
+
         if image_b64:
             self.logger.info(f"Received feedback image from '{task_name}'")
             self.history.add(
                 HistoryEntryType.GENERIC_IMAGE,
                 description=image_b64,
             )
-        
+
         if not feedback_text and not image_b64:
             self.logger.warn(
                 "Received primitive_feedback message with no feedback text or image."
@@ -176,11 +178,11 @@ class PrimitiveHandler:
     ) -> Optional[PrimitiveDefinition]:
         """
         Handle primitive activation from client.
-        
+
         Since we now set primitive_in_execution when sending (not when activated),
         this method just validates that the client activated what we expected
         and records it in history.
-        
+
         Returns the current primitive_in_execution (unchanged).
         """
         primitive_id = payload["primitive_id"]
@@ -194,7 +196,10 @@ class PrimitiveHandler:
             return primitive_in_execution
 
         # Check if this matches what we're currently tracking
-        if primitive_in_execution and primitive_in_execution.primitive_id == primitive_id:
+        if (
+            primitive_in_execution
+            and primitive_in_execution.primitive_id == primitive_id
+        ):
             # Expected case: client activated the primitive we sent
             self.logger.info(
                 f"\033[92m[Brain {self.connection_id}] Task '{primitive_in_execution.name}' "
