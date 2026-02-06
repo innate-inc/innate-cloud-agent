@@ -162,7 +162,7 @@ class PrimitiveHandler:
         if image_b64:
             self.logger.info(f"Received feedback image from '{task_name}'")
             self.history.add(
-                HistoryEntryType.GENERIC_IMAGE,
+                HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE,
                 description=image_b64,
             )
 

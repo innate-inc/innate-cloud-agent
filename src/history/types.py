@@ -13,6 +13,7 @@ class HistoryEntryType(Enum):
     PRIMITIVE_CANCELLED = "primitive_cancelled"
     PRIMITIVE_COMPLETED = "primitive_completed"
     PRIMITIVE_FEEDBACK = "primitive_feedback"
+    PRIMITIVE_FEEDBACK_IMAGE = "primitive_feedback_image"
     GENERIC_IMAGE = "generic_image"
     IMAGE_PRE_ACTION = "image_pre_action"
 

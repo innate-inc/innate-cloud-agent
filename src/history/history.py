@@ -182,6 +182,9 @@ class History:
                 elif entry.type == HistoryEntryType.IMAGE_PRE_ACTION:
                     message_content = "[Image Before Action]"
                     display_type = DisplayEntryType.SYSTEM_MESSAGE
+                elif entry.type == HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE:
+                    message_content = "[Skill Feedback Image]"
+                    display_type = DisplayEntryType.SYSTEM_MESSAGE
                 else:
                     try:
                         display_type = DisplayEntryType(display_type_value)
@@ -351,22 +354,39 @@ class History:
             selected_pre_action_indices
         )
 
+        # Feedback images are always included (not limited like generic images)
+        feedback_image_indices = set(
+            i
+            for i, entry in enumerate(entries_to_process)
+            if entry.type == HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE
+        )
+
         for d_entry in deduplicated_intermediate_entries:
             source_idx = d_entry["source_index"]  # Index in entries_to_process
             original_raw_type = d_entry["original_raw_type"]
             original_raw_description = d_entry["original_raw_description"]
 
             is_selected_for_multimodal_image_role = (
-                original_raw_type == HistoryEntryType.GENERIC_IMAGE
-                or original_raw_type == HistoryEntryType.IMAGE_PRE_ACTION
-            ) and source_idx in selected_image_source_indices
+                (
+                    original_raw_type == HistoryEntryType.GENERIC_IMAGE
+                    or original_raw_type == HistoryEntryType.IMAGE_PRE_ACTION
+                )
+                and source_idx in selected_image_source_indices
+            ) or (
+                original_raw_type == HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE
+                and source_idx in feedback_image_indices
+            )
 
             if is_selected_for_multimodal_image_role:
-                # Create and add the "This is what I was seeing." text item first
+                # Create and add a prefix text item first
+                if original_raw_type == HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE:
+                    prefix_message = "This image was sent as feedback from a skill."
+                else:
+                    prefix_message = "This is what I was seeing."
                 prefix_text_intermediate_entry = {
                     "timestamp": d_entry["timestamp"],  # Use image's timestamp
                     "type": DisplayEntryType.SYSTEM_MESSAGE,
-                    "message": "This is what I was seeing.",
+                    "message": prefix_message,
                     # Pass through other fields; safer for formatter.
                     "source_index": d_entry["source_index"],
                     "original_raw_type": DisplayEntryType.SYSTEM_MESSAGE,  # Arbitrary
@@ -409,6 +429,7 @@ class History:
             if entry.type not in [
                 HistoryEntryType.GENERIC_IMAGE,
                 HistoryEntryType.IMAGE_PRE_ACTION,
+                HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE,
             ]:
                 desc = (
                     entry.description[:100]
@@ -430,6 +451,7 @@ class History:
             if entry.type in [
                 HistoryEntryType.GENERIC_IMAGE,
                 HistoryEntryType.IMAGE_PRE_ACTION,
+                HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE,
             ]:
                 return entry.description
         return None
@@ -498,6 +520,7 @@ class History:
                 if (
                     "[Image data]" in formatted_line
                     or "[Image Before Action]" in formatted_line
+                    or "[Skill Feedback Image]" in formatted_line
                 ):
                     continue  # Skip image placeholders
 
