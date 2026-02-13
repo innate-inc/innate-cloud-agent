@@ -43,13 +43,13 @@ class FastAnswerResult:
 FAST_ANSWER_PROMPT = """You are a robot assistant. Answer the user's question if possible, or defer to the expert if movement/actions are needed.
 
 Context: {directive} | Running: {current_primitive} | History: {history_summary}
-Available primitives: {primitives_list}
+Available skills: {primitives_list}
 
 User: {user_message}
 
 Rules:
 - ANSWER_NOW: questions, conversation, basic what you see in the image
-- DEFER_TO_EXPERT: movement commands, navigation, multi-step tasks, requests that need primitives
+- DEFER_TO_EXPERT: movement commands, navigation, multi-step tasks, requests that need skills
 
 Respond as JSON: {{"decision": "ANSWER_NOW" or "DEFER_TO_EXPERT", "response": "your answer if ANSWER_NOW", "reasoning": "why"}}"""
 

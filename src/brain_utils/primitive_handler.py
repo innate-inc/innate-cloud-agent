@@ -13,7 +13,7 @@ from src.primitives.types import Primitive
 
 class PrimitiveHandler:
     """
-    Handles primitive lifecycle events:
+    Handles skill lifecycle events:
     - Activation
     - Completion
     - Failure
@@ -54,11 +54,11 @@ class PrimitiveHandler:
         ):
             # Expected case: the completed primitive matches what we're tracking
             self.logger.info(
-                f"Task '{primitive_in_execution.name}' (ID: {primitive_id}) completed."
+                f"Skill '{primitive_in_execution.name}' (ID: {primitive_id}) completed."
             )
             self.history.add(
                 HistoryEntryType.PRIMITIVE_COMPLETED,
-                description=f"Task '{primitive_in_execution.name}' completed.",
+                description=f"Skill '{primitive_in_execution.name}' completed.",
             )
             return None
 
@@ -89,10 +89,10 @@ class PrimitiveHandler:
             and primitive_in_execution.primitive_id == primitive_id
         ):
             # Expected case: the failed primitive matches what we're tracking
-            self.logger.info(f"Task '{primitive_in_execution.name}' failed.")
+            self.logger.info(f"Skill '{primitive_in_execution.name}' failed.")
             self.history.add(
                 HistoryEntryType.PRIMITIVE_CANCELLED,
-                description=f"Primitive '{primitive_name}' failed.",
+                description=f"Skill '{primitive_name}' failed.",
             )
             return None
 
@@ -135,10 +135,10 @@ class PrimitiveHandler:
             )
             return primitive_in_execution
 
-        self.logger.info(f"Task '{primitive_in_execution.name}' interrupted.")
+        self.logger.info(f"Skill '{primitive_in_execution.name}' interrupted.")
         self.history.add(
             HistoryEntryType.PRIMITIVE_INTERRUPTED,
-            description=f"Primitive '{primitive_name}' interrupted.",
+            description=f"Skill '{primitive_name}' interrupted.",
         )
         return None
 
@@ -207,7 +207,7 @@ class PrimitiveHandler:
             )
             self.history.add(
                 HistoryEntryType.PRIMITIVE_ACTIVATED,
-                description=f"Primitive {primitive_in_execution.name} activated",
+                description=f"Skill {primitive_in_execution.name} activated",
             )
         elif primitive_in_execution:
             # Client activated a different primitive than we're tracking

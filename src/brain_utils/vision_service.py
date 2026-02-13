@@ -76,7 +76,7 @@ class VisionService:
             )
             agent_name = agent_type.value
             self.logger.info(
-                f"Calling {agent_name} vision model while current primitive is "
+                f"Calling {agent_name} vision model while current skill is "
                 + (
                     f"\033[1;34m{current_primitive} (id: {primitive_in_execution.primitive_id})\033[0m"
                     if current_primitive != "None"

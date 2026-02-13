@@ -171,7 +171,7 @@ class ImageHandler:
                 user_prompt_text=latest_user_message,
                 primitive_in_execution=primitive_in_execution,
                 primitives_list=local_primitives_list + primitives_list,
-                history=self.history.get_as_multimodal_list(),
+                history=self.history.get_as_model_multimodal_list(),
                 robot_coords=robot_coords,
                 directive=directive,
                 agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,
@@ -384,11 +384,11 @@ class ImageHandler:
             # Add history entries for this self-completing primitive
             self.history.add(
                 HistoryEntryType.PRIMITIVE_ACTIVATED,
-                description=f"Primitive {PrimitiveNames.CHECK_DISTANCE_AND_ORIENTATION} activated",
+                description=f"Skill {PrimitiveNames.CHECK_DISTANCE_AND_ORIENTATION} activated",
             )
             self.history.add(
                 HistoryEntryType.PRIMITIVE_COMPLETED,
-                description=f"Primitive {PrimitiveNames.CHECK_DISTANCE_AND_ORIENTATION} completed",
+                description=f"Skill {PrimitiveNames.CHECK_DISTANCE_AND_ORIENTATION} completed",
             )
             vision_output.next_task = None
 
@@ -453,7 +453,7 @@ class ImageHandler:
             user_prompt_text=latest_user_message,
             primitive_in_execution=primitive_in_execution,
             primitives_list=primitives_list,
-            history=self.history.get_as_multimodal_list(),
+            history=self.history.get_as_model_multimodal_list(),
             robot_coords=robot_coords,
             directive=directive,
             agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,

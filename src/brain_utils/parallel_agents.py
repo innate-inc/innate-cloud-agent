@@ -49,7 +49,7 @@ def validate_vision_output(
     )
 
     # Check for discrepancy: next_task provided without stop_current_task
-    # when a primitive is already running
+    # when a skill is already running
     if (
         not vision_output.stop_current_task
         and vision_output.next_task is not None
@@ -58,7 +58,7 @@ def validate_vision_output(
         history.record_discrepancy(
             message=(
                 f"The VLM returned a next_task ({vision_output.next_task.name}) "
-                f"even though there is a task running "
+                f"even though there is a skill running "
                 f"({primitive_in_execution.name}) and it did not say to "
                 f"stop the current task."
             )

@@ -125,7 +125,7 @@ class ChatHandler:
                 user_prompt_text=text,
                 primitive_in_execution=primitive_in_execution,
                 primitives_list=all_primitives,
-                history=self.history.get_as_multimodal_list(),
+                history=self.history.get_as_model_multimodal_list(),
                 robot_coords=robot_coords or {},
                 directive=directive,
                 agent_type=VisionAgentType.NATIVE_GEMINI_MULTI,
@@ -147,7 +147,7 @@ class ChatHandler:
             slow_agent_coro=slow_coro,
             send_chat_callback=self._send_chat_response,
             logger=self.logger,
-            primitives_list=primitives_list,
+            primitives_list=all_primitives,
         )
 
         if result.fast_answered:

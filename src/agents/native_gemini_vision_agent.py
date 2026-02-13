@@ -56,34 +56,34 @@ def get_model_name_for_variant(gemini_variant: str) -> str:
 
 # Template for the main prompt
 VISION_AGENT_PROMPT_TEMPLATE = """<system_role>
-You are a robot navigating and executing primitives in a home.
+You are a robot navigating and executing skills in a home.
 
-You are following a directive (defined in <directive>) that guides your actions, and you can pick primitives to execute to achieve your goal.
+You are following a directive (defined in <directive>) that guides your actions, and you can pick skills to execute to achieve your goal.
 
-You have to decide what to do right now based on the current image you see (in <main_camera_image>), the history of your actions and observations (in <history_of_events>), and the current primitive that is being executed (in <primitive_in_execution>).
+You have to decide what to do right now based on the current image you see (in <main_camera_image>), the history of your actions and observations (in <history_of_events>), and the current skill that is being executed (in <skill_in_execution>).
 
 You are also being provided with what the user most recently said (in <user_input>).
 </system_role>
 
 <operational_guidelines>
-<choosing_next_primitive>
-**IF NO PRIMITIVE IS RUNNING:**
+<choosing_next_skill>
+**IF NO SKILL IS RUNNING:**
 - Look at your directive and what you see in the image
-- Choose the primitive that makes the most progress toward your goal
+- Choose the skill that makes the most progress toward your goal
 - If the user just gave you a command, prioritize that
-- You don't have to start a new primitive if you think you should stay idle
-</choosing_next_primitive>
+- You don't have to start a new skill if you think you should stay idle
+</choosing_next_skill>
 
-<stopping_running_primitives>
-**IF A PRIMITIVE IS CURRENTLY RUNNING:**
+<stopping_running_skills>
+**IF A SKILL IS CURRENTLY RUNNING:**
 Only stop it if:
 - The user explicitly told you to stop it.
 - Your directive clearly requires stopping it.
-- You clearly can assess the primitive has completed its goal.
+- You clearly can assess the skill has completed its goal.
 - You clearly can assess that something is wrong and you need to stop it.
 
-**DO NOT STOP** running primitives for any other reason. When in doubt, let it continue.
-</stopping_running_primitives>
+**DO NOT STOP** running skills for any other reason. When in doubt, let it continue.
+</stopping_running_skills>
 
 <communication>
 **TALK TO THE USER** when:
@@ -94,9 +94,9 @@ Only stop it if:
 </communication>
 
 <navigation_rules>
-- Navigation primitives allow you to get closer to your objective but a completion of a navigation primitive does not mean you're done. You might need to get closer or pursue the navigation objective.
-- A navigation primitive can indicate when it's close to being completed. When that is the case, if you think you need to navigate again, you should stop the current navigation primitive and start a new one.
-- You are provided with previous images of what you saw in <history_of_events>. Pay attention to them when pursuing several navigation primitives.
+- Navigation skills allow you to get closer to your objective but a completion of a navigation skill does not mean you're done. You might need to get closer or pursue the navigation objective.
+- A navigation skill can indicate when it's close to being completed. When that is the case, if you think you need to navigate again, you should stop the current navigation skill and start a new one.
+- You are provided with previous images of what you saw in <history_of_events>. Pay attention to them when pursuing several navigation skills.
 - Your horizontal field of view is {field_of_view}, keep that in mind when turning. Too big of a turn can make you lose sight of something important, but too small might just make you be very slow.
 </navigation_rules>
 
@@ -127,9 +127,9 @@ Unless precised by the directive or user, decision-making should be done fast es
 {user_input}
 </user_input>
 
-<primitive_in_execution>
-{primitive_in_execution}
-</primitive_in_execution>
+<skill_in_execution>
+{skill_in_execution}
+</skill_in_execution>
 
 <robot_position>
 {robot_position}
@@ -139,26 +139,26 @@ Unless precised by the directive or user, decision-making should be done fast es
 {directive}
 </directive>
 
-<current_primitive_guidelines>
-{current_primitive_guidelines}
-</current_primitive_guidelines>
+<current_skill_guidelines>
+{current_skill_guidelines}
+</current_skill_guidelines>
 
 {additional_camera_image}
 </current_context>
 
-<available_primitives>
-You can only use one of the following primitives: {available_primitives}.
-</available_primitives>
+<available_skills>
+You can only use one of the following skills: {available_skills}.
+</available_skills>
 
 <response_requirements>
 Use the following fields in your response:
 
 - "observation": Describe what you see in the image as an internal thought
 - "thoughts": Think about what you should do (or not do) based on the observation and context
-- "stop_current_primitive": Decide whether to stop the current primitive
+- "stop_current_primitive": Decide whether to stop the current skill
 - "anticipation": Consider what might happen next and leave mental notes for future reference
 - "to_tell_user": Communicate something to the user (if needed)
-- "next_primitive": Specify which primitive to execute next (if any)
+- "next_primitive": Specify which skill to execute next (if any)
 </response_requirements>
 """
 
@@ -340,11 +340,14 @@ class NativeGeminiVisionAgent:
         else:
             user_input = "The user did not say anything."
 
-        # Prepare current primitive context
+        # Prepare current skill context
         if vlm_inputs.primitive_in_execution:
-            current_primitive = f"The current primitive is: {vlm_inputs.primitive_in_execution.model_dump_json()}"
+            current_skill = (
+                "The current skill is: "
+                f"{vlm_inputs.primitive_in_execution.model_dump_json()}"
+            )
         else:
-            current_primitive = "You are not currently executing a primitive."
+            current_skill = "No skill is currently running."
 
         # Prepare robot coordinates section
         robot_coordinates = ""
@@ -357,26 +360,37 @@ class NativeGeminiVisionAgent:
         if vlm_inputs.directive:
             directive_section = vlm_inputs.directive
 
-        # Prepare primitive guidelines section
-        primitive_guidelines = ""
+        # Prepare skill guidelines section
+        skill_guidelines = ""
         if (
             vlm_inputs.primitive_in_execution
             and vlm_inputs.primitive_in_execution.guidelines_when_running
         ):
-            primitive_guidelines = f"Here are the guidelines for the primitive currently running. Watch them carefully:\n{vlm_inputs.primitive_in_execution.guidelines_when_running}"
+            skill_guidelines = (
+                "Guidelines for the running skill (high priority):\n"
+                f"{vlm_inputs.primitive_in_execution.guidelines_when_running}"
+            )
+        elif (
+            vlm_inputs.primitive_in_execution
+            and vlm_inputs.primitive_in_execution.guidelines
+        ):
+            skill_guidelines = (
+                "Guidelines for the running skill:\n"
+                f"{vlm_inputs.primitive_in_execution.guidelines}"
+            )
 
-        # Prepare available primitives
+        # Prepare available skills
         primitive_names = [prim.name for prim in vlm_inputs.primitives_list]
-        available_primitives = ", ".join(primitive_names)
+        available_skills = ", ".join(primitive_names)
 
         return {
             "text_vars": {
                 "user_input": user_input,
-                "primitive_in_execution": current_primitive,
+                "skill_in_execution": current_skill,
                 "robot_position": robot_coordinates,
                 "directive": directive_section,
-                "current_primitive_guidelines": primitive_guidelines,
-                "available_primitives": available_primitives,
+                "current_skill_guidelines": skill_guidelines,
+                "available_skills": available_skills,
                 # Note: multimodal placeholders are handled separately
                 "multimodal_history": history_of_events,  # Fallback text version
                 "main_camera_image": "[Image will be displayed here]",  # Placeholder text
