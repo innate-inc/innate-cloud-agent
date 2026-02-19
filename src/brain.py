@@ -488,12 +488,18 @@ class Brain:
             # where multiple primitives could be sent before the first is acknowledged
             self.state.primitive_in_execution = primitive_to_remember
 
+            # Avoid replacing converted tasks (e.g. turn_and_move ->
+            # navigate_to_position) when history keeps the original skill with
+            # the same primitive_id.
             if vision_output.next_task and (
                 vision_output.next_task.primitive_id == primitive_to_remember.primitive_id
+                and vision_output.next_task.name == primitive_to_remember.name
             ):
                 vision_output.next_task = primitive_to_remember
             if vision_output_to_write_in_history and vision_output_to_write_in_history.next_task and (
                 vision_output_to_write_in_history.next_task.primitive_id == primitive_to_remember.primitive_id
+                and vision_output_to_write_in_history.next_task.name
+                == primitive_to_remember.name
             ):
                 vision_output_to_write_in_history.next_task = primitive_to_remember
         # Record the vision agent output in the history.
