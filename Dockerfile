@@ -21,8 +21,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ src/
 COPY run_server.py .
 
-# Expose port 8765 for the WebSocket
-EXPOSE 8765
+# Cloud Run sets PORT=8080 by default
+ENV PORT=8080
+EXPOSE 8080
 
 # Define the command to run the server
 CMD ["python", "run_server.py"]
