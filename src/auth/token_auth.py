@@ -180,7 +180,10 @@ class TokenAuthenticator:
         try:
             resp = requests.post(
                 f"{self.auth_issuer_url}/v1/auth",
-                headers={"Authorization": f"Bearer {service_key}"},
+                headers={
+                    "Authorization": f"Bearer {service_key}",
+                    "User-Agent": "innate-cloud-agent",
+                },
                 timeout=10,
             )
         except requests.RequestException as e:
