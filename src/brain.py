@@ -826,7 +826,7 @@ class Brain:
             )
             
             if msg:
-                await self._send_chat_out(f"Navigation complete: {msg}")
+                self.logger.info(f"Navigation complete: {msg}")
         
         return True
 
