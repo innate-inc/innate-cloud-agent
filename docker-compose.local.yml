@@ -6,9 +6,11 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8765:8765"
+      - "8765:8080"
     volumes:
       - ./:/app
     env_file:
       - .env
+    environment:
+      PORT: 8080
     command: python -u run_server.py

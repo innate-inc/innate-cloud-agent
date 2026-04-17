@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Optionally read port from environment or config
-WEBSOCKET_PORT = 8765
+WEBSOCKET_PORT = int(os.environ.get("PORT", "8080"))
 DEBUG_PANEL_PORT = 8081
 
 
