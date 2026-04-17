@@ -108,11 +108,19 @@ class ChatHandler:
         )
         history_summary = self.history.get_as_string()
 
-        # Build primitives list for VLM (local + registered)
+        # Build primitives list for VLM (local + registered). Local navigation
+        # primitives that convert to navigate_to_position are only exposed to the
+        # VLM if the client actually registered navigate_to_position.
+        from src.brain_utils.constants import (
+            filter_locals_requiring_navigate_to_position,
+        )
         from src.primitives.transforms import primitive_to_object
 
+        eligible_locals = filter_locals_requiring_navigate_to_position(
+            self.local_primitives_list, primitives_list or []
+        )
         local_primitives_as_definitions = [
-            primitive_to_object(p) for p in self.local_primitives_list
+            primitive_to_object(p) for p in eligible_locals
         ]
         all_primitives = local_primitives_as_definitions + (primitives_list or [])
 

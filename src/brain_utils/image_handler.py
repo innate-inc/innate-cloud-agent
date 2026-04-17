@@ -15,6 +15,7 @@ from src.brain_utils.parallel_agents import (
     run_agents_in_parallel,
     validate_vision_output,
 )
+from src.brain_utils.constants import filter_locals_requiring_navigate_to_position
 from src.brain_utils.vision_service import VisionAgentType, VisionService
 from src.history.history import History, HistoryEntryType
 from src.primitives.transforms import primitive_to_object
@@ -124,9 +125,14 @@ class ImageHandler:
         # Process depth and map data
         self._process_supplementary_data(depth_payload, map_payload, robot_coords)
 
-        # Call the VLM (with parallel fast agent if user message present)
+        # Call the VLM (with parallel fast agent if user message present).
+        # Local navigation primitives that convert to navigate_to_position are only
+        # exposed to the VLM if the client actually registered navigate_to_position.
+        eligible_locals = filter_locals_requiring_navigate_to_position(
+            self.local_primitives_list, primitives_list
+        )
         local_primitives_list = [
-            primitive_to_object(prim) for prim in self.local_primitives_list
+            primitive_to_object(prim) for prim in eligible_locals
         ]
 
         vlm_start_time = time.time()
