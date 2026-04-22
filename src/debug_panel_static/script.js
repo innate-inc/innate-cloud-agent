@@ -247,13 +247,13 @@ function renderPrimitivesCard(state) {
 function renderContentMain(state) {
     return `
         <div class="content-main">
-            ${renderCurrentPrimitiveCard(state)}
+            ${renderCurrentSkillCard(state)}
             ${renderHistoryCard(state)}
         </div>
     `;
 }
 
-function renderCurrentPrimitiveCard(state) {
+function renderCurrentSkillCard(state) {
     const prim = state.primitive_in_execution;
     const badge = prim 
         ? `<span class="card-badge" style="background: var(--accent-emerald-dim); color: var(--accent-emerald);">ACTIVE</span>`
@@ -282,7 +282,7 @@ function renderCurrentPrimitiveCard(state) {
         content = `
             <div class="empty-state">
                 <div class="empty-icon">⏸️</div>
-                <div class="empty-text">No primitive currently executing</div>
+                <div class="empty-text">No skill currently executing</div>
             </div>
         `;
     }
@@ -292,7 +292,7 @@ function renderCurrentPrimitiveCard(state) {
             <div class="card-header">
                 <span class="card-title">
                     <span class="card-title-icon">▶️</span>
-                    Primitive In Execution
+                    Skill In Execution
                 </span>
                 ${badge}
             </div>
@@ -474,4 +474,3 @@ async function fetchDebugData() {
 // Initial fetch and setup auto-refresh
 fetchDebugData();
 setInterval(fetchDebugData, 1000);
-

@@ -121,7 +121,7 @@ def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
                 Literal[primitive.name],
                 Field(
                     ...,
-                    description=f"Guidelines on primitive usage: {primitive.guidelines}",
+                    description=f"Guidelines on skill usage: {primitive.guidelines}",
                 ),
             ),
             inputs=(
@@ -144,7 +144,7 @@ def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
         "VisionAgentOutput",
         stop_current_primitive=(
             bool,
-            Field(..., description="Whether to stop the current primitive"),
+            Field(..., description="Whether to stop the current skill"),
         ),
         observation=(
             str,
@@ -162,7 +162,7 @@ def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
         ),
         next_primitive=(
             Optional[NextPrimitiveUnion],
-            Field(None, description="The next primitive to execute, if any"),
+            Field(None, description="The next skill to execute, if any"),
         ),
         input_tokens=(
             Optional[int],

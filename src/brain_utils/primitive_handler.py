@@ -13,7 +13,7 @@ from src.primitives.types import Primitive
 
 class PrimitiveHandler:
     """
-    Handles primitive lifecycle events:
+    Handles skill lifecycle events:
     - Activation
     - Completion
     - Failure
@@ -54,17 +54,19 @@ class PrimitiveHandler:
         ):
             # Expected case: the completed primitive matches what we're tracking
             self.logger.info(
-                f"Task '{primitive_in_execution.name}' (ID: {primitive_id}) completed."
+                f"Skill '{primitive_in_execution.name}' (ID: {primitive_id}) completed."
             )
             self.history.add(
                 HistoryEntryType.PRIMITIVE_COMPLETED,
-                description=f"Task '{primitive_in_execution.name}' completed.",
+                description=f"Skill '{primitive_in_execution.name}' completed.",
             )
             return None
 
         # Stale completion - log warning but don't crash
         # This can happen due to race conditions when multiple primitives are sent quickly
-        current_id = primitive_in_execution.primitive_id if primitive_in_execution else None
+        current_id = (
+            primitive_in_execution.primitive_id if primitive_in_execution else None
+        )
         current_name = primitive_in_execution.name if primitive_in_execution else None
         self.logger.warn(
             f"[Brain {self.connection_id}] Received completion for '{primitive_name}' "
@@ -87,16 +89,18 @@ class PrimitiveHandler:
             and primitive_in_execution.primitive_id == primitive_id
         ):
             # Expected case: the failed primitive matches what we're tracking
-            self.logger.info(f"Task '{primitive_in_execution.name}' failed.")
+            self.logger.info(f"Skill '{primitive_in_execution.name}' failed.")
             self.history.add(
                 HistoryEntryType.PRIMITIVE_CANCELLED,
-                description=f"Primitive '{primitive_name}' failed.",
+                description=f"Skill '{primitive_name}' failed.",
             )
             return None
 
         # Stale failure - log warning but don't crash
         # This can happen due to race conditions when multiple primitives are sent quickly
-        current_id = primitive_in_execution.primitive_id if primitive_in_execution else None
+        current_id = (
+            primitive_in_execution.primitive_id if primitive_in_execution else None
+        )
         current_name = primitive_in_execution.name if primitive_in_execution else None
         self.logger.warn(
             f"[Brain {self.connection_id}] Received failure for '{primitive_name}' "
@@ -131,10 +135,10 @@ class PrimitiveHandler:
             )
             return primitive_in_execution
 
-        self.logger.info(f"Task '{primitive_in_execution.name}' interrupted.")
+        self.logger.info(f"Skill '{primitive_in_execution.name}' interrupted.")
         self.history.add(
             HistoryEntryType.PRIMITIVE_INTERRUPTED,
-            description=f"Primitive '{primitive_name}' interrupted.",
+            description=f"Skill '{primitive_name}' interrupted.",
         )
         return None
 
@@ -143,20 +147,28 @@ class PrimitiveHandler:
         payload: dict,
         primitive_in_execution: Optional[PrimitiveDefinition],
     ) -> None:
-        """Handle primitive feedback. Records feedback in history."""
+        """Handle primitive feedback. Records feedback and optional image in history."""
         feedback_text = payload.get("feedback")
+        image_b64 = payload.get("image_b64")
+        task_name = primitive_in_execution.name if primitive_in_execution else "unknown"
+
         if feedback_text:
             self.logger.info(f"Received primitive feedback: {feedback_text}")
-            task_name = (
-                primitive_in_execution.name if primitive_in_execution else "unknown"
-            )
             self.history.add(
                 HistoryEntryType.PRIMITIVE_FEEDBACK,
                 description=f"'{task_name}': {feedback_text}",
             )
-        else:
+
+        if image_b64:
+            self.logger.info(f"Received feedback image from '{task_name}'")
+            self.history.add(
+                HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE,
+                description=image_b64,
+            )
+
+        if not feedback_text and not image_b64:
             self.logger.warn(
-                "Received primitive_feedback message with no feedback text."
+                "Received primitive_feedback message with no feedback text or image."
             )
 
     async def handle_primitive_activated(
@@ -166,11 +178,11 @@ class PrimitiveHandler:
     ) -> Optional[PrimitiveDefinition]:
         """
         Handle primitive activation from client.
-        
+
         Since we now set primitive_in_execution when sending (not when activated),
         this method just validates that the client activated what we expected
         and records it in history.
-        
+
         Returns the current primitive_in_execution (unchanged).
         """
         primitive_id = payload["primitive_id"]
@@ -184,7 +196,10 @@ class PrimitiveHandler:
             return primitive_in_execution
 
         # Check if this matches what we're currently tracking
-        if primitive_in_execution and primitive_in_execution.primitive_id == primitive_id:
+        if (
+            primitive_in_execution
+            and primitive_in_execution.primitive_id == primitive_id
+        ):
             # Expected case: client activated the primitive we sent
             self.logger.info(
                 f"\033[92m[Brain {self.connection_id}] Task '{primitive_in_execution.name}' "
@@ -192,7 +207,7 @@ class PrimitiveHandler:
             )
             self.history.add(
                 HistoryEntryType.PRIMITIVE_ACTIVATED,
-                description=f"Primitive {primitive_in_execution.name} activated",
+                description=f"Skill {primitive_in_execution.name} activated",
             )
         elif primitive_in_execution:
             # Client activated a different primitive than we're tracking

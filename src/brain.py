@@ -30,6 +30,7 @@ from src.brain_utils.image_handler import ImageHandler
 from src.brain_utils.chat_handler import ChatHandler
 from src.brain_utils.primitive_handler import PrimitiveHandler
 from src.brain_utils.pose_graph_handler import PoseGraphHandler
+from src.primitives.transforms import primitive_to_object
 
 DEFAULT_GEMINI_VARIANT = "gemini-3-flash-preview"
 
@@ -84,6 +85,12 @@ class Brain:
 
         self.state = BrainState()
         self.current_robot_coords = {}
+
+        # Cancellation support: when PRIMITIVE_COMPLETED arrives, we cancel
+        # current processing and reprocess the last image.
+        self._current_process_task: asyncio.Task | None = None
+        self._last_image_message: MessageIn | None = None
+        self._pending_primitive_completed: MessageIn | None = None
 
         # Initialize history to record chat messages and vision agent outputs.
         # The History class defaults to MAX_MULTIMODAL_IMAGES = 3.
@@ -179,13 +186,34 @@ class Brain:
         CHAT_IN messages are processed immediately in a separate task to avoid
         waiting behind slow IMAGE processing. This ensures fast response times
         for user questions.
+
+        PRIMITIVE_COMPLETED messages cancel the current agent processing (e.g.
+        a slow VLM call whose context is now stale) and are handled with
+        priority so the brain can immediately reprocess the last image with
+        updated state.
         """
         self.logger.debug(f"[Brain] Enqueue message type={message.type}, queue_size={self.message_queue.qsize()}")
+
+        # Always track the latest image for potential reprocessing
+        if message.type == MessageInType.IMAGE:
+            self._last_image_message = message
+
         # Process CHAT_IN immediately without waiting for the queue
         if message.type == MessageInType.CHAT_IN:
             # Fire and forget - process chat in parallel
             self.logger.debug(f"[Brain] CHAT_IN fast path - processing immediately")
             asyncio.create_task(self._process_chat_immediately(message))
+        elif message.type == MessageInType.PRIMITIVE_COMPLETED:
+            # Cancel current processing so we handle completion with priority
+            if self._current_process_task and not self._current_process_task.done():
+                self.logger.info(
+                    "[Brain] PRIMITIVE_COMPLETED received - cancelling current processing to handle immediately"
+                )
+                self._pending_primitive_completed = message
+                self._current_process_task.cancel()
+            else:
+                # No active processing, queue normally
+                await self.message_queue.put(message)
         else:
             await self.message_queue.put(message)
 
@@ -206,6 +234,11 @@ class Brain:
         """
         The brain's main loop. It runs on a single thread (event loop), processes
         one message at a time, and sends back results with send_callback.
+
+        Processing is wrapped in a cancellable task so that a PRIMITIVE_COMPLETED
+        message can interrupt a slow VLM call.  After cancellation the pending
+        completion is handled immediately and the last image is reprocessed with
+        the updated state (no primitive in execution).
         """
         self.logger.info("[Brain] Main loop started")
         while self.running:
@@ -214,7 +247,31 @@ class Brain:
                 self.logger.info("[Brain] Received None message, shutting down")
                 break  # Allow graceful shutdown when a None message is pushed
             self.logger.debug(f"[Brain] Processing from queue: type={message.type}, queue_size={self.message_queue.qsize()}")
-            await self.process_message(message)
+
+            self._current_process_task = asyncio.create_task(self.process_message(message))
+            try:
+                await self._current_process_task
+            except asyncio.CancelledError:
+                self.logger.info("[Brain] Current processing was cancelled")
+            finally:
+                self._current_process_task = None
+
+            # If a PRIMITIVE_COMPLETED caused the cancellation, handle it now
+            # and reprocess the last image with the updated brain state.
+            if self._pending_primitive_completed:
+                pending = self._pending_primitive_completed
+                self._pending_primitive_completed = None
+                self.logger.info("[Brain] Processing pending PRIMITIVE_COMPLETED")
+                await self.process_message(pending)
+
+                if self._last_image_message:
+                    self._drain_stale_images_from_queue()
+                    self.logger.info("[Brain] Reprocessing last image after primitive completed")
+                    await self.process_message(self._last_image_message)
+                else:
+                    await self.send_callback(
+                        MessageOut(type=MessageOutType.READY_FOR_IMAGE, payload={})
+                    )
 
     async def process_message(self, message: MessageIn):
         """Dispatch message to appropriate handler using match statement."""
@@ -421,12 +478,30 @@ class Brain:
             else vision_output.next_task
         )
         if primitive_to_remember:
+            # Fill missing metadata so the running skill context stays rich
+            # even if the model returned only name/inputs.
+            primitive_to_remember = self._enrich_selected_skill(primitive_to_remember)
             self.state.primitive_ids_map[primitive_to_remember.primitive_id] = (
                 primitive_to_remember
             )
             # Set primitive_in_execution immediately when sending to prevent race conditions
             # where multiple primitives could be sent before the first is acknowledged
             self.state.primitive_in_execution = primitive_to_remember
+
+            # Avoid replacing converted tasks (e.g. turn_and_move ->
+            # navigate_to_position) when history keeps the original skill with
+            # the same primitive_id.
+            if vision_output.next_task and (
+                vision_output.next_task.primitive_id == primitive_to_remember.primitive_id
+                and vision_output.next_task.name == primitive_to_remember.name
+            ):
+                vision_output.next_task = primitive_to_remember
+            if vision_output_to_write_in_history and vision_output_to_write_in_history.next_task and (
+                vision_output_to_write_in_history.next_task.primitive_id == primitive_to_remember.primitive_id
+                and vision_output_to_write_in_history.next_task.name
+                == primitive_to_remember.name
+            ):
+                vision_output_to_write_in_history.next_task = primitive_to_remember
         # Record the vision agent output in the history.
         self.history.add(
             HistoryEntryType.VISION_AGENT_OUTPUT,
@@ -477,6 +552,8 @@ class Brain:
             self.state.gemini_variant = result.new_gemini_variant
 
         if result.vision_output is not None:
+            # Response already resolved against the current message.
+            self.state.latest_user_message = None
             # Fast agent deferred - process the slow agent's vision output
             vision_output = result.vision_output
             vision_output_for_history = result.vision_output
@@ -499,6 +576,12 @@ class Brain:
             await self._send_vision_output(vision_output, vision_output_for_history)
             self.history.check_and_summarize()
         else:
+            text = message.payload.get("text", "")
+            if text and not text.startswith("!") and not result.fast_response_sent:
+                # Keep the latest user message for the next image-based slow-agent call.
+                self.state.latest_user_message = text
+            elif result.fast_response_sent:
+                self.state.latest_user_message = None
             # Fast agent answered or no vision output - request next image
             await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
@@ -630,17 +713,25 @@ class Brain:
         for p in primitives_data:
             name = p.get("name")
             if not name:
-                self.logger.error(f"Primitive missing 'name': {p}")
+                self.logger.error(f"Skill missing 'name': {p}")
                 continue
             if name in local_names:
-                self.logger.info(f"Primitive '{name}' already exists locally, skipping")
+                self.logger.info(f"Skill '{name}' already exists locally, skipping")
                 continue
 
             self.state.primitives_list.append(
                 PrimitiveDefinition(
                     name=name,
-                    guidelines=p.get("guidelines"),
-                    guidelines_when_running=p.get("guidelines_when_running"),
+                    guidelines=(
+                        p.get("guidelines")
+                        or p.get("guideline")
+                        or p.get("description")
+                    ),
+                    guidelines_when_running=(
+                        p.get("guidelines_when_running")
+                        or p.get("guideline_when_running")
+                        or p.get("description_when_running")
+                    ),
                     inputs=p.get("inputs", {}),
                 )
             )
@@ -691,10 +782,64 @@ class Brain:
                     "success": True,
                     "count": registered_count,
                     "directive_registered": directive_registered,
-                    "message": f"Registered {registered_count} primitives and {'a' if directive_registered else 'no'} directive.",
+                    "message": (
+                        f"Registered {registered_count} skills and "
+                        f"{'a' if directive_registered else 'no'} directive."
+                    ),
                 },
             )
         )
+
+    def _enrich_selected_skill(
+        self, selected_skill: PrimitiveDefinition
+    ) -> PrimitiveDefinition:
+        """
+        Enrich a selected skill with static metadata (guidelines) from the
+        registered/local skill definitions when that metadata is missing.
+        """
+        if selected_skill.guidelines and selected_skill.guidelines_when_running:
+            return selected_skill
+
+        available_skills = list(self.state.primitives_list) + [
+            primitive_to_object(p) for p in self.local_primitives_list
+        ]
+        matching_skill = next(
+            (skill for skill in available_skills if skill.name == selected_skill.name),
+            None,
+        )
+        if matching_skill is None:
+            return selected_skill
+
+        enriched_skill = selected_skill.model_copy(deep=True)
+        if not enriched_skill.guidelines:
+            enriched_skill.guidelines = matching_skill.guidelines
+        if not enriched_skill.guidelines_when_running:
+            enriched_skill.guidelines_when_running = (
+                matching_skill.guidelines_when_running
+            )
+        return enriched_skill
+
+    def _drain_stale_images_from_queue(self):
+        """
+        Remove IMAGE messages from the queue to avoid duplicate processing.
+        Called before reprocessing the last image after a PRIMITIVE_COMPLETED
+        cancellation.  Non-IMAGE messages are retained in order.
+        """
+        retained = []
+        drained_count = 0
+        while not self.message_queue.empty():
+            try:
+                msg = self.message_queue.get_nowait()
+                if msg is not None and msg.type == MessageInType.IMAGE:
+                    drained_count += 1
+                else:
+                    retained.append(msg)
+            except asyncio.QueueEmpty:
+                break
+        for msg in retained:
+            self.message_queue.put_nowait(msg)
+        if drained_count:
+            self.logger.info(f"[Brain] Drained {drained_count} stale IMAGE message(s) from queue")
 
     async def stop(self):
         """

@@ -1,17 +1,29 @@
 from typing import Literal, Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, AliasChoices
 
 
 class PrimitiveDefinition(BaseModel):
     name: str
-    # This field will accept either a key named "description" (via the alias) or "guidelines"
     guidelines: Optional[str] = Field(
         default=None,
-        description="Guidelines for the task. Can be provided as 'description' in inputs.",
+        validation_alias=AliasChoices("guidelines", "guideline", "description"),
+        description=(
+            "Guidelines for the skill. Can be provided as "
+            "'guidelines', 'guideline', or 'description'."
+        ),
     )
     guidelines_when_running: Optional[str] = Field(
         default=None,
-        description="Guidelines for the task when running. Can be provided as 'description_when_running' in inputs.",
+        validation_alias=AliasChoices(
+            "guidelines_when_running",
+            "guideline_when_running",
+            "description_when_running",
+        ),
+        description=(
+            "Guidelines for the skill while running. Can be provided as "
+            "'guidelines_when_running', 'guideline_when_running', "
+            "or 'description_when_running'."
+        ),
     )
     inputs: Dict[str, Any]
     primitive_id: Optional[str] = Field(
@@ -20,7 +32,7 @@ class PrimitiveDefinition(BaseModel):
     )
 
     model_config = ConfigDict(
-        # Allow population using the field name (guideline) even if an alias is provided.
+        # Allow population using field names even when aliases are provided.
         populate_by_name=True
     )
 

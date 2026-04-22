@@ -138,12 +138,12 @@ class History:
                                     "message": data["anticipation"],
                                 }
                             )
-                        if "next_primitive" in data and data["next_primitive"]:
-                            primitive = data["next_primitive"]
-                            primitive_name = primitive["name"]
-                            primitive_inputs = primitive["inputs"]
+                        next_skill = data.get("next_task") or data.get("next_primitive")
+                        if next_skill:
+                            primitive_name = next_skill["name"]
+                            primitive_inputs = next_skill["inputs"]
                             message_lines = [
-                                f"Next primitive decided: {primitive_name}",
+                                f"Next skill decided: {primitive_name}",
                                 f"  Inputs: {primitive_inputs}",
                             ]
                             message = "\n".join(message_lines)
@@ -181,6 +181,9 @@ class History:
                     display_type = DisplayEntryType.SYSTEM_MESSAGE
                 elif entry.type == HistoryEntryType.IMAGE_PRE_ACTION:
                     message_content = "[Image Before Action]"
+                    display_type = DisplayEntryType.SYSTEM_MESSAGE
+                elif entry.type == HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE:
+                    message_content = "[Skill Feedback Image]"
                     display_type = DisplayEntryType.SYSTEM_MESSAGE
                 else:
                     try:
@@ -275,21 +278,23 @@ class History:
         elif entry_display_type == DisplayEntryType.ANTICIPATION:
             prefix = "Anticipation:"
         elif entry_display_type == DisplayEntryType.PRIMITIVE_ACTIVATED:
-            prefix = "Primitive Activated:"
+            prefix = "Skill Activated:"
         elif entry_display_type == DisplayEntryType.PRIMITIVE_INTERRUPTED:
-            prefix = "Primitive Interrupted:"
+            prefix = "Skill Interrupted:"
         elif entry_display_type == DisplayEntryType.PRIMITIVE_CANCELLED:
-            prefix = "Primitive Cancelled:"
+            prefix = "Skill Cancelled:"
         elif (
             entry_display_type == DisplayEntryType.PRIMITIVE_COMPLETED
         ):  # Added for completeness
-            prefix = "Primitive Completed:"
+            prefix = "Skill Completed:"
         elif entry_display_type == DisplayEntryType.HISTORY_SUMMARY:
             prefix = "Summary:"
+        elif entry_display_type == DisplayEntryType.PRIMITIVE_FEEDBACK:
+            prefix = "Skill Feedback:"
         elif entry_display_type == DisplayEntryType.NEXT_PRIMITIVE_DECIDED:
-            prefix = "Next Primitive Decided:"
+            prefix = "Next Skill Decided:"
             suffix_lines = [
-                " I am waiting for confirmation this primitive gets activated,",
+                " I am waiting for confirmation this skill gets activated,",
                 " after which I should be aware that it is running until",
                 " cancelled, interrupted, or completed.",
             ]
@@ -311,6 +316,54 @@ class History:
 
         full_message = f"{message}{suffix}"
         return f"{time_str:>{time_col}} | {prefix:<{prefix_col}} {full_message}"
+
+    def _format_intermediate_entry_to_model_line(
+        self, intermediate_entry_dict: Dict[str, Any], now: datetime
+    ) -> str:
+        """
+        Format a history entry into a compact, model-friendly line.
+        """
+        entry_display_type = intermediate_entry_dict["type"]
+        message = " ".join(intermediate_entry_dict["message"].split())
+        timestamp = intermediate_entry_dict["timestamp"]
+
+        time_diff = now - timestamp
+        secs = abs(int(time_diff.total_seconds()))
+        if secs < 60:
+            time_str = f"{secs}s_ago"
+        elif secs < 3600:
+            time_str = f"{secs // 60}m_ago"
+        else:
+            time_str = f"{secs // 3600}h_ago"
+
+        flags = []
+        entry_type_value = entry_display_type.value
+        if entry_display_type == DisplayEntryType.PRIMITIVE_FEEDBACK:
+            entry_type_value = "skill_feedback"
+        elif entry_display_type in [
+            DisplayEntryType.PRIMITIVE_ACTIVATED,
+            DisplayEntryType.PRIMITIVE_INTERRUPTED,
+            DisplayEntryType.PRIMITIVE_CANCELLED,
+            DisplayEntryType.PRIMITIVE_COMPLETED,
+            DisplayEntryType.NEXT_PRIMITIVE_DECIDED,
+        ]:
+            entry_type_value = entry_type_value.replace("primitive", "skill")
+
+        if entry_display_type == DisplayEntryType.AUDIO_OUT:
+            if (
+                time_diff.total_seconds()
+                <= self.estimate_speech_duration(intermediate_entry_dict["message"])
+            ):
+                flags.append("still_speaking=true")
+        if entry_display_type == DisplayEntryType.NEXT_PRIMITIVE_DECIDED:
+            flags.append("awaiting_activation=true")
+
+        flag_suffix = f" [{' '.join(flags)}]" if flags else ""
+        return (
+            f"[{time_str}] "
+            f"[{entry_type_value}] "
+            f"{message}{flag_suffix}"
+        )
 
     def _prepare_unified_display_items(
         self, entries_to_process: List[HistoryEntry], now: datetime
@@ -351,22 +404,39 @@ class History:
             selected_pre_action_indices
         )
 
+        # Feedback images are always included (not limited like generic images)
+        feedback_image_indices = set(
+            i
+            for i, entry in enumerate(entries_to_process)
+            if entry.type == HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE
+        )
+
         for d_entry in deduplicated_intermediate_entries:
             source_idx = d_entry["source_index"]  # Index in entries_to_process
             original_raw_type = d_entry["original_raw_type"]
             original_raw_description = d_entry["original_raw_description"]
 
             is_selected_for_multimodal_image_role = (
-                original_raw_type == HistoryEntryType.GENERIC_IMAGE
-                or original_raw_type == HistoryEntryType.IMAGE_PRE_ACTION
-            ) and source_idx in selected_image_source_indices
+                (
+                    original_raw_type == HistoryEntryType.GENERIC_IMAGE
+                    or original_raw_type == HistoryEntryType.IMAGE_PRE_ACTION
+                )
+                and source_idx in selected_image_source_indices
+            ) or (
+                original_raw_type == HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE
+                and source_idx in feedback_image_indices
+            )
 
             if is_selected_for_multimodal_image_role:
-                # Create and add the "This is what I was seeing." text item first
+                # Create and add a prefix text item first
+                if original_raw_type == HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE:
+                    prefix_message = "This image was sent as feedback from a skill."
+                else:
+                    prefix_message = "This is what I was seeing."
                 prefix_text_intermediate_entry = {
                     "timestamp": d_entry["timestamp"],  # Use image's timestamp
                     "type": DisplayEntryType.SYSTEM_MESSAGE,
-                    "message": "This is what I was seeing.",
+                    "message": prefix_message,
                     # Pass through other fields; safer for formatter.
                     "source_index": d_entry["source_index"],
                     "original_raw_type": DisplayEntryType.SYSTEM_MESSAGE,  # Arbitrary
@@ -409,6 +479,7 @@ class History:
             if entry.type not in [
                 HistoryEntryType.GENERIC_IMAGE,
                 HistoryEntryType.IMAGE_PRE_ACTION,
+                HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE,
             ]:
                 desc = (
                     entry.description[:100]
@@ -430,6 +501,7 @@ class History:
             if entry.type in [
                 HistoryEntryType.GENERIC_IMAGE,
                 HistoryEntryType.IMAGE_PRE_ACTION,
+                HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE,
             ]:
                 return entry.description
         return None
@@ -498,6 +570,7 @@ class History:
                 if (
                     "[Image data]" in formatted_line
                     or "[Image Before Action]" in formatted_line
+                    or "[Skill Feedback Image]" in formatted_line
                 ):
                     continue  # Skip image placeholders
 
@@ -526,6 +599,134 @@ class History:
         # For debugging purposes, save to a file
         with open("multimodal_history.json", "w") as f:
             json.dump([item.model_dump() for item in multimodal_list], f, indent=2)
+
+        return multimodal_list
+
+    def get_as_model_multimodal_list(self) -> List[MultimodalHistoryItem]:
+        """
+        Build a compact and model-friendly multimodal history.
+        This version avoids terminal-style alignment and emphasizes event type.
+        """
+        now = get_now()
+        multimodal_list: List[MultimodalHistoryItem] = []
+        current_text_lines_block: List[str] = []
+        term_width = 80
+
+        start_index = max(0, len(self.entries) - self.MULTIMODAL_HISTORY_COUNT)
+        relevant_entries = self.entries[start_index:]
+        if not relevant_entries:
+            return []
+
+        intermediate_entries = self._get_intermediate_display_entries(relevant_entries)
+        deduplicated_intermediate_entries = self._deduplicate_intermediate_entries(
+            intermediate_entries
+        )
+
+        generic_image_indices = [
+            i
+            for i, entry in enumerate(relevant_entries)
+            if entry.type == HistoryEntryType.GENERIC_IMAGE
+        ]
+        selected_generic_indices = set(
+            generic_image_indices[-self.max_recent_generic_images :]
+        )
+        pre_action_image_indices = [
+            i
+            for i, entry in enumerate(relevant_entries)
+            if entry.type == HistoryEntryType.IMAGE_PRE_ACTION
+        ]
+        selected_pre_action_indices = set(
+            pre_action_image_indices[-self.max_recent_pre_action_images :]
+        )
+        selected_image_source_indices = selected_generic_indices.union(
+            selected_pre_action_indices
+        )
+        feedback_image_indices = set(
+            i
+            for i, entry in enumerate(relevant_entries)
+            if entry.type == HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE
+        )
+
+        for d_entry in deduplicated_intermediate_entries:
+            source_idx = d_entry["source_index"]
+            original_raw_type = d_entry["original_raw_type"]
+            original_raw_description = d_entry["original_raw_description"]
+
+            is_selected_for_multimodal_image_role = (
+                (
+                    original_raw_type == HistoryEntryType.GENERIC_IMAGE
+                    or original_raw_type == HistoryEntryType.IMAGE_PRE_ACTION
+                )
+                and source_idx in selected_image_source_indices
+            ) or (
+                original_raw_type == HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE
+                and source_idx in feedback_image_indices
+            )
+
+            if is_selected_for_multimodal_image_role:
+                if current_text_lines_block:
+                    multimodal_list.append(
+                        MultimodalHistoryItem(
+                            type="text", content="\n".join(current_text_lines_block)
+                        )
+                    )
+                    current_text_lines_block = []
+
+                if original_raw_type == HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE:
+                    prefix_text = {
+                        "timestamp": d_entry["timestamp"],
+                        "type": DisplayEntryType.SYSTEM_MESSAGE,
+                        "message": "This image is feedback from a skill.",
+                    }
+                else:
+                    prefix_text = {
+                        "timestamp": d_entry["timestamp"],
+                        "type": DisplayEntryType.SYSTEM_MESSAGE,
+                        "message": "This image is what I was seeing.",
+                    }
+                multimodal_list.append(
+                    MultimodalHistoryItem(
+                        type="text",
+                        content=self._format_intermediate_entry_to_model_line(
+                            prefix_text, now
+                        ),
+                    )
+                )
+                multimodal_list.append(
+                    MultimodalHistoryItem(
+                        type="image", content=original_raw_description
+                    )
+                )
+                continue
+
+            if original_raw_type in [
+                HistoryEntryType.GENERIC_IMAGE,
+                HistoryEntryType.IMAGE_PRE_ACTION,
+                HistoryEntryType.PRIMITIVE_FEEDBACK_IMAGE,
+            ]:
+                continue
+
+            current_text_lines_block.append(
+                self._format_intermediate_entry_to_model_line(d_entry, now)
+            )
+
+        current_time_str = f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        separator_line = "-" * term_width
+
+        if current_text_lines_block:
+            current_text_lines_block.append(separator_line)
+            current_text_lines_block.append(current_time_str)
+            multimodal_list.append(
+                MultimodalHistoryItem(
+                    type="text", content="\n".join(current_text_lines_block)
+                )
+            )
+        else:
+            multimodal_list.append(
+                MultimodalHistoryItem(
+                    type="text", content=f"{separator_line}\n{current_time_str}"
+                )
+            )
 
         return multimodal_list
 
