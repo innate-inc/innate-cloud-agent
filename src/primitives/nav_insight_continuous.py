@@ -263,6 +263,45 @@ class NavInsightContinuous(Primitive):
             convert_to_image_coords,
         )
 
+    def _annotate_image_single_point(
+        self,
+        cv_image,
+        image_width,
+        image_height,
+        selected_point_id: str,
+        camera_valid_points,
+    ) -> np.ndarray:
+        """Create annotated image with only the selected navigation point."""
+
+        def convert_to_image_coords(angle, distance):
+            return angle_distance_to_image_coordinates(
+                angle,
+                distance,
+                {
+                    "width": image_width,
+                    "height": image_height,
+                    "horizontal_fov": self.horizontal_fov,
+                    "vertical_fov": self.vertical_fov,
+                    "pitch_deg": self.pitch_deg,
+                    "x_cam": self.x_cam,
+                    "height_cam": self.height_cam,
+                },
+            )
+
+        # Filter to only the selected point
+        selected_point_int = int(selected_point_id)
+        single_point = [
+            (angle, distance, point_id)
+            for (angle, distance, point_id) in camera_valid_points
+            if point_id == selected_point_int
+        ]
+
+        return annotate_camera_view(
+            cv_image,
+            single_point,
+            convert_to_image_coords,
+        )
+
     def _call_gemini_continuous(
         self,
         annotated_image: np.ndarray,
@@ -305,7 +344,7 @@ ITERATION: {self._iteration_count + 1} / {self._max_iterations}
 
 The images show:
 1. CURRENT VIEW - The current camera view with numbered green circles representing safe navigation points
-{f"2. PREVIOUS VIEW - The view from the previous decision point (for comparison)" if previous_annotated_image is not None else ""}
+{f"2. PREVIOUS VIEW - The view from the previous step, showing ONLY the point that was chosen (to help you track progress)" if previous_annotated_image is not None else ""}
 
 Analyze the current situation and decide:
 1. If the objective has been reached, return status OBJECTIVE_REACHED with point_id 0
@@ -503,10 +542,22 @@ Provide a brief explanation and describe any progress made since the last image.
             self._previous_decision,
         )
 
-        # Store current as previous for next iteration
+        # Store current image with ONLY the selected point for next iteration
         self._previous_image = cv_image.copy()
-        self._previous_annotated_image = annotated_image.copy()
         self._previous_decision = gemini_response
+
+        # Create previous annotated image with only the selected point drawn
+        if selected_point_id and selected_point_id != "0":
+            self._previous_annotated_image = self._annotate_image_single_point(
+                cv_image.copy(),
+                image_width,
+                image_height,
+                selected_point_id,
+                camera_valid_points,
+            )
+        else:
+            # No point selected (objective reached or cannot proceed)
+            self._previous_annotated_image = cv_image.copy()
 
         # Check if we should stop
         if gemini_response:
