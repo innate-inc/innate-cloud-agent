@@ -31,6 +31,34 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## Local Molmo for navigation
+
+The `navigate_in_sight` and `nav_insight_continuous` primitives are served by a
+local Molmo2-ER vLLM OpenAI-compatible server instead of Gemini. Other call
+sites still use Gemini.
+
+Configure the server location with these env vars (all have defaults):
+
+| Var | Default | Notes |
+|---|---|---|
+| `MOLMO_BASE_URL` | `http://localhost:8000/v1` | OpenAI-compatible base URL of the vLLM server. |
+| `MOLMO_MODEL` | `allenai/Molmo2-ER` | Model name passed in `chat.completions.create`. |
+| `MOLMO_API_KEY` | `EMPTY` | vLLM ignores it but the OpenAI client requires a non-empty value. |
+
+Bring up the vLLM server (one H100 80GB; bf16; ~2 images per request to cover
+`nav_insight_continuous`):
+
+```bash
+vllm serve allenai/Molmo2-ER \
+  --trust-remote-code --dtype bfloat16 \
+  --max-model-len 4096 --gpu-memory-utilization 0.85 \
+  --limit-mm-per-prompt image=2 \
+  --port 8000
+```
+
+The schema is enforced server-side via vLLM's `guided_json` (the same Pydantic
+models that Gemini's `response_schema` used).
+
 ## Build and run the Docker image
 
 Standard mode (memory commands disabled):

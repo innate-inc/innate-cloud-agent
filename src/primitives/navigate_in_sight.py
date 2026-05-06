@@ -3,9 +3,6 @@ from src.primitives.types import Primitive
 import base64
 import cv2
 import numpy as np
-from google import genai
-from google.genai import types
-import os
 from pydantic import BaseModel
 from enum import Enum
 
@@ -23,19 +20,14 @@ from src.primitives.projection_utils import (
 
 # Utility to decode depth payload (assumed defined in src/utils.py)
 from src.brain_utils.payload_decoders import decode_map_payload
+from src.brain_utils.molmo_client import MolmoClient
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 ROBOT_CAMERA_INFO = ROBOT_PARAMS_TO_USE["camera_info"]
 MIN_OBSTACLE_DISTANCE = ROBOT_PARAMS_TO_USE["min_obstacle_distance"]
 ENABLE_VISUALIZATIONS = ROBOT_PARAMS_TO_USE["enable_visualizations"]
 
-# Gemini API constants from navigate_through_memory.py
-GEMINI_MODEL_NAME = "gemini-3-flash-preview"
-GEMINI_TEMPERATURE = 0
-GEMINI_TOP_P = 0.95
-GEMINI_TOP_K = 64
-GEMINI_MAX_OUTPUT_TOKENS = 8192
-THINKING_BUDGET = 0
+MOLMO_MAX_OUTPUT_TOKENS = 256
 
 
 class PointSelectionReason(Enum):
@@ -55,27 +47,14 @@ class ResponseSchema(BaseModel):
 class NavigateInSight(Primitive):
     def __init__(self):
         """
-        Initialize Gemini client.
+        Initialize the Molmo client used for point selection.
         """
-        # Initialize Gemini API client
-        api_key = os.getenv("GEMINI_API_KEY")
-        if api_key:
-            try:
-                # Attempt to create the client, which might also handle configuration.
-                # If genai.configure is still needed, it should be called before client instantiation.
-                # However, the example in navigate_through_memory.py suggests client takes api_key directly.
-                # genai.configure(api_key=api_key) # Assuming configure is not needed if client takes key
-                self.genai_client = genai.Client(api_key=api_key)
-                print("Gemini client initialized successfully.")
-            except Exception as e:
-                self.genai_client = None
-                print(f"Failed to initialize Gemini client: {e}")
-        else:
-            self.genai_client = None
-            print(
-                "Warning: GEMINI_API_KEY not found in environment variables. "
-                "Point selection with VLM will not be available."
-            )
+        try:
+            self.molmo = MolmoClient()
+            print("NavigateInSight: Molmo client initialized.")
+        except Exception as e:
+            self.molmo = None
+            print(f"NavigateInSight: Failed to initialize Molmo client: {e}")
 
     @property
     def name(self):
@@ -277,7 +256,7 @@ class NavigateInSight(Primitive):
                 },
             )
 
-        # Always create annotated image (needed for Gemini point selection)
+        # Always create annotated image (needed for Molmo point selection)
         annotated_image = annotate_camera_view(
             cv_image,
             camera_valid_points,
@@ -308,14 +287,14 @@ class NavigateInSight(Primitive):
 
         return annotated_image
 
-    def _call_gemini_for_point_selection(
+    async def _call_molmo_for_point_selection(
         self, target_description, stop_in_front_of_target, annotated_image
     ):
         """
-        Call Gemini API to select a navigation point.
+        Call the local Molmo2-ER vLLM server to select a navigation point.
 
         Returns:
-            tuple: (selected_point_id, gemini_response)
+            tuple: (selected_point_id, molmo_response)
         """
         if stop_in_front_of_target:
             additional_prompt = (
@@ -327,7 +306,6 @@ class NavigateInSight(Primitive):
         else:
             additional_prompt = ""
 
-        # Create prompt for Gemini to select a navigation point
         user_prompt = f"""
 I need to navigate to: {target_description}
 
@@ -348,67 +326,41 @@ If there's a need for clarification, explain in the explanation field.
 {additional_prompt}
 """
 
-        try:
-            # Check if API key is available and client was initialized
-            if not self.genai_client:
-                print("Warning: Gemini client not available. Using default point 1.")
-                return "1", None
-            else:
-                print("Calling Gemini to select a navigation point...")
+        if not self.molmo:
+            print("Warning: Molmo client not available. Using default point 1.")
+            return "1", None
 
-                # Convert CV2 image to JPEG bytes
-                _, img_encoded = cv2.imencode(".jpg", annotated_image)
-                img_bytes = img_encoded.tobytes()
+        print("Calling Molmo to select a navigation point...")
 
-                # Create image part for Gemini
-                image_part = types.Part.from_bytes(
-                    data=img_bytes,
-                    mime_type="image/jpeg",
-                )
+        _, img_encoded = cv2.imencode(".jpg", annotated_image)
+        img_bytes = img_encoded.tobytes()
 
-                # Create content parts: user prompt and the image part
-                message_parts = [user_prompt, image_part]
+        response_parsed = await self.molmo.select(
+            prompt=user_prompt,
+            jpeg_bytes_list=[img_bytes],
+            schema=ResponseSchema,
+            max_tokens=MOLMO_MAX_OUTPUT_TOKENS,
+        )
 
-                # Call Gemini model using the client
-                response = self.genai_client.models.generate_content(
-                    contents=message_parts,
-                    model=GEMINI_MODEL_NAME,
-                    config=types.GenerateContentConfig(
-                        temperature=GEMINI_TEMPERATURE,
-                        top_p=GEMINI_TOP_P,
-                        top_k=GEMINI_TOP_K,
-                        max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-                        thinking_config=types.ThinkingConfig(
-                            thinking_budget=THINKING_BUDGET
-                        ),
-                        response_mime_type="application/json",
-                        response_schema=ResponseSchema,
-                    ),
-                )
-                response_parsed = response.parsed
+        if response_parsed is None:
+            print("Molmo call failed or returned invalid JSON, defaulting to point 1.")
+            return "1", None
 
-                print(f"Gemini response: {response_parsed}")
+        print(f"Molmo response: {response_parsed}")
 
-                if response_parsed.found_a_point:
-                    selected_point_id = str(response_parsed.point_id)
-                    print(f"Extracted selected point ID: {selected_point_id}")
-                    return selected_point_id, response_parsed
-                else:
-                    selected_point_id = "0"
-                    print(
-                        f"No point found in response, defaulting to point {selected_point_id}"
-                    )
-                    return selected_point_id, response_parsed
-
-        except Exception as e:
-            print(f"Error calling Gemini API: {e}")
-            # Default to the first point
-            selected_point_id = "1"
-            print(f"Error with Gemini API, defaulting to point {selected_point_id}")
-            return selected_point_id, None
+        if response_parsed.found_a_point:
+            selected_point_id = str(response_parsed.point_id)
+            print(f"Extracted selected point ID: {selected_point_id}")
+            return selected_point_id, response_parsed
+        else:
+            selected_point_id = "0"
+            print(
+                f"No point found in response, defaulting to point {selected_point_id}"
+            )
+            return selected_point_id, response_parsed
 
     def _handle_point_selection_response(
-        self, selected_point_id, gemini_response, point_mapping
+        self, selected_point_id, molmo_response, point_mapping
     ):
         """
         Handle the point selection response and create navigation command.
@@ -443,19 +395,19 @@ If there's a need for clarification, explain in the explanation field.
                 navigation_command,
             )
         elif selected_point_id == "0":
-            # Handle special cases from Gemini response
+            # Handle special cases from Molmo response
             if (
-                gemini_response
-                and gemini_response.reason == PointSelectionReason.ALREADY_CLOSE_ENOUGH
+                molmo_response
+                and molmo_response.reason == PointSelectionReason.ALREADY_CLOSE_ENOUGH
             ):
                 return (
-                    f"Already close enough to target: {gemini_response.explanation}",
+                    f"Already close enough to target: {molmo_response.explanation}",
                     True,
                     None,  # No navigation needed
                 )
             elif (
-                gemini_response
-                and gemini_response.reason == PointSelectionReason.NO_POINT_AVAILABLE
+                molmo_response
+                and molmo_response.reason == PointSelectionReason.NO_POINT_AVAILABLE
             ):
                 return None  # Signal to retry with different angles
             else:
@@ -479,7 +431,7 @@ If there's a need for clarification, explain in the explanation field.
                     None,
                 )
 
-    def _execute_with_angles(
+    async def _execute_with_angles(
         self,
         target_description,
         stop_in_front_of_target,
@@ -596,35 +548,35 @@ If there's a need for clarification, explain in the explanation field.
                 navigation_command,
             )
 
-        # Call Gemini for point selection
-        selected_point_id, gemini_response = self._call_gemini_for_point_selection(
+        # Call Molmo for point selection
+        selected_point_id, molmo_response = await self._call_molmo_for_point_selection(
             target_description, stop_in_front_of_target, annotated_image
         )
 
         # Check if this is NO_POINT_AVAILABLE and we haven't retried yet
         if (
-            gemini_response
-            and gemini_response.reason == PointSelectionReason.NO_POINT_AVAILABLE
+            molmo_response
+            and molmo_response.reason == PointSelectionReason.NO_POINT_AVAILABLE
             and attempt == 0
         ):
             print(
-                "Gemini returned NO_POINT_AVAILABLE, will retry with different angles..."
+                "Molmo returned NO_POINT_AVAILABLE, will retry with different angles..."
             )
             return None  # Signal to continue with retry
         elif (
-            gemini_response
-            and gemini_response.reason == PointSelectionReason.ALREADY_CLOSE_ENOUGH
+            molmo_response
+            and molmo_response.reason == PointSelectionReason.ALREADY_CLOSE_ENOUGH
         ):
-            print("Gemini returned ALREADY_CLOSE_ENOUGH, we can just stay here.")
+            print("Molmo returned ALREADY_CLOSE_ENOUGH, we can just stay here.")
             return (
-                f"Already close enough to target: {gemini_response.explanation}",
+                f"Already close enough to target: {molmo_response.explanation}",
                 True,
                 None,
             )
 
         # Handle the point selection response
         result = self._handle_point_selection_response(
-            selected_point_id, gemini_response, point_mapping
+            selected_point_id, molmo_response, point_mapping
         )
 
         if result is None and attempt == 0:
@@ -633,7 +585,7 @@ If there's a need for clarification, explain in the explanation field.
         elif result is None and attempt > 0:
             # This means NO_POINT_AVAILABLE was returned even after retry
             return (
-                f"No suitable navigation points found even after retry: {gemini_response.explanation}",
+                f"No suitable navigation points found even after retry: {molmo_response.explanation}",
                 False,
                 None,
             )
@@ -682,7 +634,7 @@ If there's a need for clarification, explain in the explanation field.
 
         # Try with initial angles first, then retry with different angles if needed
         for attempt, angles in enumerate([initial_angles, retry_angles]):
-            result = self._execute_with_angles(
+            result = await self._execute_with_angles(
                 target_description,
                 stop_in_front_of_target,
                 map_array,

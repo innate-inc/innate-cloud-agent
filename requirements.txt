@@ -5,6 +5,7 @@
 google-cloud-bigquery==3.38.0
 google-genai==1.17.0
 networkx==3.4.2
+openai>=1.40.0
 numpy==2.1.1
 opencv-python-headless==4.11.0.86
 packaging==24.2

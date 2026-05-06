@@ -4,9 +4,6 @@ import asyncio
 import base64
 import cv2
 import numpy as np
-from google import genai
-from google.genai import types
-import os
 from pydantic import BaseModel
 from enum import Enum
 from typing import Optional, Callable, Awaitable
@@ -23,18 +20,14 @@ from src.primitives.projection_utils import (
 )
 
 from src.brain_utils.payload_decoders import decode_map_payload
+from src.brain_utils.molmo_client import MolmoClient
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 ROBOT_CAMERA_INFO = ROBOT_PARAMS_TO_USE["camera_info"]
 MIN_OBSTACLE_DISTANCE = ROBOT_PARAMS_TO_USE["min_obstacle_distance"]
 ENABLE_VISUALIZATIONS = ROBOT_PARAMS_TO_USE["enable_visualizations"]
 
-GEMINI_MODEL_NAME = "gemini-3-flash-preview"
-GEMINI_TEMPERATURE = 0
-GEMINI_TOP_P = 0.95
-GEMINI_TOP_K = 64
-GEMINI_MAX_OUTPUT_TOKENS = 8192
-THINKING_BUDGET = 0
+MOLMO_MAX_OUTPUT_TOKENS = 256
 
 
 class ContinuousNavigationStatus(Enum):
@@ -65,17 +58,12 @@ class NavInsightContinuous(Primitive):
 
     def __init__(self):
         super().__init__()
-        api_key = os.getenv("GEMINI_API_KEY")
-        if api_key:
-            try:
-                self.genai_client = genai.Client(api_key=api_key)
-                print("NavInsightContinuous: Gemini client initialized.")
-            except Exception as e:
-                self.genai_client = None
-                print(f"NavInsightContinuous: Failed to initialize Gemini client: {e}")
-        else:
-            self.genai_client = None
-            print("NavInsightContinuous: GEMINI_API_KEY not found.")
+        try:
+            self.molmo = MolmoClient()
+            print("NavInsightContinuous: Molmo client initialized.")
+        except Exception as e:
+            self.molmo = None
+            print(f"NavInsightContinuous: Failed to initialize Molmo client: {e}")
 
         # State for continuous navigation
         self._is_active = False
@@ -263,20 +251,20 @@ class NavInsightContinuous(Primitive):
             convert_to_image_coords,
         )
 
-    def _call_gemini_continuous(
+    async def _call_molmo_continuous(
         self,
         annotated_image: np.ndarray,
         previous_annotated_image: Optional[np.ndarray],
         previous_decision: Optional[ContinuousNavigationResponse],
     ) -> tuple[Optional[str], Optional[ContinuousNavigationResponse]]:
         """
-        Call Gemini for continuous navigation decision, comparing current and previous images.
+        Call the local Molmo2-ER vLLM server for the continuous navigation
+        decision, comparing current and previous images.
         """
-        if not self.genai_client:
-            print("NavInsightContinuous: Gemini client not available.")
+        if not self.molmo:
+            print("NavInsightContinuous: Molmo client not available.")
             return "1", None
 
-        # Build the prompt with context about previous decision
         previous_context = ""
         if previous_decision:
             previous_context = f"""
@@ -319,55 +307,33 @@ Select the numbered point (1, 2, 3, etc.) that best helps reach the objective.
 Provide a brief explanation and describe any progress made since the last image.
 """
 
-        try:
-            # Prepare image parts
-            _, curr_encoded = cv2.imencode(".jpg", annotated_image)
-            curr_bytes = curr_encoded.tobytes()
-            current_image_part = types.Part.from_bytes(
-                data=curr_bytes, mime_type="image/jpeg"
-            )
+        _, curr_encoded = cv2.imencode(".jpg", annotated_image)
+        curr_bytes = curr_encoded.tobytes()
+        jpeg_bytes_list: list[bytes] = [curr_bytes]
 
-            message_parts = [user_prompt, current_image_part]
+        if previous_annotated_image is not None:
+            _, prev_encoded = cv2.imencode(".jpg", previous_annotated_image)
+            jpeg_bytes_list.append(prev_encoded.tobytes())
 
-            # Add previous image if available
-            if previous_annotated_image is not None:
-                _, prev_encoded = cv2.imencode(".jpg", previous_annotated_image)
-                prev_bytes = prev_encoded.tobytes()
-                previous_image_part = types.Part.from_bytes(
-                    data=prev_bytes, mime_type="image/jpeg"
-                )
-                message_parts.append(previous_image_part)
+        response_parsed = await self.molmo.select(
+            prompt=user_prompt,
+            jpeg_bytes_list=jpeg_bytes_list,
+            schema=ContinuousNavigationResponse,
+            max_tokens=MOLMO_MAX_OUTPUT_TOKENS,
+        )
 
-            response = self.genai_client.models.generate_content(
-                contents=message_parts,
-                model=GEMINI_MODEL_NAME,
-                config=types.GenerateContentConfig(
-                    temperature=GEMINI_TEMPERATURE,
-                    top_p=GEMINI_TOP_P,
-                    top_k=GEMINI_TOP_K,
-                    max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-                    thinking_config=types.ThinkingConfig(
-                        thinking_budget=THINKING_BUDGET
-                    ),
-                    response_mime_type="application/json",
-                    response_schema=ContinuousNavigationResponse,
-                ),
-            )
-
-            response_parsed = response.parsed
-            print(f"NavInsightContinuous: Gemini response: {response_parsed}")
-
-            if response_parsed.status in [
-                ContinuousNavigationStatus.OBJECTIVE_REACHED,
-                ContinuousNavigationStatus.CANNOT_PROCEED,
-            ]:
-                return "0", response_parsed
-            else:
-                return str(response_parsed.point_id), response_parsed
-
-        except Exception as e:
-            print(f"NavInsightContinuous: Error calling Gemini: {e}")
+        if response_parsed is None:
+            print("NavInsightContinuous: Molmo call failed or returned invalid JSON.")
             return "1", None
+
+        print(f"NavInsightContinuous: Molmo response: {response_parsed}")
+
+        if response_parsed.status in [
+            ContinuousNavigationStatus.OBJECTIVE_REACHED,
+            ContinuousNavigationStatus.CANNOT_PROCEED,
+        ]:
+            return "0", response_parsed
+        return str(response_parsed.point_id), response_parsed
 
     async def activate(
         self,
@@ -496,8 +462,8 @@ Provide a brief explanation and describe any progress made since the last image.
                 annotated_image, map_vis, timestamp, prefix="nav_continuous"
             )
 
-        # Call Gemini with current and previous images
-        selected_point_id, gemini_response = self._call_gemini_continuous(
+        # Call Molmo with current and previous images
+        selected_point_id, molmo_response = await self._call_molmo_continuous(
             annotated_image,
             self._previous_annotated_image,
             self._previous_decision,
@@ -506,24 +472,24 @@ Provide a brief explanation and describe any progress made since the last image.
         # Store current as previous for next iteration
         self._previous_image = cv_image.copy()
         self._previous_annotated_image = annotated_image.copy()
-        self._previous_decision = gemini_response
+        self._previous_decision = molmo_response
 
         # Check if we should stop
-        if gemini_response:
-            if gemini_response.status == ContinuousNavigationStatus.OBJECTIVE_REACHED:
-                self._send_feedback(f"Objective reached: {gemini_response.explanation}")
+        if molmo_response:
+            if molmo_response.status == ContinuousNavigationStatus.OBJECTIVE_REACHED:
+                self._send_feedback(f"Objective reached: {molmo_response.explanation}")
                 self.deactivate()
-                return f"Objective reached: {gemini_response.explanation}", False, None
+                return f"Objective reached: {molmo_response.explanation}", False, None
 
-            if gemini_response.status == ContinuousNavigationStatus.CANNOT_PROCEED:
-                self._send_feedback(f"Cannot proceed: {gemini_response.explanation}")
+            if molmo_response.status == ContinuousNavigationStatus.CANNOT_PROCEED:
+                self._send_feedback(f"Cannot proceed: {molmo_response.explanation}")
                 self.deactivate()
-                return f"Cannot proceed: {gemini_response.explanation}", False, None
+                return f"Cannot proceed: {molmo_response.explanation}", False, None
 
             # Send progress feedback
             self._send_feedback(
                 f"[{self._iteration_count}/{self._max_iterations}] "
-                f"{gemini_response.progress_description}"
+                f"{molmo_response.progress_description}"
             )
 
         # Get navigation command for selected point
