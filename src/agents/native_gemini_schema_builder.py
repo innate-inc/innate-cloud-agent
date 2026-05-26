@@ -127,8 +127,9 @@ def _input_field_from_schema(field_name: str, field_schema: Any) -> tuple[Any, F
     python_type = _python_type_from_name(type_name)
     python_type = _literal_type_from_enum(enum_values, python_type)
 
-    if default is ... and not required:
-        default = None
+    if not required:
+        if default is ...:
+            default = None
         python_type = Optional[python_type]
 
     return python_type, Field(default, description=description)
@@ -195,6 +196,13 @@ def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
     else:
         # Fallback if no primitives are currently registered. A concrete
         # sentinel model avoids null-only schemas that google-genai rejects.
+        NoPrimitiveInputs = create_model(
+            "NoPrimitiveInputs",
+            dummy=(
+                str,
+                Field("", description="No inputs available"),
+            ),
+        )
         NextPrimitiveUnion = create_model(
             "NoPrimitive",
             name=(
@@ -202,14 +210,11 @@ def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
                 Field(..., description="No primitive is currently available"),
             ),
             inputs=(
-                create_model(
-                    "NoPrimitiveInputs",
-                    dummy=(
-                        str,
-                        Field("", description="No inputs available"),
-                    ),
+                NoPrimitiveInputs,
+                Field(
+                    default_factory=NoPrimitiveInputs,
+                    description="No inputs available",
                 ),
-                Field(..., description="No inputs available"),
             ),
         )
 

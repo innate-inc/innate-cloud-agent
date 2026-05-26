@@ -90,6 +90,51 @@ def test_structured_enum_input_schema_works_and_validates_values():
         )
 
 
+def test_optional_structured_input_with_null_default_accepts_missing_or_null():
+    model = create_gemini_schema(
+        [
+            PrimitiveDefinition(
+                name="head_emotion",
+                inputs={
+                    "emotion": {
+                        "type": "str",
+                        "required": False,
+                        "default": None,
+                    }
+                },
+                guidelines="Set the head emotion if requested.",
+            )
+        ]
+    )
+
+    _assert_google_genai_accepts(model)
+    missing_output = model.model_validate(
+        {
+            "stop_current_primitive": False,
+            "observation": "ok",
+            "thoughts": "optional input omitted",
+            "next_primitive": {
+                "name": "head_emotion",
+                "inputs": {},
+            },
+        }
+    )
+    null_output = model.model_validate(
+        {
+            "stop_current_primitive": False,
+            "observation": "ok",
+            "thoughts": "optional input set to null",
+            "next_primitive": {
+                "name": "head_emotion",
+                "inputs": {"emotion": None},
+            },
+        }
+    )
+
+    assert missing_output.next_primitive.inputs.emotion is None
+    assert null_output.next_primitive.inputs.emotion is None
+
+
 def test_empty_primitive_schema_does_not_create_null_only_schema():
     model = create_gemini_schema([])
 
@@ -99,8 +144,9 @@ def test_empty_primitive_schema_does_not_create_null_only_schema():
             "stop_current_primitive": False,
             "observation": "ok",
             "thoughts": "no primitive available",
-            "next_primitive": {"name": "none", "inputs": {"dummy": ""}},
+            "next_primitive": {"name": "none"},
         }
     )
 
+    assert output.next_primitive.inputs.dummy == ""
     assert convert_to_brain_compatible_output(output).next_task is None
