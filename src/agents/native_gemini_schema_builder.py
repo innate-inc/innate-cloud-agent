@@ -1,6 +1,5 @@
 from typing import Dict, List, Any, Optional, Union, Literal
 from pydantic import BaseModel, Field, create_model
-from enum import Enum
 from src.agents.types import PrimitiveDefinition
 
 
@@ -62,6 +61,80 @@ class BrainCompatibleVisionAgentOutput(BaseModel):
     output_tokens: Optional[int] = None
 
 
+def _python_type_from_name(type_name: Any) -> type:
+    if not isinstance(type_name, str):
+        return str
+
+    type_name_lower = type_name.lower()
+    if type_name_lower in ("str", "string"):
+        return str
+    if type_name_lower in ("float", "double", "number"):
+        return float
+    if type_name_lower in ("int", "integer"):
+        return int
+    if type_name_lower in ("bool", "boolean"):
+        return bool
+    return str
+
+
+def _literal_type_from_enum(enum_values: Any, fallback_type: type) -> Any:
+    if not isinstance(enum_values, list) or not enum_values:
+        return fallback_type
+
+    literal_values = []
+    for value in enum_values:
+        if value is None:
+            continue
+        if fallback_type is str:
+            literal_values.append(str(value))
+        elif fallback_type is bool and isinstance(value, bool):
+            literal_values.append(value)
+        elif (
+            fallback_type is int
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+        ):
+            literal_values.append(value)
+        elif (
+            fallback_type is float
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+        ):
+            literal_values.append(float(value))
+
+    if not literal_values:
+        return fallback_type
+
+    return Literal[tuple(literal_values)]
+
+
+def _input_field_from_schema(field_name: str, field_schema: Any) -> tuple[Any, Field]:
+    """Normalize legacy string schemas and newer structured skill schemas."""
+    type_name = field_schema
+    enum_values = None
+    required = True
+    default = ...
+    description = f"{field_name} parameter"
+
+    if isinstance(field_schema, dict):
+        type_name = field_schema.get("type", "str")
+        enum_values = field_schema.get("enum")
+        required = field_schema.get("required", True)
+        description = field_schema.get("description") or description
+        if "default" in field_schema:
+            default = field_schema["default"]
+
+    python_type = _python_type_from_name(type_name)
+    python_type = _literal_type_from_enum(enum_values, python_type)
+
+    if not required:
+        if default is ...:
+            default = None
+        python_type = Optional[python_type]
+
+    return python_type, Field(default, description=description)
+
+
 def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
     """
     Create a Gemini-compatible Pydantic model with dynamic next_primitive Union.
@@ -79,24 +152,9 @@ def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
     for i, primitive in enumerate(primitives):
         # Create input fields dict for this primitive
         input_fields = {}
-        for field_name, field_type_str in primitive.inputs.items():
-            # Map string types to Python types
-            field_type_str_lower = field_type_str.lower()
-            if field_type_str_lower == "string":
-                python_type = str
-            elif field_type_str_lower in ("float", "double"):
-                python_type = float
-            elif field_type_str_lower in ("int", "integer"):
-                python_type = int
-            elif field_type_str_lower in ("bool", "boolean"):
-                python_type = bool
-            else:
-                # Default fallback
-                python_type = str
-
-            input_fields[field_name] = (
-                python_type,
-                Field(..., description=f"{field_name} parameter"),
+        for field_name, field_schema in primitive.inputs.items():
+            input_fields[field_name] = _input_field_from_schema(
+                field_name, field_schema
             )
 
         # Create inputs model for this primitive
@@ -136,8 +194,29 @@ def create_gemini_schema(primitives: List[PrimitiveDefinition]) -> type:
     if primitive_models:
         NextPrimitiveUnion = Union[tuple(primitive_models)]
     else:
-        # Fallback if no primitives
-        NextPrimitiveUnion = None
+        # Fallback if no primitives are currently registered. A concrete
+        # sentinel model avoids null-only schemas that google-genai rejects.
+        NoPrimitiveInputs = create_model(
+            "NoPrimitiveInputs",
+            dummy=(
+                str,
+                Field("", description="No inputs available"),
+            ),
+        )
+        NextPrimitiveUnion = create_model(
+            "NoPrimitive",
+            name=(
+                Literal["none"],
+                Field(..., description="No primitive is currently available"),
+            ),
+            inputs=(
+                NoPrimitiveInputs,
+                Field(
+                    default_factory=NoPrimitiveInputs,
+                    description="No inputs available",
+                ),
+            ),
+        )
 
     # Create the main VisionAgentOutput model
     VisionAgentOutput = create_model(
@@ -205,7 +284,7 @@ def convert_to_brain_compatible_output(
     """
     next_primitive_dict = None
 
-    if gemini_output.next_primitive:
+    if gemini_output.next_primitive and gemini_output.next_primitive.name != "none":
         # Extract inputs from the properly typed Pydantic model
         inputs_dict = {}
         if hasattr(gemini_output.next_primitive, "inputs"):

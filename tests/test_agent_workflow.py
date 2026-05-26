@@ -21,6 +21,8 @@ load_dotenv()
 
 from run_server import connection_handler
 from src.constants_robots import MIN_CLIENT_VERSION
+from tests.websocket_cleanup import track_websocket_client, track_websocket_server
+from tests.websocket_helpers import wait_for_ready_after_chat
 
 
 async def common_setup(test_name):
@@ -33,10 +35,12 @@ async def common_setup(test_name):
     server = await websockets.serve(
         connection_handler, "localhost", port, max_size=10 * 1024 * 1024
     )
+    track_websocket_server(server)
     await asyncio.sleep(0.1)  # Allow time for the server to start.
 
     uri = f"ws://localhost:{port}"
     websocket = await websockets.connect(uri)
+    track_websocket_client(websocket)
 
     # Send authentication message.
     auth_message = {
@@ -244,6 +248,8 @@ async def test_chat_ask_to_navigate():
     }
     await websocket.send(json.dumps(chat_message))
 
+    await wait_for_ready_after_chat(websocket)
+
     # Send the image using the helper.
     await basic_image_handling(websocket, "tests/test_navigate.png", "PNG")
 
@@ -341,6 +347,8 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
         "payload": {"text": chat_text_1},
     }
     await websocket.send(json.dumps(chat_message_1))
+
+    await wait_for_ready_after_chat(websocket)
 
     # Send the image for the first command.
     await basic_image_handling(websocket, "tests/test_navigate.png", "PNG")

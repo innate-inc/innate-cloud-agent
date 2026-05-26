@@ -409,8 +409,8 @@ class ImageHandler:
         time_elapsed: float,
     ) -> TokenMetrics:
         """Calculate token usage metrics from VLM processing."""
-        input_tokens = vision_output.input_tokens
-        output_tokens = vision_output.output_tokens
+        input_tokens = getattr(vision_output, "input_tokens", None)
+        output_tokens = getattr(vision_output, "output_tokens", None)
 
         total_tokens = None
         tokens_per_second = None

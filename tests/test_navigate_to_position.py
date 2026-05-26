@@ -19,6 +19,8 @@ load_dotenv()
 # Import connection_handler from run_server (local application import)
 from run_server import connection_handler
 from src.constants_robots import MIN_CLIENT_VERSION
+from tests.websocket_cleanup import track_websocket_client, track_websocket_server
+from tests.websocket_helpers import wait_for_ready_after_chat
 
 
 async def common_setup(test_name):
@@ -31,10 +33,12 @@ async def common_setup(test_name):
     server = await websockets.serve(
         connection_handler, "localhost", port, max_size=10 * 1024 * 1024
     )
+    track_websocket_server(server)
     await asyncio.sleep(0.1)  # Allow time for the server to start.
 
     uri = f"ws://localhost:{port}"
     websocket = await websockets.connect(uri)
+    track_websocket_client(websocket)
 
     # Send authentication message.
     auth_message = {
@@ -196,6 +200,8 @@ async def test_absolute_navigation():
     }
     await websocket.send(json.dumps(chat_message))
 
+    await wait_for_ready_after_chat(websocket)
+
     # Send the image
     await basic_image_handling(websocket)
 
@@ -291,6 +297,8 @@ async def test_relative_navigation_turn_around():
         "payload": {"text": "Turn around"},
     }
     await websocket.send(json.dumps(chat_message))
+
+    await wait_for_ready_after_chat(websocket)
 
     # Send the image
     await basic_image_handling(websocket)
@@ -393,6 +401,8 @@ async def test_relative_navigation_move_forward():
         "payload": {"text": "Move forward 2 meters"},
     }
     await websocket.send(json.dumps(chat_message))
+
+    await wait_for_ready_after_chat(websocket)
 
     # Send the image
     await basic_image_handling(websocket)

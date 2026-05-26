@@ -20,6 +20,8 @@ load_dotenv()
 # Import connection_handler after path modification and env loading
 from run_server import connection_handler
 from src.constants_robots import MIN_CLIENT_VERSION
+from tests.websocket_cleanup import track_websocket_client, track_websocket_server
+from tests.websocket_helpers import wait_for_ready_after_chat
 
 
 # Import the setup functions directly instead of from the other test file
@@ -33,10 +35,12 @@ async def common_setup(test_name):
     server = await websockets.serve(
         connection_handler, "localhost", port, max_size=10 * 1024 * 1024
     )
+    track_websocket_server(server)
     await asyncio.sleep(0.1)  # Allow time for the server to start.
 
     uri = f"ws://localhost:{port}"
     websocket = await websockets.connect(uri)
+    track_websocket_client(websocket)
 
     # Send authentication message.
     auth_message = {
@@ -197,6 +201,8 @@ async def test_turn_and_move_primitive():
         "payload": {"text": "Turn left 90 degrees and move forward 2 meters"},
     }
     await websocket.send(json.dumps(chat_message))
+
+    await wait_for_ready_after_chat(websocket)
 
     # Send the image
     await basic_image_handling(websocket)
