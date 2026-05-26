@@ -21,6 +21,7 @@ load_dotenv()
 
 from run_server import connection_handler
 from src.constants_robots import MIN_CLIENT_VERSION
+from tests.websocket_cleanup import track_websocket_client, track_websocket_server
 
 
 async def common_setup(test_name):
@@ -33,10 +34,12 @@ async def common_setup(test_name):
     server = await websockets.serve(
         connection_handler, "localhost", port, max_size=10 * 1024 * 1024
     )
+    track_websocket_server(server)
     await asyncio.sleep(0.1)  # Allow time for the server to start.
 
     uri = f"ws://localhost:{port}"
     websocket = await websockets.connect(uri)
+    track_websocket_client(websocket)
 
     # Send authentication message.
     auth_message = {
