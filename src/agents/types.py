@@ -67,3 +67,5 @@ class VisionAgentOutput(BaseModel):
     next_task: Optional[Any] = None
     anticipation: Optional[str] = None
     to_tell_user: Optional[str] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
