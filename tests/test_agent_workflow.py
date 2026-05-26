@@ -22,6 +22,7 @@ load_dotenv()
 from run_server import connection_handler
 from src.constants_robots import MIN_CLIENT_VERSION
 from tests.websocket_cleanup import track_websocket_client, track_websocket_server
+from tests.websocket_helpers import wait_for_ready_after_chat
 
 
 async def common_setup(test_name):
@@ -247,6 +248,8 @@ async def test_chat_ask_to_navigate():
     }
     await websocket.send(json.dumps(chat_message))
 
+    await wait_for_ready_after_chat(websocket)
+
     # Send the image using the helper.
     await basic_image_handling(websocket, "tests/test_navigate.png", "PNG")
 
@@ -344,6 +347,8 @@ async def test_chat_ask_to_navigate_with_task_in_execution():
         "payload": {"text": chat_text_1},
     }
     await websocket.send(json.dumps(chat_message_1))
+
+    await wait_for_ready_after_chat(websocket)
 
     # Send the image for the first command.
     await basic_image_handling(websocket, "tests/test_navigate.png", "PNG")

@@ -21,6 +21,7 @@ load_dotenv()
 from run_server import connection_handler
 from src.constants_robots import MIN_CLIENT_VERSION
 from tests.websocket_cleanup import track_websocket_client, track_websocket_server
+from tests.websocket_helpers import wait_for_ready_after_chat
 
 
 # Import the setup functions directly instead of from the other test file
@@ -200,6 +201,8 @@ async def test_turn_and_move_primitive():
         "payload": {"text": "Turn left 90 degrees and move forward 2 meters"},
     }
     await websocket.send(json.dumps(chat_message))
+
+    await wait_for_ready_after_chat(websocket)
 
     # Send the image
     await basic_image_handling(websocket)

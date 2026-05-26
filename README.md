@@ -164,10 +164,20 @@ sequenceDiagram
         alt User Chat
             Client->>Server: Chat Message (type: "chat_in", payload: {"text": "..."})
             Note over Brain: Process chat
+            opt Fast agent can answer without a new image
+                Server->>Client: Chat Output (type: "chat_out", payload: {"text": "..."})
+            end
             Server->>Client: Ready for Image (type: "ready_for_image", payload: {})
         end
     end
 ```
+
+For `chat_in` messages that do not include `image_b64`, the client should wait
+for the server's immediate response and the following `ready_for_image` before
+sending the next standalone image. If the `chat_in` payload includes `image_b64`,
+the cloud agent can run the slow visual agent on that image and return
+`vision_agent_output`; clients should still wait for the next readiness signal
+before sending additional image frames.
 
 ### Message Types
 
