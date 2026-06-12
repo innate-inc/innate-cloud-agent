@@ -20,9 +20,9 @@ from src.agents.debug_html_generator import save_content_parts_html
 from src.constants_robots import ROBOT_PARAMS_TO_USE
 
 # Gemini API constants (matching BAML configuration)
-GEMINI_MODEL_NAME = "gemini-3-flash-preview"
-GEMINI_FLASH_LITE_MODEL_NAME = "gemini-3-flash-lite-preview"
-GEMINI_ER_MODEL_NAME = "gemini-robotics-er-1.5-preview"
+GEMINI_MODEL_NAME = "gemini-3.5-flash"
+GEMINI_FLASH_LITE_MODEL_NAME = "gemini-3.1-flash-lite"
+GEMINI_ER_MODEL_NAME = "gemini-robotics-er-1.6-preview"
 GEMINI_TEMPERATURE = 0.3
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 40

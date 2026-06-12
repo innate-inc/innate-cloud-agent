@@ -31,7 +31,7 @@ from src.brain_utils.chat_handler import ChatHandler
 from src.brain_utils.primitive_handler import PrimitiveHandler
 from src.brain_utils.pose_graph_handler import PoseGraphHandler
 
-DEFAULT_GEMINI_VARIANT = "gemini-3-flash-preview"
+DEFAULT_GEMINI_VARIANT = "gemini-flash"
 
 
 @dataclass
