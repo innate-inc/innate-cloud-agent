@@ -13,7 +13,7 @@ from src.history.types import (
 
 class HistorySummarizer:
     # Gemini API constants for summarization
-    GEMINI_MODEL_NAME = "gemini-3-flash-preview"
+    GEMINI_MODEL_NAME = "gemini-3.5-flash"
     GEMINI_TEMPERATURE = 0.7  # Adjusted for more creative summarization
     GEMINI_TOP_P = 0.95
     GEMINI_TOP_K = 64
