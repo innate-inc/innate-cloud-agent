@@ -47,6 +47,7 @@ class PrimitiveHandler:
         """Handle primitive completion. Returns None to clear primitive_in_execution."""
         primitive_id = payload["primitive_id"]
         primitive_name = payload["primitive_name"]
+        output = (payload.get("output") or "").strip()
 
         if (
             primitive_in_execution
@@ -56,9 +57,12 @@ class PrimitiveHandler:
             self.logger.info(
                 f"Task '{primitive_in_execution.name}' (ID: {primitive_id}) completed."
             )
+            description = f"Task '{primitive_in_execution.name}' completed."
+            if output:
+                description += f" Output: {output}"
             self.history.add(
                 HistoryEntryType.PRIMITIVE_COMPLETED,
-                description=f"Task '{primitive_in_execution.name}' completed.",
+                description=description,
             )
             return None
 
