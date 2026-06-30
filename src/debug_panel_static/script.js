@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Innate Inc
+
 /**
  * Brain Debug Panel - Client-side JavaScript
  * Real-time state monitoring for Brain instances

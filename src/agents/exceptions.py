@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 class MaxRetriesExceededException(Exception):
     """
     Exception raised when the maximum number of retries has been exceeded

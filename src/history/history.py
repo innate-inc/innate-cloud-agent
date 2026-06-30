@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import os

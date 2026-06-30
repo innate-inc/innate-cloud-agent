@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 """
 Chat message handler for the Brain.
 Handles chat_in messages including special commands.

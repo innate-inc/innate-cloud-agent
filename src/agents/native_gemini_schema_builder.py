@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 from typing import Dict, List, Any, Optional, Union, Literal
 from pydantic import BaseModel, Field, create_model
 from src.agents.types import PrimitiveDefinition

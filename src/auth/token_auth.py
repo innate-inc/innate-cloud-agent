@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 """Token authentication via innate-auth service.
 
 Forwards the robot's innate_service_key to innate-auth /v1/auth,

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 """
 Pose graph handler for the Brain.
 Handles pose_image messages and manages the pose graph memory.

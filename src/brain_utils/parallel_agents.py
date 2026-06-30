@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 """
 Parallel agent processing for fast/slow agent pattern.
 Shared between ChatHandler and ImageHandler.

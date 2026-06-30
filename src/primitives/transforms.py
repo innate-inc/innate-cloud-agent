@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 import inspect
 import uuid
 from src.agents.types import PrimitiveDefinition

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 """
 Primitive lifecycle handler for the Brain.
 Handles primitive activation, completion, failure, interruption, and feedback.
