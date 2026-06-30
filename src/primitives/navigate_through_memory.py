@@ -47,7 +47,7 @@ TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S_%f"
 # Gemini API constants
 
 
-GEMINI_MODEL_NAME = "gemini-flash-latest"
+GEMINI_MODEL_NAME = "gemini-3.5-flash"
 GEMINI_TEMPERATURE = 0
 GEMINI_TOP_P = 0.95
 GEMINI_TOP_K = 64

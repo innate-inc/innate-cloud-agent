@@ -1,7 +1,7 @@
 """
 Fast Answer Agent - A lightweight agent for quick responses.
 
-This agent answers simple questions quickly using Gemini 2.0 Flash with the
+This agent answers simple questions quickly using Gemini 3.1 Flash-Lite with the
 current camera image. It runs in parallel with the main vision agent.
 """
 
@@ -19,7 +19,7 @@ from google.genai import types
 from src.agents.types import PrimitiveDefinition
 
 
-FAST_MODEL_NAME = "gemini-2.0-flash"
+FAST_MODEL_NAME = "gemini-3.1-flash-lite"
 FAST_AGENT_TEMPERATURE = 0.3
 FAST_AGENT_MAX_OUTPUT_TOKENS = 512
 
