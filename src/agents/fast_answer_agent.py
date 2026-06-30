@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 """
 Fast Answer Agent - A lightweight agent for quick responses.
 

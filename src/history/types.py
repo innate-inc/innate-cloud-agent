@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 from enum import Enum
 from pydantic import BaseModel
 from datetime import datetime

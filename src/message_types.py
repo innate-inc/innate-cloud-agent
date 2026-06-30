@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 from enum import Enum
 from typing import Dict, Any
 from pydantic import BaseModel, field_serializer

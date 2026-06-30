@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 """
 Image message handler for the Brain.
 Breaks down the complex handle_image logic into smaller, focused methods.

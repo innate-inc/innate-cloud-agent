@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 import pytest
 from google.genai import _transformers
 from pydantic import ValidationError

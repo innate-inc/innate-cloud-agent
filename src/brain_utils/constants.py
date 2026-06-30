@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Innate Inc
+
 """
 Constants for the brain module.
 Centralizes magic strings and values to improve maintainability.
