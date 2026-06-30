@@ -73,40 +73,10 @@ reset_msg = MessageIn(
 )
 ```
 
-## Build and deploy the Cloud Run service
+## Cloud Run deployment
 
-### Build the Docker image
-
-```bash
-docker build \
-  --platform=linux/amd64 \
-  -t us-central1-docker.pkg.dev/innate-agent/innate-agent-websocket-server/agent-ws-server-image:v1.1.6 \
-  .
-```
-
-### Push the Docker image to Google Cloud Container Registry
-
-```bash
-docker push us-central1-docker.pkg.dev/innate-agent/innate-agent-websocket-server/agent-ws-server-image:v1.1.6
-```
-
-### Deploy the Cloud Run service
-
-```bash
-gcloud run deploy agent-ws-server \
-  --image us-central1-docker.pkg.dev/innate-agent/innate-agent-websocket-server/agent-ws-server-image:v1.0.1 \
-  --platform managed \
-  --region us-central1 \
-  --port 8765
-```
-
-### Test the Cloud Run service
-
-Use the test_ws_server.py script to test the Cloud Run service.
-
-```bash
-python3 test_ws_server.py
-```
+Building, pushing, and deploying the image to Google Cloud Run is documented
+separately in [docs/cloud.md](docs/cloud.md).
 
 ## WebSocket Protocol
 
@@ -184,11 +154,14 @@ before sending additional image frames.
 #### Incoming Messages (Client to Server)
 - `auth`: Authentication with token
 - `image`: Image data with optional depth map and robot coordinates
+- `pose_image`: Image data accompanied by pose information
+- `reset`: Reset the brain state, optionally loading a saved `memory_state`
 - `chat_in`: User chat message
 - `primitive_activated`: Notification that a primitive has started execution
 - `primitive_completed`: Notification that a primitive has completed successfully
 - `primitive_failed`: Notification that a primitive has failed
 - `primitive_interrupted`: Notification that a primitive was interrupted
+- `primitive_feedback`: Feedback from a primitive during execution
 - `register_primitives_and_directive`: Register new primitives and/or directive
 
 #### Outgoing Messages (Server to Client)
@@ -197,6 +170,8 @@ before sending additional image frames.
 - `chat_out`: Chat message from the agent to the user
 - `thoughts`: Internal thoughts/reasoning from the agent
 - `primitives_and_directive_registered`: Confirmation of primitive/directive registration
+- `memory_positions`: Saved memory positions from the pose graph
+- `error`: Error message from the server
 
 ### Primitive Execution Flow
 
