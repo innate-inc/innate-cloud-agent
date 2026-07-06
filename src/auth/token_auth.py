@@ -23,6 +23,32 @@ from src.constants_robots import MIN_CLIENT_VERSION
 
 logger = logging.getLogger(__name__)
 
+# A robot rejected for an out-of-date OS reconnects roughly once per second.
+# Speaking the version warning on every attempt floods the robot's
+# text-to-speech queue, so it is spoken at most once per this interval per
+# robot token. The connection is still rejected on every attempt regardless.
+VERSION_WARNING_INTERVAL_S = 3600.0  # once per hour
+_last_version_warning: Dict[str, float] = {}
+
+
+def should_speak_version_warning(token: str) -> bool:
+    """Return True at most once per VERSION_WARNING_INTERVAL_S per token.
+
+    This only rate-limits the *spoken* warning so reconnect storms don't spam
+    the robot's TTS; it does not affect whether the connection is accepted.
+    """
+    now = time.monotonic()
+    last = _last_version_warning.get(token)
+    if last is not None and now - last < VERSION_WARNING_INTERVAL_S:
+        return False
+    _last_version_warning[token] = now
+    # Opportunistically drop stale entries so the dict can't grow unbounded.
+    if len(_last_version_warning) > 1000:
+        for key, ts in list(_last_version_warning.items()):
+            if now - ts >= VERSION_WARNING_INTERVAL_S:
+                del _last_version_warning[key]
+    return True
+
 
 def compare_versions(
     client_version: str, min_version: str = MIN_CLIENT_VERSION

@@ -13,7 +13,12 @@ from typing import Optional
 from src.message_types import MessageInType, MessageOut, MessageOutType, MessageIn
 from src.brain import Brain
 from src.debug_panel import register_brain_for_debug, unregister_brain_for_debug
-from src.auth.token_auth import get_authenticator, AuthContext, compare_versions
+from src.auth.token_auth import (
+    get_authenticator,
+    AuthContext,
+    compare_versions,
+    should_speak_version_warning,
+)
 from src.constants_robots import MIN_CLIENT_VERSION
 
 
@@ -182,35 +187,57 @@ class WebSocketAgentConnection:
             print("[WARN] No token provided, closing connection.")
             return False
 
-        # Validate client version
+        # Validate client version. Old, missing, or malformed versions are
+        # rejected. The robot reconnects ~once per second while rejected, so the
+        # spoken warning is rate-limited (see should_speak_version_warning) to
+        # avoid flooding the robot's text-to-speech queue.
         client_version = auth_msg_payload.get("client_version")
         if not client_version:
-            print("[WARN] No client_version provided in auth message")
-            await self.send_message(
-                MessageOut(
-                    type=MessageOutType.BRAIN_CHAT_OUT,
-                    payload={
-                        "text": "Your robot OS version is 0 point 2 point 4 or older. Please update your robot to continue.",
-                    },
-                )
+            print(
+                "[WARN] Rejecting connection: robot did not report its OS version "
+                "(client_version missing — likely on 0.2.4 or older, or missing a "
+                "release tag)."
             )
-            client_version = "0.2.4"
+            if should_speak_version_warning(token):
+                await self.send_message(
+                    MessageOut(
+                        type=MessageOutType.BRAIN_CHAT_OUT,
+                        payload={
+                            "text": (
+                                "Warning. Your robot could not report its operating "
+                                "system version. It may be on version 0 point 2 point 4 "
+                                "or older, or missing a release tag. Please update your "
+                                "robot to the latest version to connect to the cloud."
+                            ),
+                        },
+                    )
+                )
             return False
-        
+
         is_valid, version_msg = compare_versions(client_version)
         print(f"[INFO] Client version check: {version_msg}")
         if not is_valid:
-            print(f"[WARN] {version_msg}")
-            await self.send_message(
-                MessageOut(
-                    type=MessageOutType.ERROR,
-                    payload={
-                        "error": "version_mismatch",
-                        "message": version_msg,
-                        "min_version": MIN_CLIENT_VERSION,
-                    },
-                )
+            print(
+                f"[WARN] Rejecting connection: robot OS version {client_version!r} "
+                f"is not supported (minimum {MIN_CLIENT_VERSION}). {version_msg}"
             )
+            if should_speak_version_warning(token):
+                spoken_version = client_version.replace(".", " point ")
+                await self.send_message(
+                    MessageOut(
+                        type=MessageOutType.ERROR,
+                        payload={
+                            "error": "version_mismatch",
+                            "message": (
+                                f"Warning. Your robot's operating system, version "
+                                f"{spoken_version}, is out of date and no longer "
+                                f"supported. Please update your robot to the latest "
+                                f"version to connect to the cloud."
+                            ),
+                            "min_version": MIN_CLIENT_VERSION,
+                        },
+                    )
+                )
             return False
         # Validate token against BigQuery user_management table
         auth_context = get_user_from_token(token)
