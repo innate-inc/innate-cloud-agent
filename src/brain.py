@@ -43,6 +43,15 @@ class BrainState:
 
     latest_user_message: str | None = None
     primitive_in_execution: PrimitiveDefinition | None = None
+    # Watchdog bookkeeping for primitive_in_execution: it is set OPTIMISTICALLY
+    # at send time, and only a terminal lifecycle message clears it — if the
+    # robot never answers (message dropped in transit, robot mid-restart), the
+    # agent would believe "running" forever and refuse to act. sent_at is the
+    # monotonic send time; activation_seen flips when the robot confirms the
+    # primitive actually started (after which it may legitimately run for a
+    # long time and the watchdog must not fire).
+    primitive_sent_at: float | None = None
+    primitive_activation_seen: bool = False
     directive: str | None = None
     gemini_variant: str = DEFAULT_GEMINI_VARIANT
     primitives_list: list = field(default_factory=list)
@@ -56,6 +65,8 @@ class BrainState:
         )
         self.latest_user_message = None
         self.primitive_in_execution = None
+        self.primitive_sent_at = None
+        self.primitive_activation_seen = False
         self.directive = None
         self.gemini_variant = saved_variant
         self.slow_agent_running = False
@@ -205,6 +216,11 @@ class Brain:
                 f"Error processing chat message: {e}\n{traceback.format_exc()}"
             )
 
+    # A sent primitive is normally confirmed (primitive_activated) within a
+    # second; a task that stays unconfirmed this long is lost (dropped in
+    # transit, robot mid-restart) and will never get a terminal message.
+    PRIMITIVE_CONFIRMATION_TIMEOUT_S = 10.0
+
     async def run(self):
         """
         The brain's main loop. It runs on a single thread (event loop), processes
@@ -212,12 +228,59 @@ class Brain:
         """
         self.logger.info("[Brain] Main loop started")
         while self.running:
-            message = await self.message_queue.get()
+            try:
+                message = await asyncio.wait_for(self.message_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                # Idle tick: the only work is the confirmation watchdog.
+                await self._check_primitive_watchdog()
+                continue
             if message is None:
                 self.logger.info("[Brain] Received None message, shutting down")
                 break  # Allow graceful shutdown when a None message is pushed
             self.logger.debug(f"[Brain] Processing from queue: type={message.type}, queue_size={self.message_queue.qsize()}")
             await self.process_message(message)
+            await self._check_primitive_watchdog()
+
+    async def _check_primitive_watchdog(self):
+        """Clear a sent-but-never-confirmed primitive so a single lost message
+        cannot wedge the agent forever.
+
+        primitive_in_execution is set optimistically at send time and only a
+        terminal lifecycle message clears it. If the robot never received the
+        task (or its reply was lost), no terminal will ever come — the agent
+        would keep believing the primitive is running, the output validator
+        would silently discard every new task, and the loop would stall with
+        no image request outstanding. Fires only while the activation is
+        unconfirmed; a confirmed primitive may legitimately run for minutes.
+        """
+        if (
+            self.state.primitive_in_execution is None
+            or self.state.primitive_activation_seen
+            or self.state.primitive_sent_at is None
+            or time.monotonic() - self.state.primitive_sent_at
+            < self.PRIMITIVE_CONFIRMATION_TIMEOUT_S
+        ):
+            return
+        lost = self.state.primitive_in_execution
+        self.logger.warn(
+            f"[Brain {self.connection_id}] Primitive '{lost.name}' (ID: {lost.primitive_id}) "
+            f"was never confirmed by the robot within {self.PRIMITIVE_CONFIRMATION_TIMEOUT_S:.0f}s "
+            "— treating it as failed and resuming."
+        )
+        self.history.add(
+            HistoryEntryType.PRIMITIVE_CANCELLED,
+            description=(
+                f"Primitive '{lost.name}' was never confirmed by the robot "
+                "(the task or its reply was lost). It did NOT run — decide again."
+            ),
+        )
+        self._clear_primitive_tracking()
+        await self.send_callback(MessageOut(type="ready_for_image", payload={}))
+
+    def _clear_primitive_tracking(self):
+        self.state.primitive_in_execution = None
+        self.state.primitive_sent_at = None
+        self.state.primitive_activation_seen = False
 
     async def process_message(self, message: MessageIn):
         """Dispatch message to appropriate handler using match statement."""
@@ -430,6 +493,8 @@ class Brain:
             # Set primitive_in_execution immediately when sending to prevent race conditions
             # where multiple primitives could be sent before the first is acknowledged
             self.state.primitive_in_execution = primitive_to_remember
+            self.state.primitive_sent_at = time.monotonic()
+            self.state.primitive_activation_seen = False
         # Record the vision agent output in the history.
         self.history.add(
             HistoryEntryType.VISION_AGENT_OUTPUT,
@@ -505,21 +570,42 @@ class Brain:
             # Fast agent answered or no vision output - request next image
             await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
+    async def _finish_terminal_lifecycle(self, cleared: bool):
+        """Housekeeping after a terminal lifecycle handler resolved (or
+        ignored) a primitive.
+
+        The image loop is re-armed by primitive_activated; a primitive that
+        reaches a terminal state WITHOUT ever activating (e.g. the robot
+        refused/dropped the task and answered with a terminal "failed") would
+        otherwise leave no image request outstanding and the vision loop would
+        stall — exactly the never-started paths of INN-711.
+        """
+        if not cleared:
+            return
+        rearm = not self.state.primitive_activation_seen
+        self._clear_primitive_tracking()
+        if rearm:
+            await self.send_callback(MessageOut(type="ready_for_image", payload={}))
+
     async def handle_primitive_completed(self, message: MessageIn):
         """Handle primitive completion."""
+        had = self.state.primitive_in_execution is not None
         self.state.primitive_in_execution = (
             await self.primitive_handler.handle_primitive_completed(
                 message.payload, self.state.primitive_in_execution
             )
         )
+        await self._finish_terminal_lifecycle(had and self.state.primitive_in_execution is None)
 
     async def handle_primitive_failed(self, message: MessageIn):
         """Handle primitive failure."""
+        had = self.state.primitive_in_execution is not None
         self.state.primitive_in_execution = (
             await self.primitive_handler.handle_primitive_failed(
                 message.payload, self.state.primitive_in_execution
             )
         )
+        await self._finish_terminal_lifecycle(had and self.state.primitive_in_execution is None)
         # Deactivate continuous navigation if active
         nav_continuous = self._get_nav_insight_continuous_primitive()
         if nav_continuous and nav_continuous.is_active:
@@ -528,11 +614,13 @@ class Brain:
 
     async def handle_primitive_interrupted(self, message: MessageIn):
         """Handle primitive interruption."""
+        had = self.state.primitive_in_execution is not None
         self.state.primitive_in_execution = (
             await self.primitive_handler.handle_primitive_interrupted(
                 message.payload, self.state.primitive_in_execution
             )
         )
+        await self._finish_terminal_lifecycle(had and self.state.primitive_in_execution is None)
         # Deactivate continuous navigation if active
         nav_continuous = self._get_nav_insight_continuous_primitive()
         if nav_continuous and nav_continuous.is_active:
@@ -552,6 +640,13 @@ class Brain:
                 message.payload, self.state.primitive_in_execution
             )
         )
+        # Confirmation disarms the never-confirmed watchdog: from here on the
+        # primitive is genuinely running and may take as long as it takes.
+        if (
+            self.state.primitive_in_execution is not None
+            and self.state.primitive_in_execution.primitive_id == message.payload.get("primitive_id")
+        ):
+            self.state.primitive_activation_seen = True
 
     async def handle_unknown(self, message: MessageIn):
         """
