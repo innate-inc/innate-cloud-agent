@@ -43,6 +43,13 @@ class BrainState:
 
     latest_user_message: str | None = None
     primitive_in_execution: PrimitiveDefinition | None = None
+    # Whether the robot confirmed (primitive_activated) the primitive that
+    # primitive_in_execution tracks. The image loop is normally re-armed by
+    # the activation handler; a primitive that reaches a terminal state
+    # WITHOUT ever activating (the robot refused or failed to start it —
+    # report_start_failure paths) must have its terminal handler re-arm the
+    # loop instead, or no image request is left outstanding.
+    primitive_activation_seen: bool = False
     directive: str | None = None
     gemini_variant: str = DEFAULT_GEMINI_VARIANT
     primitives_list: list = field(default_factory=list)
@@ -56,6 +63,7 @@ class BrainState:
         )
         self.latest_user_message = None
         self.primitive_in_execution = None
+        self.primitive_activation_seen = False
         self.directive = None
         self.gemini_variant = saved_variant
         self.slow_agent_running = False
@@ -430,6 +438,7 @@ class Brain:
             # Set primitive_in_execution immediately when sending to prevent race conditions
             # where multiple primitives could be sent before the first is acknowledged
             self.state.primitive_in_execution = primitive_to_remember
+            self.state.primitive_activation_seen = False
         # Record the vision agent output in the history.
         self.history.add(
             HistoryEntryType.VISION_AGENT_OUTPUT,
@@ -505,21 +514,42 @@ class Brain:
             # Fast agent answered or no vision output - request next image
             await self.send_callback(MessageOut(type="ready_for_image", payload={}))
 
+    async def _finish_terminal_lifecycle(self, cleared: bool):
+        """Housekeeping after a terminal lifecycle handler resolved (or
+        ignored) a primitive.
+
+        The image loop is re-armed by primitive_activated; a primitive that
+        reaches a terminal state WITHOUT ever activating (e.g. the robot
+        refused/dropped the task and answered with a terminal "failed") would
+        otherwise leave no image request outstanding and the vision loop would
+        stall — exactly the never-started paths of INN-711.
+        """
+        if not cleared:
+            return
+        rearm = not self.state.primitive_activation_seen
+        self.state.primitive_activation_seen = False
+        if rearm:
+            await self.send_callback(MessageOut(type="ready_for_image", payload={}))
+
     async def handle_primitive_completed(self, message: MessageIn):
         """Handle primitive completion."""
+        had = self.state.primitive_in_execution is not None
         self.state.primitive_in_execution = (
             await self.primitive_handler.handle_primitive_completed(
                 message.payload, self.state.primitive_in_execution
             )
         )
+        await self._finish_terminal_lifecycle(had and self.state.primitive_in_execution is None)
 
     async def handle_primitive_failed(self, message: MessageIn):
         """Handle primitive failure."""
+        had = self.state.primitive_in_execution is not None
         self.state.primitive_in_execution = (
             await self.primitive_handler.handle_primitive_failed(
                 message.payload, self.state.primitive_in_execution
             )
         )
+        await self._finish_terminal_lifecycle(had and self.state.primitive_in_execution is None)
         # Deactivate continuous navigation if active
         nav_continuous = self._get_nav_insight_continuous_primitive()
         if nav_continuous and nav_continuous.is_active:
@@ -528,11 +558,13 @@ class Brain:
 
     async def handle_primitive_interrupted(self, message: MessageIn):
         """Handle primitive interruption."""
+        had = self.state.primitive_in_execution is not None
         self.state.primitive_in_execution = (
             await self.primitive_handler.handle_primitive_interrupted(
                 message.payload, self.state.primitive_in_execution
             )
         )
+        await self._finish_terminal_lifecycle(had and self.state.primitive_in_execution is None)
         # Deactivate continuous navigation if active
         nav_continuous = self._get_nav_insight_continuous_primitive()
         if nav_continuous and nav_continuous.is_active:
@@ -552,6 +584,13 @@ class Brain:
                 message.payload, self.state.primitive_in_execution
             )
         )
+        # Confirmation disarms the never-confirmed watchdog: from here on the
+        # primitive is genuinely running and may take as long as it takes.
+        if (
+            self.state.primitive_in_execution is not None
+            and self.state.primitive_in_execution.primitive_id == message.payload.get("primitive_id")
+        ):
+            self.state.primitive_activation_seen = True
 
     async def handle_unknown(self, message: MessageIn):
         """
