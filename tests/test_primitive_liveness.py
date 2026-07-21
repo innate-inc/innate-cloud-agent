@@ -1,29 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Innate Inc
-"""Tests for the primitive confirmation watchdog and image-loop liveness.
+"""Tests for image-loop liveness on never-activated terminals.
 
-primitive_in_execution is set optimistically when a task is SENT and only a
-terminal lifecycle message with the matching id clears it. Before these fixes
-a single lost message (task dropped by the robot mid-registration, reply lost
-in transit) pinned the agent forever: it kept narrating "the tool has already
-been called and has to finish" while validate_vision_output silently
-discarded every new task, and no image request was outstanding (INN-711).
+ready_for_image is withheld when a task is sent and normally re-armed by the
+primitive_activated handler. Since innate-os#533/#557 the robot deliberately
+answers never-started tasks with a terminal "failed" and NO activation — a
+terminal handler that clears the state without re-arming the loop leaves no
+image request outstanding and the vision agent silently stalls (INN-711).
 
-Pins:
-- the watchdog clears a sent-but-never-confirmed primitive and re-arms the
-  image loop; a confirmed (activated) primitive is never touched;
-- a terminal that resolves a never-activated primitive re-arms the image
-  loop (activation, the usual re-arm source, never happened);
-- a terminal after a normal activation does not double-grant.
+Pins: a terminal resolving a never-activated primitive re-arms the loop; a
+terminal after a normal activation does not double-grant; activation sets the
+confirmation flag; a stale-id terminal touches nothing.
 """
-
-import time
 
 import pytest
 
 from src.agents.types import PrimitiveDefinition
 from src.brain import Brain
-from src.history.history import HistoryEntryType
 from src.message_types import MessageIn, MessageInType
 
 
@@ -37,55 +30,16 @@ def make_brain():
     return brain, sent
 
 
-def arm_primitive(brain, *, confirmed, age_s=0.0):
+def arm_primitive(brain, *, confirmed):
     task = PrimitiveDefinition(name="turn_and_move", inputs={"x": 0.5}, primitive_id="prim-42")
     brain.state.primitive_ids_map["prim-42"] = task
     brain.state.primitive_in_execution = task
-    brain.state.primitive_sent_at = time.monotonic() - age_s
     brain.state.primitive_activation_seen = confirmed
     return task
 
 
 def ready_for_image_count(sent):
     return sum(1 for m in sent if m.type == "ready_for_image")
-
-
-@pytest.mark.asyncio
-async def test_watchdog_clears_unconfirmed_primitive():
-    brain, sent = make_brain()
-    arm_primitive(brain, confirmed=False, age_s=Brain.PRIMITIVE_CONFIRMATION_TIMEOUT_S + 1)
-
-    await brain._check_primitive_watchdog()
-
-    assert brain.state.primitive_in_execution is None
-    assert brain.state.primitive_sent_at is None
-    assert ready_for_image_count(sent) == 1
-    cancelled = [e for e in brain.history.entries if e.type == HistoryEntryType.PRIMITIVE_CANCELLED]
-    assert len(cancelled) == 1
-    assert "never confirmed" in cancelled[0].description
-
-
-@pytest.mark.asyncio
-async def test_watchdog_spares_confirmed_primitive():
-    # A confirmed primitive may legitimately run far longer than the timeout.
-    brain, sent = make_brain()
-    task = arm_primitive(brain, confirmed=True, age_s=Brain.PRIMITIVE_CONFIRMATION_TIMEOUT_S * 10)
-
-    await brain._check_primitive_watchdog()
-
-    assert brain.state.primitive_in_execution is task
-    assert ready_for_image_count(sent) == 0
-
-
-@pytest.mark.asyncio
-async def test_watchdog_spares_recent_send():
-    brain, sent = make_brain()
-    task = arm_primitive(brain, confirmed=False, age_s=0.0)
-
-    await brain._check_primitive_watchdog()
-
-    assert brain.state.primitive_in_execution is task
-    assert ready_for_image_count(sent) == 0
 
 
 @pytest.mark.asyncio
@@ -122,13 +76,14 @@ async def test_confirmed_terminal_does_not_double_grant():
     )
 
     assert brain.state.primitive_in_execution is None
+    assert brain.state.primitive_activation_seen is False  # cleared for the next task
     assert ready_for_image_count(sent) == 0
 
 
 @pytest.mark.asyncio
-async def test_activation_confirms_and_disarms_watchdog():
+async def test_activation_sets_confirmation_flag():
     brain, _sent = make_brain()
-    arm_primitive(brain, confirmed=False, age_s=Brain.PRIMITIVE_CONFIRMATION_TIMEOUT_S + 1)
+    arm_primitive(brain, confirmed=False)
 
     await brain.handle_primitive_activated(
         MessageIn(
@@ -136,10 +91,8 @@ async def test_activation_confirms_and_disarms_watchdog():
             payload={"primitive_name": "turn_and_move", "primitive_id": "prim-42"},
         )
     )
-    assert brain.state.primitive_activation_seen is True
 
-    await brain._check_primitive_watchdog()  # would have fired without the confirmation
-    assert brain.state.primitive_in_execution is not None
+    assert brain.state.primitive_activation_seen is True
 
 
 @pytest.mark.asyncio
